@@ -3,17 +3,46 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import type { ChangeEvent, SubmitEvent } from "react";
 
+const API_BASE_URL = "http://localhost:8000";
+
 function Login() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const navigate = useNavigate();
 
-  function setEmailHandler(event: ChangeEvent<HTMLInputElement>) {
-    console.log(event.target.value);
-    setEmail(event.target.value);
+  function setUsernameHandler(event: ChangeEvent<HTMLInputElement>) {
+    setUsername(event.target.value);
   }
 
-  function submitHandler(event: SubmitEvent<HTMLFormElement>) {
+  async function submitHandler(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    console.log("Login button clicked", { username });
+
+    let response: Response;
+
+    try {
+      response = await fetch(`${API_BASE_URL}/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username }),
+      });
+    } catch (error) {
+      console.log("Login request failed", error);
+      alert("Nem sikerult kapcsolodni a backendhez.");
+      return;
+    }
+
+    if (!response.ok) {
+      console.log("Login failed", { username, status: response.status });
+      alert("Csak letezo userrel lehet bejelentkezni.");
+      return;
+    }
+
+    const loggedInUser = await response.json();
+    console.log("Login successful", loggedInUser);
+    sessionStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
     navigate('/hr-home', { replace: true });
   }
 
@@ -33,8 +62,8 @@ function Login() {
 
         <form className="form" onSubmit={submitHandler}>
           <div className="field">
-            <label htmlFor="email">Work email</label>
-            <input id="email" type="email" value={email} required placeholder="sarah@company.com" autoComplete="email" onChange={setEmailHandler} />
+            <label htmlFor="username">Email</label>
+            <input id="username" type="text" value={username} required placeholder="Enter your email address" autoComplete="name" onChange={setUsernameHandler} />
           </div> {/*TODO: adjunk hozzá template-et cég email végződés alapján*/}
           <div className="field">
             <label htmlFor="password">Password</label>

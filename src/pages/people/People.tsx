@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import './People.css';
-import './hr-home.css';
+import './people.css';
+import '../hr-home/hr-home.css';
 
 const html = `
   <div class="page layout">
