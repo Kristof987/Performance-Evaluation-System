@@ -7,6 +7,7 @@ import '../hr-home/hr-home.css';
 const html = `
   <div class="page layout">
     <aside class="sidebar">
+      <button class="sidebar-toggle" type="button" aria-label="Close sidebar" aria-expanded="true"><span></span></button>
       <div class="company"><div class="logo"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/></svg></div><div class="company-name">Compass</div></div>
       <nav class="sidebar-nav">
         <div class="nav-item" data-link="/hr-home"><svg style="width:17px;height:17px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span class="nav-item-label">Dashboard</span></div>
@@ -17,7 +18,7 @@ const html = `
         <div class="nav-item"><svg style="width:17px;height:17px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span class="nav-item-label">Settings</span></div>
       </nav>
       <div class="sidebar-spacer"></div>
-      <div class="user-menu"><div class="user-avatar"><div class="user-initials">SM</div></div><div class="user-info"><div class="user-name">Sarah Miller</div><div class="user-role">HR Admin</div></div><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B91A8" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></div>
+      <div class="user-menu"><div class="user-avatar" id="sidebarAvatar"><div class="user-initials">U</div></div><div class="user-info"><div class="user-name" id="sidebarUserName">User</div><div class="user-role">HR Admin</div></div><button class="user-menu-toggle" type="button" id="sidebarUserMenuToggle" aria-label="Open user menu"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B91A8" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button><div class="user-settings-menu" id="sidebarUserSettings"><button type="button">Settings</button></div></div>
     </aside>
 
     <main class="main">
@@ -266,6 +267,33 @@ export default function People() {
 
   useEffect(() => {
     const $ = id => document.getElementById(id);
+
+    const layout = document.querySelector('.page.layout');
+    const sidebarToggle = document.querySelector('.sidebar-toggle');
+    const loggedInUser = sessionStorage.getItem('loggedInUser');
+    const sidebarUser = loggedInUser === null ? null : JSON.parse(loggedInUser);
+    const formatUserName = username => {
+      const name = username.split('@')[0].replace(/[._-]+/g, ' ').trim();
+      return name.split(' ').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+    };
+    const getUserInitials = name => name.split(' ').filter(Boolean).slice(0, 2).map(part => part.charAt(0).toUpperCase()).join('') || 'U';
+    const sidebarUserName = sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
+
+    $('sidebarUserName').textContent = sidebarUserName;
+
+    if (sidebarUser?.profile_image_url) {
+      $('sidebarAvatar').innerHTML = `<img src="${sidebarUser.profile_image_url}" alt="${sidebarUserName}" />`;
+    } else {
+      $('sidebarAvatar').innerHTML = `<div class="user-initials">${getUserInitials(sidebarUserName)}</div>`;
+    }
+
+    $('sidebarUserMenuToggle').onclick = () => $('sidebarUserSettings').classList.toggle('open');
+
+    sidebarToggle.onclick = () => {
+      const isCollapsed = layout.classList.toggle('sidebar-collapsed');
+      sidebarToggle.setAttribute('aria-label', isCollapsed ? 'Open sidebar' : 'Close sidebar');
+      sidebarToggle.setAttribute('aria-expanded', String(!isCollapsed));
+    };
 
     // Navigáció – a cél a HTML-ben, data-link attribútumban van
     document.querySelectorAll('.nav-item[data-link]').forEach(item => {

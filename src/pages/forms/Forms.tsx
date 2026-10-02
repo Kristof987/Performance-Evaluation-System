@@ -1,69 +1,126 @@
 import { useNavigate } from 'react-router';
+import { useState } from 'react';
 import {
   Bell,
   ChartNoAxesCombined,
   ChevronDown,
   ClipboardPen,
   Compass,
-  FileText,
+  Files,
   LayoutDashboard,
   Search,
   Settings,
   Users,
 } from 'lucide-react';
+import '../hr-home/hr-home.css';
 import './forms.css';
+
+type SidebarUser = {
+  username: string;
+  profile_image_url: string | null;
+};
+
+function getSidebarUser() {
+  const loggedInUser = sessionStorage.getItem('loggedInUser');
+
+  if (loggedInUser === null) {
+    return null;
+  }
+
+  return JSON.parse(loggedInUser) as SidebarUser;
+}
+
+function formatUserName(username: string) {
+  const name = username.split('@')[0].replace(/[._-]+/g, ' ').trim();
+
+  return name.split(' ').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function getUserInitials(name: string) {
+  return name.split(' ').filter(Boolean).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('') || 'U';
+}
 
 export default function Forms() {
   const navigate = useNavigate();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const sidebarUser = getSidebarUser();
+  const sidebarUserName = sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
 
   return (
-    <div className="forms-editor-app">
-      <aside className="forms-editor-sidebar">
-        <div className="forms-editor-brand">
-          <div className="forms-editor-mark">
-            <Compass size={17} />
-          </div>
-          <div className="forms-editor-company-name">Compass</div>
-        </div>
+    <main className="page forms-page">
+      <div className={`layout${isSidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+        <aside className="sidebar">
+          <button
+            className="sidebar-toggle"
+            type="button"
+            aria-label={isSidebarCollapsed ? 'Open sidebar' : 'Close sidebar'}
+            aria-expanded={!isSidebarCollapsed}
+            onClick={() => setIsSidebarCollapsed((current) => !current)}
+          >
+            <span />
+          </button>
 
-        <nav className="forms-editor-nav">
-          <button className="forms-editor-nav-item" type="button" onClick={() => navigate('/hr-home')}>
-            <LayoutDashboard />
-            Dashboard
-          </button>
-          <button className="forms-editor-nav-item" type="button" onClick={() => navigate('/people')}>
-            <Users />
-            People
-          </button>
-          <button className="forms-editor-nav-item" type="button" onClick={() => navigate('/campaigns')}>
-            <ClipboardPen />
-            Campaigns
-          </button>
-          <button className="forms-editor-nav-item active" type="button" onClick={() => navigate('/forms')}>
-            <FileText />
-            Forms
-          </button>
-          <div className="forms-editor-nav-item">
-            <ChartNoAxesCombined />
-            Reports
+          <div className="company">
+            <div className="logo">
+              <Compass size={17} />
+            </div>
+            <div className="company-name">Compass</div>
           </div>
-          <div className="forms-editor-nav-item">
-            <Settings />
-            Settings
-          </div>
-        </nav>
 
-        <div className="forms-editor-profile">
-          <div className="forms-editor-avatar">SM</div>
-          <div className="forms-editor-profile-info">
-            <div className="forms-editor-profile-name">Sarah Miller</div>
-            <div className="forms-editor-profile-role">HR Admin</div>
-          </div>
-          <ChevronDown size={15} color="#8B91A8" />
-        </div>
-      </aside>
+          <nav className="sidebar-nav" aria-label="Main navigation">
+            <button className="nav-item" type="button" onClick={() => navigate('/hr-home')}>
+              <LayoutDashboard size={17} />
+              <span className="nav-item-label">Dashboard</span>
+            </button>
+            <button className="nav-item" type="button" onClick={() => navigate('/people')}>
+              <Users size={17} />
+              <span className="nav-item-label">People</span>
+            </button>
+            <button className="nav-item" type="button" onClick={() => navigate('/campaigns')}>
+              <ClipboardPen size={17} />
+              <span className="nav-item-label">Campaigns</span>
+            </button>
+            <button className="nav-item active" type="button" onClick={() => navigate('/forms')}>
+              <Files size={17} />
+              <span className="nav-item-label">Forms</span>
+            </button>
+            <div className="nav-item">
+              <ChartNoAxesCombined size={17} />
+              <span className="nav-item-label">Reports</span>
+            </div>
+            <div className="nav-item">
+              <Settings size={17} />
+              <span className="nav-item-label">Settings</span>
+            </div>
+          </nav>
 
-      <main className="forms-editor-main">
+          <div className="sidebar-spacer" />
+
+          <div className="user-menu">
+            <div className="user-avatar">
+              {sidebarUser?.profile_image_url ? (
+                <img src={sidebarUser.profile_image_url} alt={sidebarUserName} />
+              ) : (
+                <div className="user-initials">{getUserInitials(sidebarUserName)}</div>
+              )}
+            </div>
+            <div className="user-info">
+              <div className="user-name">{sidebarUserName}</div>
+              <div className="user-role">HR Admin</div>
+            </div>
+            <button className="user-menu-toggle" type="button" aria-label="Open user menu" onClick={() => setIsUserMenuOpen((current) => !current)}>
+              <ChevronDown size={15} color="#8B91A8" />
+            </button>
+            {isUserMenuOpen && (
+              <div className="user-settings-menu open">
+                <button type="button">Settings</button>
+              </div>
+            )}
+          </div>
+        </aside>
+
+        <div className="main-content forms-editor-main">
         <div className="forms-editor-top-actions">
           <button className="forms-editor-icon-btn" type="button" aria-label="Search">
             <Search size={16} />
@@ -197,8 +254,9 @@ export default function Forms() {
             </div>
           </aside>
         </section>
-      </main>
-    </div>
+        </div>
+      </div>
+    </main>
   );
 }
 

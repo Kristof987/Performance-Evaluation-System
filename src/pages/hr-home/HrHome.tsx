@@ -15,38 +15,116 @@ type Campaign = {
   is_active: boolean;
 };
 
+type DashboardMetrics = {
+  assignment_count: number;
+  submitted_count: number;
+  completion_rate: number;
+  awaiting_submission_count: number;
+  not_started_count: number;
+  in_progress_count: number;
+  overdue_count: number;
+  overdue_forms_count: number;
+  upcoming_reviews_count: number;
+  next_review_date: string | null;
+};
+
+type DashboardForm = {
+  form_id: number;
+  name: string;
+  audience: string;
+  submitted_count: number;
+  assignment_count: number;
+  due_date: string | null;
+  overdue_count: number;
+};
+
+type DashboardUpcomingReview = {
+  campaign_id: number;
+  name: string;
+  start_date: string;
+  participant_count: number;
+  form_count: number;
+};
+
+type DashboardResponse = {
+  campaigns: Campaign[];
+  selected_campaign_id: number | null;
+  metrics: DashboardMetrics | null;
+  forms: DashboardForm[];
+  upcoming_reviews: DashboardUpcomingReview[];
+};
+
+type SidebarUser = {
+  username: string;
+  profile_image_url: string | null;
+};
+
+function getSidebarUser() {
+  const loggedInUser = sessionStorage.getItem("loggedInUser");
+
+  if (loggedInUser === null) {
+    return null;
+  }
+
+  return JSON.parse(loggedInUser) as SidebarUser;
+}
+
+function formatUserName(username: string) {
+  const name = username.split("@")[0].replace(/[._-]+/g, " ").trim();
+
+  return name.split(" ").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+function getUserInitials(name: string) {
+  return name.split(" ").filter(Boolean).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("") || "U";
+}
+
 function HrHome() {
   const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
+  const [dashboardForms, setDashboardForms] = useState<DashboardForm[]>([]);
+  const [upcomingReviews, setUpcomingReviews] = useState<DashboardUpcomingReview[]>([]);
   const [isCampaignListOpen, setIsCampaignListOpen] = useState(false);
-  const [isCampaignsLoading, setIsCampaignsLoading] = useState(true);
-  const [campaignsError, setCampaignsError] = useState("");
+  const [isDashboardLoading, setIsDashboardLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState("");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
+  const sidebarUser = getSidebarUser();
+  const sidebarUserName = sidebarUser === null ? "User" : formatUserName(sidebarUser.username);
 
   useEffect(() => {
-    async function fetchCampaigns() {
-      try {
-        const response = await fetch(`${API_BASE_URL}/campaigns`);
-
-        if (!response.ok) {
-          throw new Error(`Campaign request failed with status ${response.status}`);
-        }
-
-        const campaignList = await response.json() as Campaign[];
-        setCampaigns(campaignList);
-        setSelectedCampaignId(campaignList[0]?.id ?? null);
-      } catch (error) {
-        console.log("Campaigns could not be loaded", error);
-        setCampaignsError("Campaigns could not be loaded.");
-      } finally {
-        setIsCampaignsLoading(false);
-      }
-    }
-
-    fetchCampaigns();
+    fetchDashboard();
   }, []);
+
+  async function fetchDashboard(campaignId?: number) {
+    setIsDashboardLoading(true);
+
+    try {
+      const searchParams = campaignId === undefined ? "" : `?campaign_id=${campaignId}`;
+      const response = await fetch(`${API_BASE_URL}/dashboard${searchParams}`);
+
+      if (!response.ok) {
+        throw new Error(`Dashboard request failed with status ${response.status}`);
+      }
+
+      const dashboard = await response.json() as DashboardResponse;
+      setCampaigns(dashboard.campaigns);
+      setSelectedCampaignId(dashboard.selected_campaign_id);
+      setDashboardMetrics(dashboard.metrics);
+      setDashboardForms(dashboard.forms);
+      setUpcomingReviews(dashboard.upcoming_reviews);
+      setDashboardError("");
+    } catch (error) {
+      console.log("Dashboard could not be loaded", error);
+      setDashboardError("Dashboard could not be loaded.");
+    } finally {
+      setIsDashboardLoading(false);
+    }
+  }
 
   const peopleButtonHandler = () => {
     navigate("/people");
@@ -69,13 +147,7 @@ function HrHome() {
   };
 
   function getCurrentUser() {
-    const loggedInUser = sessionStorage.getItem("loggedInUser");
-
-    if (loggedInUser === null) {
-      return null;
-    }
-
-    return JSON.parse(loggedInUser).username;
+    return sidebarUserName;
   }
 
   function getTimeOfDay() {
@@ -100,10 +172,36 @@ function HrHome() {
     return currentDayString + ", " + currentDay + " " + currentMonth + " " + currentYear;
   }
 
+  function formatShortDate(value: string | null) {
+    if (value === null) {
+      return "No date";
+    }
+
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(`${value}T00:00:00`));
+  }
+
+  function getProgressPercent(submittedCount: number, assignmentCount: number) {
+    return assignmentCount === 0 ? 0 : Math.round((submittedCount / assignmentCount) * 100);
+  }
+
   return (
     <main className="page">
-      <div className="layout">
+      <div className={`layout${isSidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
         <div className="sidebar">
+          <button
+            className="sidebar-toggle"
+            type="button"
+            aria-label={isSidebarCollapsed ? 'Open sidebar' : 'Close sidebar'}
+            aria-expanded={!isSidebarCollapsed}
+            onClick={() => setIsSidebarCollapsed((current) => !current)}
+          >
+            <span />
+          </button>
+
           <div className="company">
             <div className="logo">
               <Compass size={17} />
@@ -147,13 +245,24 @@ function HrHome() {
 
           <div className="user-menu">
             <div className="user-avatar">
-              <div className="user-initials">SM</div>
+              {sidebarUser?.profile_image_url ? (
+                <img src={sidebarUser.profile_image_url} alt={sidebarUserName} />
+              ) : (
+                <div className="user-initials">{getUserInitials(sidebarUserName)}</div>
+              )}
             </div>
             <div className="user-info">
-              <div className="user-name">Sarah Miller</div>
+              <div className="user-name">{sidebarUserName}</div>
               <div className="user-role">HR Admin</div>
             </div>
-            <ChevronDown size={15} color="#8B91A8" />
+            <button className="user-menu-toggle" type="button" aria-label="Open user menu" onClick={() => setIsUserMenuOpen((current) => !current)}>
+              <ChevronDown size={15} color="#8B91A8" />
+            </button>
+            {isUserMenuOpen && (
+              <div className="user-settings-menu open">
+                <button type="button">Settings</button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -175,7 +284,7 @@ function HrHome() {
 
           <div className="section-header">
             <div className="overview-title">Campaign overview</div>
-            {campaigns.length > 0 && (
+            {!isDashboardLoading && campaigns.length > 0 && (
               <div className="button-group">
                 <div className="button button-secondary">
                   <ChevronDown size={15} color="#5A6079" />
@@ -189,17 +298,17 @@ function HrHome() {
             )}
           </div>
 
-          {isCampaignsLoading ? (
+          {isDashboardLoading ? (
             <div className="campaign-bar">
               <div className="campaign-selector">
                 <Folder size={16} color="#4553C4" />
-                <div className="campaign-name">Loading campaigns...</div>
+                <div className="campaign-name">Loading dashboard...</div>
               </div>
             </div>
-          ) : campaignsError !== "" ? (
+          ) : dashboardError !== "" ? (
             <div className="empty-campaign-card">
               <div>
-                <div className="empty-campaign-title">Campaigns are unavailable</div>
+                <div className="empty-campaign-title">Dashboard is unavailable</div>
                 <div className="empty-campaign-text">Refresh the page after the backend connection is restored.</div>
               </div>
             </div>
@@ -228,7 +337,7 @@ function HrHome() {
                         type="button"
                         className="campaign-dropdown-item"
                         onClick={() => {
-                          setSelectedCampaignId(campaign.id);
+                          fetchDashboard(campaign.id);
                           setIsCampaignListOpen(false);
                         }}
                       >
@@ -243,28 +352,28 @@ function HrHome() {
             </div>
           )}
 
-          {campaigns.length > 0 && (
+          {!isDashboardLoading && dashboardMetrics !== null && campaigns.length > 0 && (
             <>
               <div className="metrics">
                 <div className="metric-card">
                   <div className="metric-label">Completion rate</div>
-                  <div className="metric-value accent">72%</div>
-                  <div className="metric-context">184 of 256 assignments submitted</div>
+                  <div className="metric-value accent">{dashboardMetrics.completion_rate}%</div>
+                  <div className="metric-context">{dashboardMetrics.submitted_count} of {dashboardMetrics.assignment_count} assignments submitted</div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">Awaiting submission</div>
-                  <div className="metric-value">72</div>
-                  <div className="metric-context">48 not started · 24 in progress</div>
+                  <div className="metric-value">{dashboardMetrics.awaiting_submission_count}</div>
+                  <div className="metric-context">{dashboardMetrics.not_started_count} not started · {dashboardMetrics.in_progress_count} in progress</div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">Overdue</div>
-                  <div className="metric-value danger">12</div>
-                  <div className="metric-context">Across 3 forms</div>
+                  <div className="metric-value danger">{dashboardMetrics.overdue_count}</div>
+                  <div className="metric-context">Across {dashboardMetrics.overdue_forms_count} forms</div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">Upcoming reviews</div>
-                  <div className="metric-value">3</div>
-                  <div className="metric-context">Next review · 1 Oct 2026</div>
+                  <div className="metric-value">{dashboardMetrics.upcoming_reviews_count}</div>
+                  <div className="metric-context">Next review · {formatShortDate(dashboardMetrics.next_review_date)}</div>
                 </div>
               </div>
 
@@ -283,73 +392,44 @@ function HrHome() {
                       <div className="forms-table-heading col-action"></div>
                     </div>
 
-                <div className="form-row">
-                  <div className="form-info">
-                    <div className="form-name">September feedback</div>
-                    <div className="form-audience">All groups</div>
-                  </div>
-                  <div className="form-progress">
-                    <div className="form-progress-label">112 / 144 submitted</div>
-                    <div className="progress-track">
-                      <div className="progress-fill" style={{ width: "77.78%" }}></div>
-                    </div>
-                  </div>
-                  <div className="form-deadline">
-                    <div className="form-due-date">30 Sep 2026</div>
-                    <div className="form-overdue">6 overdue</div>
-                  </div>
-                  <div className="form-open-button">
-                    <ArrowUpRight size={15} />
-                  </div>
-                </div>
+                    {dashboardForms.length === 0 && (
+                      <div className="forms-empty-state">No forms are assigned to this campaign.</div>
+                    )}
 
-                <div className="form-row">
-                  <div className="form-info">
-                    <div className="form-name">Engineering peer review</div>
-                    <div className="form-audience">Engineering</div>
-                  </div>
-                  <div className="form-progress">
-                    <div className="form-progress-label">48 / 72 submitted</div>
-                    <div className="progress-track">
-                      <div className="progress-fill" style={{ width: "66.67%" }}></div>
-                    </div>
-                  </div>
-                  <div className="form-deadline">
-                    <div className="form-due-date">24 Sep 2026</div>
-                    <div className="form-overdue">4 overdue</div>
-                  </div>
-                  <div className="form-open-button">
-                    <ArrowUpRight size={15} />
-                  </div>
-                </div>
+                    {dashboardForms.map((form) => {
+                      const progressPercent = getProgressPercent(form.submitted_count, form.assignment_count);
 
-                <div className="form-row">
-                  <div className="form-info">
-                    <div className="form-name">Manager feedback</div>
-                    <div className="form-audience">All groups</div>
-                  </div>
-                  <div className="form-progress">
-                    <div className="form-progress-label">24 / 40 submitted</div>
-                    <div className="progress-track">
-                      <div className="progress-fill" style={{ width: "60%" }}></div>
-                    </div>
-                  </div>
-                  <div className="form-deadline">
-                    <div className="form-due-date">3 Oct 2026</div>
-                    <div className="form-overdue">2 overdue</div>
-                  </div>
-                  <div className="form-open-button">
-                    <ArrowUpRight size={15} />
-                  </div>
-                </div>
+                      return (
+                        <div className="form-row" key={form.form_id}>
+                          <div className="form-info">
+                            <div className="form-name">{form.name}</div>
+                            <div className="form-audience">{form.audience}</div>
+                          </div>
+                          <div className="form-progress">
+                            <div className="form-progress-label">{form.submitted_count} / {form.assignment_count} submitted</div>
+                            <div className="progress-track">
+                              <div className="progress-fill" style={{ width: `${progressPercent}%` }}></div>
+                            </div>
+                          </div>
+                          <div className="form-deadline">
+                            <div className="form-due-date">{formatShortDate(form.due_date)}</div>
+                            <div className="form-overdue">{form.overdue_count} overdue</div>
+                          </div>
+                          <div className="form-open-button">
+                            <ArrowUpRight size={15} />
+                          </div>
+                        </div>
+                      );
+                    })}
               </div>
             </div>
 
             <div className="next-actions">
               <div className="section-title">Next Actions</div>
 
-              <div className="overdue-alert">
-                <div className="overdue-alert-title">12 submissions are overdue</div>
+              {dashboardMetrics.overdue_count > 0 && (
+                <div className="overdue-alert">
+                <div className="overdue-alert-title">{dashboardMetrics.overdue_count} submissions are overdue</div>
                 <div className="overdue-alert-text">
                   Follow up with reviewers who missed their deadline.
                 </div>
@@ -357,11 +437,12 @@ function HrHome() {
                   <BellRing size={14} />
                   <span>Send reminders</span>
                 </div>
-              </div>
+                </div>
+              )}
 
               <div className="publish-card">
-                <div className="publish-card-title">Results ready to publish</div>
-                <div className="publish-card-context">Product team check-in · 18 people</div>
+                <div className="publish-card-title">{dashboardMetrics.completion_rate === 100 && dashboardMetrics.assignment_count > 0 ? "Results ready to publish" : "Results in progress"}</div>
+                <div className="publish-card-context">{selectedCampaign?.name} · {dashboardMetrics.submitted_count} submitted</div>
                 <div className="publish-card-link">Review results →</div>
               </div>
                 </div>
@@ -375,21 +456,19 @@ function HrHome() {
               <div className="section-link">Manage schedule →</div>
             </div>
             <div className="upcoming-list">
-              <div className="upcoming-item">
-                <div className="upcoming-date">1 Oct 2026 · 09:00</div>
-                <div className="upcoming-name">Q4 development check-in</div>
-                <div className="upcoming-meta">48 participants · Self-assessment</div>
-              </div>
-              <div className="upcoming-item">
-                <div className="upcoming-date">8 Oct 2026 · 09:00</div>
-                <div className="upcoming-name">Product peer feedback</div>
-                <div className="upcoming-meta">24 participants · Peer review</div>
-              </div>
-              <div className="upcoming-item">
-                <div className="upcoming-date">1 Dec 2026 · 09:00</div>
-                <div className="upcoming-name">Year-end reflection</div>
-                <div className="upcoming-meta">96 participants · Self-assessment</div>
-              </div>
+              {upcomingReviews.length === 0 && (
+                <div className="upcoming-item">
+                  <div className="upcoming-name">No upcoming reviews</div>
+                  <div className="upcoming-meta">Create a campaign with a future start date to show it here.</div>
+                </div>
+              )}
+              {upcomingReviews.map((review) => (
+                <div className="upcoming-item" key={review.campaign_id}>
+                  <div className="upcoming-date">{formatShortDate(review.start_date)}</div>
+                  <div className="upcoming-name">{review.name}</div>
+                  <div className="upcoming-meta">{review.participant_count} participants · {review.form_count} forms</div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
