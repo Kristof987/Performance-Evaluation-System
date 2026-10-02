@@ -1,5 +1,4 @@
 import AppLayout from '../layout/AppLayout';
-import { Bell, Search } from 'lucide-react';
 import '../hr-home/hr-home.css';
 import './forms.css';
 
@@ -7,23 +6,6 @@ export default function Forms() {
   return (
     <AppLayout activePage="forms" pageClassName="forms-page">
       <div className="main-content forms-editor-main">
-        <div className="forms-editor-top-actions">
-          <button
-            className="btn btn-secondary forms-editor-icon-btn"
-            type="button"
-            aria-label="Search"
-          >
-            <Search size={16} />
-          </button>
-          <button
-            className="btn btn-secondary forms-editor-icon-btn"
-            type="button"
-            aria-label="Notifications"
-          >
-            <Bell size={16} />
-          </button>
-        </div>
-
         <section className="forms-editor-hello">
           <h1>Form editor</h1>
           <p>

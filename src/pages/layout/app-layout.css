@@ -143,6 +143,7 @@
   align-items: center;
   background: none;
   border: none;
+  border-radius: 8px;
   color: var(--color-text-muted);
   cursor: pointer;
   display: flex;

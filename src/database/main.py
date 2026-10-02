@@ -1,7 +1,9 @@
 from datetime import date
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from openpyxl import load_workbook
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -20,6 +22,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+email_validator = TypeAdapter(schemas.EmailStr)
+EMPLOYEE_IMPORT_HEADERS = [
+    "Employee Name",
+    "Employee Email Address",
+    "Employee Company Role",
+    "Employee System Role",
+]
+GROUP_IMPORT_HEADERS = ["Group Name", "Group Description"]
 
 
 def get_db():
@@ -64,6 +75,495 @@ def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
     db.refresh(user)
 
     return user
+
+
+@app.get("/people", response_model=schemas.PeopleResponse)
+def get_people(db: Session = Depends(get_db)):
+    users = (
+        db.query(models.User)
+        .order_by(models.User.is_active.desc(), models.User.username.asc())
+        .all()
+    )
+    roles_by_id = {
+        role.id: role.name
+        for role in db.query(models.CompanyRole).all()
+    }
+    groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
+    groups_by_id = {group.id: group for group in groups}
+    group_member_counts = {group.id: 0 for group in groups}
+    group_ids_by_user_id = {user.id: [] for user in users}
+
+    memberships = db.query(
+        models.user_company_groups.c.user_id,
+        models.user_company_groups.c.company_group_id,
+    ).all()
+    for membership in memberships:
+        group = groups_by_id.get(membership.company_group_id)
+        if group is None:
+            continue
+        group_member_counts[group.id] = group_member_counts.get(group.id, 0) + 1
+        if membership.user_id in group_ids_by_user_id:
+            group_ids_by_user_id[membership.user_id].append(group.id)
+
+    def serialize_group(group: models.CompanyGroup):
+        return {
+            "id": group.id,
+            "name": group.name,
+            "description": group.description,
+            "member_count": group_member_counts.get(group.id, 0),
+        }
+
+    return {
+        "employees": [
+            {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "company_role_id": user.company_role_id,
+                "role_name": roles_by_id.get(user.company_role_id, "Unknown role"),
+                "groups": [
+                    serialize_group(groups_by_id[group_id])
+                    for group_id in group_ids_by_user_id.get(user.id, [])
+                    if group_id in groups_by_id
+                ],
+                "is_active": user.is_active,
+            }
+            for user in users
+        ],
+        "groups": [serialize_group(group) for group in groups],
+    }
+
+
+def get_or_create_company_role(role_name: str, db: Session):
+    company_role = (
+        db.query(models.CompanyRole)
+        .filter(func.lower(models.CompanyRole.name) == role_name.lower())
+        .first()
+    )
+    if company_role is None:
+        company_role = models.CompanyRole(name=role_name)
+        db.add(company_role)
+        db.flush()
+    return company_role
+
+
+def get_or_create_system_role(role_name: str, db: Session):
+    system_role = (
+        db.query(models.SystemRole)
+        .filter(func.lower(models.SystemRole.name) == role_name.lower())
+        .first()
+    )
+    if system_role is None:
+        system_role = models.SystemRole(name=role_name)
+        db.add(system_role)
+        db.flush()
+    return system_role
+
+
+@app.post("/people/employees", response_model=schemas.PeopleEmployeeResponse)
+def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session = Depends(get_db)):
+    name = employee.name.strip()
+    role_name = employee.role.strip()
+    if name == "" or role_name == "":
+        raise HTTPException(status_code=400, detail="Name and role are required")
+
+    existing_user = (
+        db.query(models.User)
+        .filter((models.User.username == name) | (models.User.email == employee.email))
+        .first()
+    )
+    if existing_user is not None:
+        raise HTTPException(status_code=400, detail="Employee name or email already exists")
+
+    company_role = get_or_create_company_role(role_name, db)
+    system_role = get_or_create_system_role("Employee", db)
+
+    group_ids = sorted(set(employee.group_ids))
+    groups = []
+    if len(group_ids) > 0:
+        groups = (
+            db.query(models.CompanyGroup)
+            .filter(models.CompanyGroup.id.in_(group_ids))
+            .order_by(models.CompanyGroup.name.asc())
+            .all()
+        )
+        if len(groups) != len(group_ids):
+            raise HTTPException(status_code=400, detail="Invalid group selection")
+
+    new_user = models.User(
+        username=name,
+        email=employee.email,
+        password_hash="",
+        company_role_id=company_role.id,
+        system_role_id=system_role.id,
+        is_active=True,
+    )
+    db.add(new_user)
+    db.flush()
+
+    for group in groups:
+        db.execute(
+            models.user_company_groups.insert().values(
+                user_id=new_user.id,
+                company_group_id=group.id,
+            )
+        )
+
+    db.commit()
+    db.refresh(new_user)
+
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "email": new_user.email,
+        "company_role_id": new_user.company_role_id,
+        "role_name": company_role.name,
+        "groups": [
+            {
+                "id": group.id,
+                "name": group.name,
+                "description": group.description,
+                "member_count": 0,
+            }
+            for group in groups
+        ],
+        "is_active": new_user.is_active,
+    }
+
+
+@app.put("/people/employees/{employee_id}", response_model=schemas.PeopleEmployeeResponse)
+def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpdate, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == employee_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    name = employee.name.strip()
+    role_name = employee.role.strip()
+    if name == "" or role_name == "":
+        raise HTTPException(status_code=400, detail="Name and role are required")
+
+    duplicate_user = (
+        db.query(models.User)
+        .filter(models.User.id != employee_id)
+        .filter((models.User.username == name) | (models.User.email == employee.email))
+        .first()
+    )
+    if duplicate_user is not None:
+        raise HTTPException(status_code=400, detail="Employee name or email already exists")
+
+    company_role = get_or_create_company_role(role_name, db)
+    group_ids = sorted(set(employee.group_ids))
+    groups = []
+    if len(group_ids) > 0:
+        groups = (
+            db.query(models.CompanyGroup)
+            .filter(models.CompanyGroup.id.in_(group_ids))
+            .order_by(models.CompanyGroup.name.asc())
+            .all()
+        )
+        if len(groups) != len(group_ids):
+            raise HTTPException(status_code=400, detail="Invalid group selection")
+
+    user.username = name
+    user.email = employee.email
+    user.company_role_id = company_role.id
+
+    db.execute(
+        models.user_company_groups.delete().where(
+            models.user_company_groups.c.user_id == employee_id
+        )
+    )
+    for group in groups:
+        db.execute(
+            models.user_company_groups.insert().values(
+                user_id=employee_id,
+                company_group_id=group.id,
+            )
+        )
+
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "company_role_id": user.company_role_id,
+        "role_name": company_role.name,
+        "groups": [
+            {
+                "id": group.id,
+                "name": group.name,
+                "description": group.description,
+                "member_count": 0,
+            }
+            for group in groups
+        ],
+        "is_active": user.is_active,
+    }
+
+
+@app.post("/people/groups", response_model=schemas.PeopleGroupResponse)
+def create_people_group(group: schemas.PeopleGroupCreate, db: Session = Depends(get_db)):
+    name = group.name.strip()
+    description = group.description.strip() if group.description is not None else None
+    if name == "":
+        raise HTTPException(status_code=400, detail="Group name is required")
+
+    existing_group = (
+        db.query(models.CompanyGroup)
+        .filter(func.lower(models.CompanyGroup.name) == name.lower())
+        .first()
+    )
+    if existing_group is not None:
+        raise HTTPException(status_code=400, detail="Group name already exists")
+
+    new_group = models.CompanyGroup(name=name, description=description)
+    db.add(new_group)
+    db.commit()
+    db.refresh(new_group)
+    return {
+        "id": new_group.id,
+        "name": new_group.name,
+        "description": new_group.description,
+        "member_count": 0,
+    }
+
+
+@app.put("/people/groups/{group_id}", response_model=schemas.PeopleGroupResponse)
+def update_people_group(group_id: int, group: schemas.PeopleGroupUpdate, db: Session = Depends(get_db)):
+    existing_group = db.query(models.CompanyGroup).filter(models.CompanyGroup.id == group_id).first()
+    if existing_group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    name = group.name.strip()
+    description = group.description.strip() if group.description is not None else None
+    if name == "":
+        raise HTTPException(status_code=400, detail="Group name is required")
+
+    duplicate_group = (
+        db.query(models.CompanyGroup)
+        .filter(models.CompanyGroup.id != group_id)
+        .filter(func.lower(models.CompanyGroup.name) == name.lower())
+        .first()
+    )
+    if duplicate_group is not None:
+        raise HTTPException(status_code=400, detail="Group name already exists")
+
+    existing_group.name = name
+    existing_group.description = description
+    db.commit()
+    db.refresh(existing_group)
+
+    member_count = (
+        db.query(models.user_company_groups)
+        .filter(models.user_company_groups.c.company_group_id == group_id)
+        .count()
+    )
+    return {
+        "id": existing_group.id,
+        "name": existing_group.name,
+        "description": existing_group.description,
+        "member_count": member_count,
+    }
+
+
+@app.post("/people/groups/{group_id}/members", response_model=schemas.PeopleGroupResponse)
+def add_people_group_member(group_id: int, member: schemas.PeopleGroupMemberCreate, db: Session = Depends(get_db)):
+    group = db.query(models.CompanyGroup).filter(models.CompanyGroup.id == group_id).first()
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    user = db.query(models.User).filter(models.User.id == member.user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    existing_membership = (
+        db.query(models.user_company_groups)
+        .filter(models.user_company_groups.c.user_id == member.user_id)
+        .filter(models.user_company_groups.c.company_group_id == group_id)
+        .first()
+    )
+    if existing_membership is not None:
+        raise HTTPException(status_code=400, detail="Employee is already in this group")
+
+    db.execute(
+        models.user_company_groups.insert().values(
+            user_id=member.user_id,
+            company_group_id=group_id,
+        )
+    )
+    db.commit()
+
+    member_count = (
+        db.query(models.user_company_groups)
+        .filter(models.user_company_groups.c.company_group_id == group_id)
+        .count()
+    )
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "member_count": member_count,
+    }
+
+
+@app.post("/people/groups/import", response_model=schemas.PeopleGroupImportResponse)
+def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Please upload the provided .xlsx group template.")
+
+    try:
+        workbook = load_workbook(file.file, data_only=True)
+        worksheet = workbook.active
+    except Exception:
+        raise HTTPException(status_code=400, detail="The uploaded Excel file could not be read.")
+
+    headers = [worksheet.cell(1, column).value for column in range(1, len(GROUP_IMPORT_HEADERS) + 1)]
+    if headers != GROUP_IMPORT_HEADERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid template columns. Expected: {', '.join(GROUP_IMPORT_HEADERS)}.",
+        )
+
+    errors = []
+    rows = []
+    seen_names = set()
+    existing_names = {
+        name.lower()
+        for (name,) in db.query(models.CompanyGroup.name).all()
+    }
+
+    for row_number in range(2, worksheet.max_row + 1):
+        values = [worksheet.cell(row_number, column).value for column in range(1, 3)]
+        if all(value is None or str(value).strip() == "" for value in values):
+            continue
+
+        name = str(values[0]).strip() if values[0] is not None else ""
+        description = str(values[1]).strip() if values[1] is not None else ""
+
+        if name == "":
+            errors.append(f"Row {row_number}: Group Name is required.")
+
+        name_key = name.lower()
+        if name_key != "" and name_key in seen_names:
+            errors.append(f"Row {row_number}: Group Name is duplicated in the file.")
+        if name_key != "" and name_key in existing_names:
+            errors.append(f"Row {row_number}: Group Name already exists in the database.")
+
+        seen_names.add(name_key)
+        rows.append((name, description))
+
+    if len(rows) == 0:
+        errors.append("The uploaded template does not contain any group rows.")
+
+    if len(errors) > 0:
+        return {"created_count": 0, "errors": errors}
+
+    for name, description in rows:
+        db.add(
+            models.CompanyGroup(
+                name=name,
+                description=description if description != "" else None,
+            )
+        )
+
+    db.commit()
+    return {"created_count": len(rows), "errors": []}
+
+
+@app.post("/people/employees/import", response_model=schemas.PeopleEmployeeImportResponse)
+def import_people_employees(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Please upload the provided .xlsx employee template.")
+
+    try:
+        workbook = load_workbook(file.file, data_only=True)
+        worksheet = workbook.active
+    except Exception:
+        raise HTTPException(status_code=400, detail="The uploaded Excel file could not be read.")
+
+    headers = [worksheet.cell(1, column).value for column in range(1, len(EMPLOYEE_IMPORT_HEADERS) + 1)]
+    if headers != EMPLOYEE_IMPORT_HEADERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid template columns. Expected: {', '.join(EMPLOYEE_IMPORT_HEADERS)}.",
+        )
+
+    errors = []
+    rows = []
+    seen_names = set()
+    seen_emails = set()
+    existing_names = {
+        username.lower()
+        for (username,) in db.query(models.User.username).all()
+    }
+    existing_emails = {
+        email.lower()
+        for (email,) in db.query(models.User.email).all()
+    }
+
+    for row_number in range(2, worksheet.max_row + 1):
+        values = [worksheet.cell(row_number, column).value for column in range(1, 5)]
+        if all(value is None or str(value).strip() == "" for value in values):
+            continue
+
+        name = str(values[0]).strip() if values[0] is not None else ""
+        email = str(values[1]).strip() if values[1] is not None else ""
+        company_role_name = str(values[2]).strip() if values[2] is not None else ""
+        system_role_name = str(values[3]).strip() if values[3] is not None else ""
+
+        if name == "":
+            errors.append(f"Row {row_number}: Employee Name is required.")
+        if email == "":
+            errors.append(f"Row {row_number}: Employee Email Address is required.")
+        else:
+            try:
+                email_validator.validate_python(email)
+            except ValidationError:
+                errors.append(f"Row {row_number}: Employee Email Address is not a valid email.")
+        if company_role_name == "":
+            errors.append(f"Row {row_number}: Employee Company Role is required.")
+        if system_role_name == "":
+            errors.append(f"Row {row_number}: Employee System Role is required.")
+
+        name_key = name.lower()
+        email_key = email.lower()
+        if name_key != "" and name_key in seen_names:
+            errors.append(f"Row {row_number}: Employee Name is duplicated in the file.")
+        if email_key != "" and email_key in seen_emails:
+            errors.append(f"Row {row_number}: Employee Email Address is duplicated in the file.")
+        if name_key != "" and name_key in existing_names:
+            errors.append(f"Row {row_number}: Employee Name already exists in the database.")
+        if email_key != "" and email_key in existing_emails:
+            errors.append(f"Row {row_number}: Employee Email Address already exists in the database.")
+
+        seen_names.add(name_key)
+        seen_emails.add(email_key)
+        rows.append((name, email, company_role_name, system_role_name))
+
+    if len(rows) == 0:
+        errors.append("The uploaded template does not contain any employee rows.")
+
+    if len(errors) > 0:
+        return {"created_count": 0, "errors": errors}
+
+    for name, email, company_role_name, system_role_name in rows:
+        company_role = get_or_create_company_role(company_role_name, db)
+        system_role = get_or_create_system_role(system_role_name, db)
+        db.add(
+            models.User(
+                username=name,
+                email=email,
+                password_hash="",
+                company_role_id=company_role.id,
+                system_role_id=system_role.id,
+                is_active=True,
+            )
+        )
+
+    db.commit()
+    return {"created_count": len(rows), "errors": []}
 
 
 def get_campaign_form_ids(campaign_id: int, db: Session):

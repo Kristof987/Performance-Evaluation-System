@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class FormStatusCreate(BaseModel):
@@ -170,6 +170,66 @@ class UserResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+
+class PeopleGroupResponse(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    member_count: int = 0
+
+
+class PeopleEmployeeResponse(BaseModel):
+    id: int
+    username: str
+    email: EmailStr
+    company_role_id: int
+    role_name: str
+    groups: list[PeopleGroupResponse]
+    is_active: bool
+
+
+class PeopleResponse(BaseModel):
+    employees: list[PeopleEmployeeResponse]
+    groups: list[PeopleGroupResponse]
+
+
+class PeopleEmployeeCreate(BaseModel):
+    name: str
+    email: EmailStr
+    role: str
+    group_ids: list[int] = Field(default_factory=list)
+
+
+class PeopleEmployeeUpdate(BaseModel):
+    name: str
+    email: EmailStr
+    role: str
+    group_ids: list[int] = Field(default_factory=list)
+
+
+class PeopleEmployeeImportResponse(BaseModel):
+    created_count: int
+    errors: list[str] = Field(default_factory=list)
+
+
+class PeopleGroupImportResponse(BaseModel):
+    created_count: int
+    errors: list[str] = Field(default_factory=list)
+
+
+class PeopleGroupCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class PeopleGroupUpdate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class PeopleGroupMemberCreate(BaseModel):
+    user_id: int
 
 class CampaignCreate(BaseModel):
     name: str
