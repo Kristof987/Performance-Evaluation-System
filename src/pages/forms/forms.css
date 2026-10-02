@@ -6,8 +6,8 @@
 }
 
 .forms-editor-app {
-  background: #f6f7fb;
-  color: #171a2b;
+  background: var(--color-bg);
+  color: var(--color-text);
   display: flex;
   font-family: Inter, system-ui, sans-serif;
   min-height: 100vh;
@@ -17,8 +17,8 @@
 
 .forms-editor-sidebar {
   align-items: flex-start;
-  background: #fff;
-  border-color: #e7e9f3;
+  background: var(--color-surface);
+  border-color: var(--color-border);
   border-style: solid;
   border-width: 0 1px 0 0;
   display: flex;
@@ -40,7 +40,7 @@
 
 .forms-editor-mark {
   align-items: center;
-  background: #4553c4;
+  background: var(--color-primary);
   border-radius: 9px;
   color: #fff;
   display: flex;
@@ -71,7 +71,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  color: #8b91a8;
+  color: var(--color-text-muted);
   display: flex;
   flex-shrink: 0;
   font: inherit;
@@ -83,7 +83,7 @@
 }
 
 .forms-editor-nav-item:hover {
-  background: #f0f2f8;
+  background: var(--color-surface-muted);
 }
 
 .forms-editor-nav-item svg {
@@ -93,19 +93,19 @@
 }
 
 .forms-editor-nav-item {
-  color: #5a6079;
+  color: var(--color-text-secondary);
   font-size: 14px;
   font-weight: 500;
 }
 
 .forms-editor-nav-item.active {
-  background: #1f2a6b;
+  background: var(--color-primary-dark);
   color: #fff;
   font-weight: 600;
 }
 
 .forms-editor-nav-item.active:hover {
-  background: #1f2a6b;
+  background: var(--color-primary-dark);
 }
 
 button.forms-editor-nav-item {
@@ -124,9 +124,9 @@ button.forms-editor-nav-item {
 
 .forms-editor-avatar {
   align-items: center;
-  background: #e9ebfb;
+  background: var(--color-primary-soft);
   border-radius: 50%;
-  color: #4553c4;
+  color: var(--color-primary);
   display: flex;
   flex-shrink: 0;
   font-size: 12px;
@@ -152,7 +152,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-profile-role {
-  color: #8b91a8;
+  color: var(--color-text-muted);
   font-size: 12px;
   width: 100%;
 }
@@ -175,10 +175,10 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-icon-btn {
-  background: #fff;
-  border: 1px solid #e7e9f3;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 9px;
-  color: #5a6079;
+  color: var(--color-text-secondary);
   display: grid;
   height: 36px;
   place-items: center;
@@ -192,7 +192,7 @@ button.forms-editor-nav-item {
 
 .forms-editor-hello p,
 .forms-editor-title p {
-  color: #5a6079;
+  color: var(--color-text-secondary);
   font-size: 14px;
   margin: 0;
 }
@@ -214,18 +214,18 @@ button.forms-editor-nav-item {
   gap: 10px;
 }
 
-.forms-editor-btn {
-  background: #fff;
-  border: 1px solid #e7e9f3;
+.forms-page .btn:not(.forms-editor-icon-btn) {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  color: #171a2b;
+  color: var(--color-text);
   font: 650 13px Inter, system-ui, sans-serif;
   padding: 11px 14px;
 }
 
-.forms-editor-btn.primary {
-  background: #4553c4;
-  border-color: #4553c4;
+.forms-page .btn.btn-primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
   color: #fff;
 }
 
@@ -239,8 +239,6 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-card {
-  background: #fff;
-  border: 1px solid #e7e9f3;
   border-radius: 14px;
   min-width: 0;
   overflow: hidden;
@@ -290,7 +288,7 @@ button.forms-editor-nav-item {
 
 .forms-editor-form-item span,
 .forms-editor-template-item span {
-  color: #8b91a8;
+  color: var(--color-text-muted);
   display: block;
   font-size: 12px;
   margin-top: 4px;
@@ -312,7 +310,7 @@ button.forms-editor-nav-item {
 
 .forms-editor-form-title input {
   border: 0;
-  color: #171a2b;
+  color: var(--color-text);
   font: 750 22px Inter, system-ui, sans-serif;
   outline: 0;
   width: 100%;
@@ -320,7 +318,7 @@ button.forms-editor-nav-item {
 
 .forms-editor-form-title textarea {
   border: 0;
-  color: #5a6079;
+  color: var(--color-text-secondary);
   font: 500 14px Inter, system-ui, sans-serif;
   margin-top: 8px;
   min-height: 48px;
@@ -348,8 +346,6 @@ button.forms-editor-nav-item {
 
 .forms-editor-question {
   align-items: start;
-  background: #fff;
-  border: 1px solid #e7e9f3;
   border-radius: 13px;
   display: grid;
   gap: 12px;
@@ -359,12 +355,12 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-question.active {
-  border-color: #4553c4;
+  border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(69, 83, 196, 0.08);
 }
 
 .forms-editor-drag {
-  color: #8b91a8;
+  color: var(--color-text-muted);
 }
 
 .forms-editor-q-main strong {
@@ -373,7 +369,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-q-main span {
-  color: #8b91a8;
+  color: var(--color-text-muted);
   display: block;
   font-size: 12px;
   margin-top: 4px;
@@ -386,18 +382,18 @@ button.forms-editor-nav-item {
   justify-content: flex-end;
 }
 
-.forms-editor-pill {
-  background: #e9ebfb;
+.forms-page .badge {
+  background: var(--color-primary-soft);
   border-radius: 999px;
-  color: #4553c4;
+  color: var(--color-primary);
   font-size: 11px;
   font-weight: 750;
   padding: 5px 8px;
 }
 
-.forms-editor-pill.gray {
-  background: #f0f2f8;
-  color: #5a6079;
+.forms-page .badge-neutral {
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
 }
 
 .forms-editor-add-row {
@@ -419,16 +415,14 @@ button.forms-editor-nav-item {
   min-width: 0;
 }
 
-.forms-editor-field label {
+.forms-editor-field .form-label {
   color: #30344d;
   font-size: 12px;
   font-weight: 750;
 }
 
-.forms-editor-field input,
-.forms-editor-field select,
-.forms-editor-field textarea {
-  border: 1px solid #e0e3ef;
+.forms-editor-field .form-control {
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font: 500 13px Inter, system-ui, sans-serif;
   min-width: 0;
@@ -497,4 +491,61 @@ button.forms-editor-nav-item {
     grid-template-columns: 1fr;
     height: auto;
   }
+}
+
+/* Preserve the original Forms appearance when shared defaults are applied. */
+.forms-page .btn:not(.forms-editor-icon-btn) {
+  display: inline-block;
+  min-height: 0;
+  line-height: normal;
+}
+
+.forms-page .btn-secondary:hover {
+  background: var(--color-surface);
+}
+
+.forms-page .btn-primary:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.forms-page .forms-editor-icon-btn {
+  min-height: 0;
+  padding: 2px 6px;
+  line-height: normal;
+}
+
+.forms-editor-field .form-control {
+  min-height: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  line-height: normal;
+}
+
+.forms-editor-field .form-control:focus {
+  border-color: var(--color-border-strong);
+  box-shadow: none;
+  outline: auto;
+}
+
+.forms-editor-form-title .form-control {
+  min-height: 0;
+  padding: 2px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: 0;
+}
+
+.forms-editor-form-title textarea.form-control {
+  min-height: 48px;
+}
+
+.forms-page .badge {
+  display: block;
+  width: auto;
+}
+
+.forms-editor-field textarea.form-control {
+  min-height: 72px;
 }
