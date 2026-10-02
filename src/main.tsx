@@ -7,6 +7,7 @@ import HrHome from './pages/hr-home/HrHome'
 import People from './pages/people/People'
 import Forms from './pages/forms/Forms'
 import { CampaignDetails, Campaigns } from './pages/campaigns/Campaigns'
+import './styles/shared.css'
 
 function RequireLoggedInUser({ children }: { children: React.ReactNode }) {
   const loggedInUser = sessionStorage.getItem('loggedInUser')

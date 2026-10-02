@@ -381,7 +381,7 @@ export function Campaigns() {
           <p>Current and past performance review campaigns</p>
         </div>
         <div className="campaign-heading-actions">
-          <button className="campaign-create-button" type="button" onClick={openCreate}>
+          <button className="btn btn-primary" type="button" onClick={openCreate}>
             Create campaign
           </button>
           <Link to="/hr-home">Back to dashboard</Link>
@@ -391,15 +391,15 @@ export function Campaigns() {
       {successMessage !== '' && <div className="campaign-success-message">{successMessage}</div>}
 
       <div className="campaign-overview-stats">
-        <div className="campaign-mini-stat">
-          <span>Total campaigns</span>
-          <strong>{campaignList.length}</strong>
-        </div>
-        <div className="campaign-mini-stat">
+      <div className="card campaign-mini-stat">
+        <span>Total campaigns</span>
+        <strong>{campaignList.length}</strong>
+      </div>
+        <div className="card campaign-mini-stat">
           <span>Active</span>
           <strong>{campaignList.filter((campaign) => campaign.status === 'Active').length}</strong>
         </div>
-        <div className="campaign-mini-stat">
+        <div className="card campaign-mini-stat">
           <span>Closed</span>
           <strong>{campaignList.filter((campaign) => campaign.status === 'Closed').length}</strong>
         </div>
@@ -425,10 +425,16 @@ export function Campaigns() {
             <option>Active</option>
             <option>Closed</option>
           </select>
-          <button className="campaign-clear" type="button" onClick={() => {
-            setSearchQuery('');
-            setStatusFilter('All statuses');
-          }}>Reset</button>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={() => {
+              setSearchQuery('');
+              setStatusFilter('All statuses');
+            }}
+          >
+            Reset
+          </button>
         </div>
       </div>
 
@@ -471,7 +477,15 @@ export function Campaigns() {
                   <strong>{campaign.name}</strong>
                 </td>
                 <td>
-                  <span className="status-pill">{campaign.status}</span>
+                  <span
+                    className={`badge ${
+                      campaign.status === 'Active'
+                        ? 'badge-success'
+                        : 'badge-neutral'
+                    }`}
+                  >
+                    {campaign.status}
+                  </span>
                 </td>
                 <td>
                   {campaign.start} - {campaign.end}
@@ -504,42 +518,54 @@ export function Campaigns() {
             </div>
 
             <form className="campaign-create-form" onSubmit={handleCreateCampaign}>
-              <label className="campaign-field campaign-field-wide">
-                <span>Campaign name *</span>
-                <input required value={form.name} onChange={(event) => updateForm('name', event.target.value)} placeholder="e.g. Winter 2027 review" />
+              <label className="form-field campaign-field-wide">
+                <span className="form-label">Campaign name *</span>
+                <input
+                  className="form-control"
+                  required
+                  value={form.name}
+                  onChange={(event) => updateForm('name', event.target.value)}
+                  placeholder="e.g. Winter 2027 review"
+                />
               </label>
 
-              <label className="campaign-field campaign-field-wide">
-                <span>Description</span>
-                <textarea value={form.description} onChange={(event) => updateForm('description', event.target.value)} placeholder="Short summary shown to HR admins and participants" rows={3} />
+              <label className="form-field campaign-field-wide">
+                <span className="form-label">Description</span>
+                <textarea
+                  className="form-control"
+                  value={form.description}
+                  onChange={(event) => updateForm('description', event.target.value)}
+                  placeholder="Short summary shown to HR admins and participants"
+                  rows={3}
+                />
               </label>
 
-              <label className="campaign-field">
-                <span>Start date *</span>
-                <input required type="date" value={form.startDate} onChange={(event) => updateForm('startDate', event.target.value)} />
+              <label className="form-field">
+                <span className="form-label">Start date *</span>
+                <input className="form-control" required type="date" value={form.startDate} onChange={(event) => updateForm('startDate', event.target.value)} />
               </label>
 
-              <label className="campaign-field">
-                <span>End date</span>
-                <input type="date" value={form.endDate} min={form.startDate} onChange={(event) => updateForm('endDate', event.target.value)} />
+              <label className="form-field">
+                <span className="form-label">End date</span>
+                <input className="form-control" type="date" value={form.endDate} min={form.startDate} onChange={(event) => updateForm('endDate', event.target.value)} />
               </label>
 
-              <label className="campaign-field">
-                <span>Status</span>
-                <select value={form.isActive ? 'active' : 'closed'} onChange={(event) => updateForm('isActive', event.target.value === 'active')}>
+              <label className="form-field">
+                <span className="form-label">Status</span>
+                <select className="form-control" value={form.isActive ? 'active' : 'closed'} onChange={(event) => updateForm('isActive', event.target.value === 'active')}>
                   <option value="active">Active</option>
                   <option value="closed">Closed</option>
                 </select>
               </label>
 
-              <label className="campaign-field">
-                <span>Created by</span>
-                <input value="Sarah Miller (current user)" disabled />
+              <label className="form-field">
+                <span className="form-label">Created by</span>
+                <input className="form-control" value="Sarah Miller (current user)" disabled />
               </label>
 
-              <label className="campaign-field campaign-field-wide">
-                <span>Internal comment</span>
-                <textarea value={form.comment} onChange={(event) => updateForm('comment', event.target.value)} placeholder="Optional HR-only note" rows={3} />
+              <label className="form-field campaign-field-wide">
+                <span className="form-label">Internal comment</span>
+                <textarea className="form-control" value={form.comment} onChange={(event) => updateForm('comment', event.target.value)} placeholder="Optional HR-only note" rows={3} />
               </label>
 
               <div className="campaign-form-summary">
@@ -550,8 +576,19 @@ export function Campaigns() {
               {createMessage !== '' && <div className="campaign-save-message">{createMessage}</div>}
 
               <div className="campaign-modal-actions">
-                <button className="campaign-secondary-button" type="button" onClick={closeCreate}>Cancel</button>
-                <button className="campaign-create-button" type="submit">Save campaign</button>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={closeCreate}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  type="submit"
+                >
+                  Save campaign
+                </button>
               </div>
             </form>
           </section>
@@ -710,12 +747,26 @@ export function CampaignDetails() {
           <Link to="/campaigns">{'<- All campaigns'}</Link>
           <h1>{campaign.name}</h1>
           <p>
-            <span className="status-pill">{campaign.status}</span>
+            <span
+              className={`badge ${
+                campaign.status === 'Active'
+                  ? 'badge-success'
+                  : 'badge-neutral'
+              }`}
+            >
+              {campaign.status}
+            </span>
             {campaign.start} - {campaign.end}
           </p>
         </div>
         <div className="campaign-heading-actions">
-          <button className="campaign-create-button" type="button" onClick={openEdit}>Edit Campaign</button>
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={openEdit}
+          >
+            Edit Campaign
+          </button>
           <Link to="/hr-home">Back to dashboard</Link>
         </div>
       </div>
@@ -723,19 +774,19 @@ export function CampaignDetails() {
       {successMessage !== '' && <div className="campaign-success-message">{successMessage}</div>}
 
       <div className="campaign-stats">
-        <div className="campaign-stat">
+        <div className="card campaign-stat">
           <span>Completion rate</span>
           <strong>{campaign.sent === 0 ? '0%' : `${Math.round((campaign.done / campaign.sent) * 100)}%`}</strong>
         </div>
-        <div className="campaign-stat">
+        <div className="card campaign-stat">
           <span>Submitted</span>
           <strong>{campaign.done} / {campaign.sent}</strong>
         </div>
-        <div className="campaign-stat">
+        <div className="card campaign-stat">
           <span>{campaign.status === 'Closed' ? 'Not submitted' : 'Awaiting submission'}</span>
           <strong>{campaign.sent - campaign.done}</strong>
         </div>
-        <div className="campaign-stat">
+        <div className="card campaign-stat">
           <span>Forms</span>
           <strong>{campaign.forms.length}</strong>
         </div>
@@ -799,19 +850,20 @@ export function CampaignDetails() {
             </div>
 
             <form className="campaign-create-form" onSubmit={handleUpdateCampaign}>
-              <label className="campaign-field campaign-field-wide">
-                <span>Campaign name *</span>
-                <input required value={form.name} onChange={(event) => updateForm('name', event.target.value)} />
+              <label className="form-field campaign-field-wide">
+                <span className="form-label">Campaign name *</span>
+                <input className="form-control" required value={form.name} onChange={(event) => updateForm('name', event.target.value)} />
               </label>
 
-              <label className="campaign-field campaign-field-wide">
-                <span>Description</span>
-                <textarea value={form.description} onChange={(event) => updateForm('description', event.target.value)} rows={3} />
+              <label className="form-field campaign-field-wide">
+                <span className="form-label">Description</span>
+                <textarea className="form-control" value={form.description} onChange={(event) => updateForm('description', event.target.value)} rows={3} />
               </label>
 
-              <label className="campaign-field">
-                <span>Start date *</span>
+              <label className="form-field">
+                <span className="form-label">Start date *</span>
                 <input
+                  className="form-control"
                   required
                   type="date"
                   value={form.startDate}
@@ -820,9 +872,10 @@ export function CampaignDetails() {
                 />
               </label>
 
-              <label className="campaign-field">
-                <span>End date</span>
+              <label className="form-field">
+                <span className="form-label">End date</span>
                 <input
+                  className="form-control"
                   type="date"
                   value={form.endDate}
                   min={getEndDateMin(form, campaign)}
@@ -830,17 +883,17 @@ export function CampaignDetails() {
                 />
               </label>
 
-              <label className="campaign-field">
-                <span>Status</span>
-                <select value={form.isActive ? 'active' : 'closed'} onChange={(event) => updateForm('isActive', event.target.value === 'active')}>
+              <label className="form-field">
+                <span className="form-label">Status</span>
+                <select className="form-control" value={form.isActive ? 'active' : 'closed'} onChange={(event) => updateForm('isActive', event.target.value === 'active')}>
                   <option value="active">Active</option>
                   <option value="closed">Closed</option>
                 </select>
               </label>
 
-              <label className="campaign-field campaign-field-wide">
-                <span>Internal comment</span>
-                <textarea value={form.comment} onChange={(event) => updateForm('comment', event.target.value)} rows={3} />
+              <label className="form-field campaign-field-wide">
+                <span className="form-label">Internal comment</span>
+                <textarea className="form-control" value={form.comment} onChange={(event) => updateForm('comment', event.target.value)} rows={3} />
               </label>
 
               <div className="campaign-form-summary">
@@ -851,8 +904,24 @@ export function CampaignDetails() {
               {saveMessage !== '' && <div className="campaign-save-message">{saveMessage}</div>}
 
               <div className="campaign-modal-actions">
-                <button className="campaign-secondary-button" type="button" onClick={closeEdit}>Cancel</button>
-                <button className={hasEditChanges ? 'campaign-create-button' : 'campaign-secondary-button'} type="submit" disabled={isSavingCampaign || !hasEditChanges}>{isSavingCampaign ? 'Saving...' : 'Save changes'}</button>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={closeEdit}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={
+                    hasEditChanges
+                      ? 'btn btn-primary'
+                      : 'btn btn-secondary'
+                  }
+                  type="submit"
+                  disabled={isSavingCampaign || !hasEditChanges}
+                >
+                  {isSavingCampaign ? 'Saving...' : 'Save changes'}
+                </button>
               </div>
             </form>
           </section>
