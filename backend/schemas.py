@@ -330,6 +330,12 @@ class FormCreate(BaseModel):
     questions: list[dict[str, Any]]
 
 
+class FormUpdate(BaseModel):
+    name: str
+    description: str | None = None
+    questions: list[dict[str, Any]]
+
+
 class FormResponse(BaseModel):
     id: int
     name: str

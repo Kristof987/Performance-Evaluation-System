@@ -7,9 +7,9 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from database import engine, Base, SessionLocal
-import models
-import schemas
+from backend.database import engine, Base, SessionLocal
+import backend.database.models as models
+import backend.database.schemas as schemas
 
 #Base.metadata.create_all(bind=engine)
 
@@ -848,3 +848,70 @@ def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, d
         **campaign.__dict__,
         "issued_forms_count": issued_forms_count,
     }
+
+
+@app.get("/forms", response_model=list[schemas.FormResponse])
+def get_forms(db: Session = Depends(get_db)):
+    return db.query(models.Form).order_by(models.Form.id.desc()).all()
+
+
+@app.post("/forms", response_model=schemas.FormResponse)
+def create_form(form: schemas.FormCreate, db: Session = Depends(get_db)):
+    name = form.name.strip()
+    if name == "":
+        raise HTTPException(status_code=400, detail="Form name is required")
+
+    existing_form = (
+        db.query(models.Form)
+        .filter(func.lower(models.Form.name) == name.lower())
+        .first()
+    )
+    if existing_form is not None:
+        raise HTTPException(status_code=400, detail="Form name already exists")
+
+    new_form = models.Form(
+        name=name,
+        description=form.description.strip() if form.description is not None else None,
+        questions=form.questions,
+    )
+    db.add(new_form)
+    db.commit()
+    db.refresh(new_form)
+    return new_form
+
+
+@app.put("/forms/{form_id}", response_model=schemas.FormResponse)
+def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Depends(get_db)):
+    form = db.query(models.Form).filter(models.Form.id == form_id).first()
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    name = form_update.name.strip()
+    if name == "":
+        raise HTTPException(status_code=400, detail="Form name is required")
+
+    existing_form = (
+        db.query(models.Form)
+        .filter(models.Form.id != form_id)
+        .filter(func.lower(models.Form.name) == name.lower())
+        .first()
+    )
+    if existing_form is not None:
+        raise HTTPException(status_code=400, detail="Form name already exists")
+
+    form.name = name
+    form.description = form_update.description.strip() if form_update.description is not None else None
+    form.questions = form_update.questions
+    db.commit()
+    db.refresh(form)
+    return form
+
+
+@app.delete("/forms/{form_id}")
+def delete_form(form_id: int, db: Session = Depends(get_db)):
+    form = db.query(models.Form).filter(models.Form.id == form_id).first()
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+
+    db.delete(form)
+    db.commit()
+    return {"deleted": True}

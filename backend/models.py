@@ -14,7 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 
-from database import Base
+from backend.database import Base
 
 class CampaignEvaluationRule(Base):
     __tablename__ = "campaign_evaluation_rules"

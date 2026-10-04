@@ -212,6 +212,24 @@ button.forms-editor-nav-item {
 .forms-editor-actions {
   display: flex;
   gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.forms-list-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.forms-list-actions .btn {
+  font-size: 12px !important;
+  padding: 7px 8px !important;
+}
+
+.forms-danger-action {
+  color: #9a3412 !important;
 }
 
 .forms-page .btn:not(.forms-editor-icon-btn) {
@@ -232,7 +250,7 @@ button.forms-editor-nav-item {
 .forms-editor-workspace {
   display: grid;
   gap: clamp(10px, 1.1vw, 16px);
-  grid-template-columns: minmax(190px, 0.75fr) minmax(0, 1.65fr) minmax(240px, 0.9fr);
+  grid-template-columns: minmax(330px, 0.85fr) minmax(0, 1.55fr) minmax(240px, 0.85fr);
   height: calc(100vh - clamp(150px, 15vw, 178px));
   min-height: 0;
   min-width: 0;
@@ -263,16 +281,30 @@ button.forms-editor-nav-item {
   margin: 0;
 }
 
+.forms-editor-card-head span {
+  color: var(--color-text-muted);
+  display: block;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .forms-editor-list {
   padding: 10px;
 }
 
 .forms-editor-form-item,
 .forms-editor-template-item {
+  background: transparent;
   border: 1px solid transparent;
   border-radius: 12px;
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  font: inherit;
   margin-bottom: 8px;
   padding: 11px;
+  text-align: left;
+  width: 100%;
 }
 
 .forms-editor-form-item.active {
@@ -301,11 +333,11 @@ button.forms-editor-nav-item {
 
 .forms-editor-panel {
   display: grid;
-  gap: 14px;
+  gap: 0;
 }
 
 .forms-editor-form-title {
-  padding: 18px;
+  padding: 18px 18px 14px;
 }
 
 .forms-editor-form-title input {
@@ -329,7 +361,7 @@ button.forms-editor-nav-item {
 
 .forms-editor-section {
   border-top: 1px solid #eef0f6;
-  padding: 16px;
+  padding: 14px 16px 16px;
 }
 
 .forms-editor-section-head {
@@ -346,12 +378,19 @@ button.forms-editor-nav-item {
 
 .forms-editor-question {
   align-items: start;
+  background: var(--color-surface);
+  border: 1px solid transparent;
   border-radius: 13px;
+  color: inherit;
+  cursor: pointer;
   display: grid;
+  font: inherit;
   gap: 12px;
   grid-template-columns: 24px 1fr auto;
   margin-bottom: 10px;
   padding: 13px;
+  text-align: left;
+  width: 100%;
 }
 
 .forms-editor-question.active {
@@ -361,6 +400,12 @@ button.forms-editor-nav-item {
 
 .forms-editor-drag {
   color: var(--color-text-muted);
+  cursor: grab;
+  user-select: none;
+}
+
+.forms-editor-drag:active {
+  cursor: grabbing;
 }
 
 .forms-editor-q-main strong {
@@ -454,6 +499,30 @@ button.forms-editor-nav-item {
   color: #8a5524;
   font-size: 13px;
   line-height: 1.5;
+  padding: 12px;
+}
+
+.forms-editor-message {
+  background: #fff8ef;
+  border: 1px solid #f2dfc7;
+  border-radius: 999px;
+  color: #8a5524;
+  display: inline-flex;
+  font: 700 12px var(--font-sans);
+  margin: 10px auto 0;
+  padding: 7px 11px;
+  text-align: center;
+}
+
+.forms-editor-message.success {
+  background: #eefaf2;
+  border-color: #bfe7c8;
+  color: #24743c;
+}
+
+.forms-editor-state {
+  color: var(--color-text-secondary);
+  font: 650 13px var(--font-sans);
   padding: 12px;
 }
 
