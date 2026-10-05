@@ -14,7 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 
-from backend.database import Base
+from database import Base
 
 class CampaignEvaluationRule(Base):
     __tablename__ = "campaign_evaluation_rules"
@@ -166,6 +166,15 @@ class FilledForm(Base):
 
 class Form(Base):
     __tablename__ = "forms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    questions = Column(JSONB, nullable=False)
+
+
+class FormTemplate(Base):
+    __tablename__ = "form_templates"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)

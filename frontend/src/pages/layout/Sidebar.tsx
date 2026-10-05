@@ -12,10 +12,11 @@ import {
 } from 'lucide-react';
 import {
   formatUserName,
+  getDashboardPath,
   getSidebarUser,
   getUserInitials,
 } from './sidebar-user';
-export type SidebarPage = 'hr-home' | 'people' | 'campaigns' | 'forms';
+export type SidebarPage = 'hr-home' | 'employee-home' | 'people' | 'campaigns' | 'forms';
 type SidebarProps = {
   activePage: SidebarPage;
   isSidebarCollapsed: boolean;
@@ -30,6 +31,8 @@ export default function Sidebar({
   const sidebarUser = getSidebarUser();
   const sidebarUserName =
     sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
+  const dashboardPath = getDashboardPath();
+  const isDashboardActive = activePage === 'hr-home' || activePage === 'employee-home';
   return (
     <aside className="sidebar">
       <button
@@ -51,9 +54,9 @@ export default function Sidebar({
 
       <nav className="sidebar-nav" aria-label="Main navigation">
         <Link
-          className={activePage === 'hr-home' ? 'nav-item active' : 'nav-item'}
-          aria-current={activePage === 'hr-home' ? 'page' : undefined}
-          to="/hr-home"
+          className={isDashboardActive ? 'nav-item active' : 'nav-item'}
+          aria-current={isDashboardActive ? 'page' : undefined}
+          to={dashboardPath}
           style={{ textDecoration: 'none' }}
         >
           <LayoutDashboard size={17} />
@@ -112,7 +115,7 @@ export default function Sidebar({
         </div>
         <div className="user-info">
           <div className="user-name">{sidebarUserName}</div>
-          <div className="user-role">HR Admin</div>
+          <div className="user-role">{sidebarUser?.role_name ?? 'Employee'}</div>
         </div>
         <button
           className="user-menu-toggle"

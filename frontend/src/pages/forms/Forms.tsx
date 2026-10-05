@@ -4,13 +4,20 @@ import '../hr-home/hr-home.css';
 import './forms.css';
 import {
   createForm,
+  createFormTemplate,
   deleteForm,
+  deleteFormTemplate,
+  fetchFormTemplates,
   fetchForms,
   updateForm,
+  updateFormTemplate,
   type FormQuestion,
   type ReviewForm,
   type ReviewFormValues,
 } from './forms.api';
+
+type EditorMode = 'forms' | 'templates';
+type FormCreateSource = 'empty' | 'template';
 
 const emptyQuestion = (): FormQuestion => ({
   id: crypto.randomUUID(),
@@ -39,52 +46,15 @@ function normalizeForm(form: ReviewFormValues) {
   });
 }
 
-const templates: ReviewFormValues[] = [
-  {
-    name: 'Manager feedback',
-    description: 'Template for manager-to-employee feedback.',
-    questions: [
-      {
-        id: crypto.randomUUID(),
-        text: 'What did this employee do especially well?',
-        type: 'Text',
-        required: true,
-        helpText: '',
-      },
-      {
-        id: crypto.randomUUID(),
-        text: 'How would you rate goal achievement?',
-        type: 'Scale 1-5',
-        required: true,
-        helpText: 'Consider goals agreed at the beginning of the cycle.',
-      },
-    ],
-  },
-  {
-    name: 'Engagement survey',
-    description: 'Template for lightweight employee engagement checks.',
-    questions: [
-      {
-        id: crypto.randomUUID(),
-        text: 'How engaged do you feel at work?',
-        type: 'Scale 1-5',
-        required: true,
-        helpText: '',
-      },
-      {
-        id: crypto.randomUUID(),
-        text: 'What would improve your work experience?',
-        type: 'Text',
-        required: false,
-        helpText: '',
-      },
-    ],
-  },
-];
-
 export default function Forms() {
   const [forms, setForms] = useState<ReviewForm[]>([]);
-  const [selectedFormId, setSelectedFormId] = useState<number | null>(null);
+  const [templates, setTemplates] = useState<ReviewForm[]>([]);
+  const [editorMode, setEditorMode] = useState<EditorMode>('forms');
+  const [formCreateSource, setFormCreateSource] = useState<FormCreateSource>('empty');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createItemName, setCreateItemName] = useState('Untitled form');
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [draft, setDraft] = useState<ReviewFormValues>(emptyForm);
   const [savedDraft, setSavedDraft] = useState<ReviewFormValues>(emptyForm);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string>(
@@ -92,6 +62,7 @@ export default function Forms() {
   );
   const [draggedQuestionId, setDraggedQuestionId] = useState<string | null>(null);
   const [isLoadingForms, setIsLoadingForms] = useState(true);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
   const [isSavingForm, setIsSavingForm] = useState(false);
   const [formsMessage, setFormsMessage] = useState('');
   const selectedQuestion =
@@ -99,6 +70,10 @@ export default function Forms() {
     draft.questions[0] ??
     null;
   const hasUnsavedChanges = normalizeForm(draft) !== normalizeForm(savedDraft);
+  const activeItems = editorMode === 'forms' ? forms : templates;
+  const isLoadingActiveItems = editorMode === 'forms' ? isLoadingForms : isLoadingTemplates;
+  const activeItemLabel = editorMode === 'forms' ? 'Form' : 'Template';
+  const activeItemLabelLower = activeItemLabel.toLowerCase();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -106,7 +81,7 @@ export default function Forms() {
       .then((loadedForms) => {
         if (controller.signal.aborted) return;
         setForms(loadedForms);
-        if (loadedForms.length > 0) selectForm(loadedForms[0]);
+        if (loadedForms.length > 0) selectItem(loadedForms[0]);
       })
       .catch(() => {
         if (!controller.signal.aborted) setFormsMessage('Forms could not be loaded.');
@@ -117,29 +92,56 @@ export default function Forms() {
     return () => controller.abort();
   }, []);
 
-  function selectForm(form: ReviewForm) {
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchFormTemplates(controller.signal)
+      .then((loadedTemplates) => {
+        if (controller.signal.aborted) return;
+        setTemplates(loadedTemplates);
+        setSelectedTemplateId((current) => current ?? loadedTemplates[0]?.id ?? null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFormsMessage('Templates could not be loaded.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoadingTemplates(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  function selectItem(form: ReviewForm) {
     const nextDraft = {
       name: form.name,
       description: form.description,
       questions: form.questions.length > 0 ? form.questions : [emptyQuestion()],
     };
-    setSelectedFormId(form.id);
+    setSelectedItemId(form.id);
     setDraft(nextDraft);
     setSavedDraft(nextDraft);
     setSelectedQuestionId(nextDraft.questions[0].id);
     setFormsMessage('');
   }
 
-  function startNewForm(form: ReviewFormValues = emptyForm()) {
+  function startNewItem(form: ReviewFormValues = emptyForm()) {
     const nextForm = {
       ...form,
       questions: form.questions.length > 0 ? form.questions : [emptyQuestion()],
     };
-    setSelectedFormId(null);
+    setSelectedItemId(null);
     setDraft(nextForm);
     setSavedDraft(emptyForm());
     setSelectedQuestionId(nextForm.questions[0].id);
     setFormsMessage('');
+  }
+
+  function switchMode(mode: EditorMode) {
+    setEditorMode(mode);
+    const nextItems = mode === 'forms' ? forms : templates;
+    if (nextItems.length > 0) selectItem(nextItems[0]);
+    else startNewItem({
+      ...emptyForm(),
+      name: mode === 'forms' ? 'Untitled form' : 'Untitled template',
+    });
   }
 
   function discardChanges() {
@@ -163,15 +165,60 @@ export default function Forms() {
     return candidate;
   }
 
-  function startFromTemplate(template: ReviewFormValues) {
-    startNewForm({
+  function startFromTemplate(template: ReviewFormValues, name = getUniqueFormName(template.name)) {
+    if (editorMode !== 'forms') setEditorMode('forms');
+    startNewItem({
       ...template,
-      name: getUniqueFormName(template.name),
+      name,
       questions: template.questions.map((question) => ({
         ...question,
         id: crypto.randomUUID(),
       })),
     });
+  }
+
+  function openCreateModal() {
+    setCreateItemName(editorMode === 'forms' ? 'Untitled form' : 'Untitled template');
+    setFormCreateSource('empty');
+    setSelectedTemplateId((current) => current ?? templates[0]?.id ?? null);
+    setFormsMessage('');
+    setIsCreateModalOpen(true);
+  }
+
+  function closeCreateModal() {
+    setIsCreateModalOpen(false);
+  }
+
+  function confirmCreateItem() {
+    const name = createItemName.trim();
+    if (name === '') {
+      setFormsMessage(`${activeItemLabel} title is required.`);
+      return;
+    }
+
+    if (
+      activeItems.some((item) => item.name.trim().toLowerCase() === name.toLowerCase())
+    ) {
+      setFormsMessage(`${activeItemLabel} name already exists.`);
+      return;
+    }
+
+    if (editorMode === 'forms' && formCreateSource === 'template') {
+      const template = templates.find((item) => item.id === selectedTemplateId) ?? templates[0];
+      if (template === undefined) {
+        setFormsMessage('Choose a template first.');
+        return;
+      }
+      startFromTemplate(template, name);
+      closeCreateModal();
+      return;
+    }
+
+    startNewItem({
+      ...emptyForm(),
+      name,
+    });
+    closeCreateModal();
   }
 
   function updateDraftQuestion(questionId: string, patch: Partial<FormQuestion>) {
@@ -220,20 +267,20 @@ export default function Forms() {
     setDraggedQuestionId(null);
   }
 
-  async function saveForm() {
+  async function saveItem() {
     if (isSavingForm) return;
     if (draft.name.trim() === '') {
-      setFormsMessage('Form title is required.');
+      setFormsMessage(`${activeItemLabel} title is required.`);
       return;
     }
     if (
-      forms.some(
+      activeItems.some(
         (form) =>
-          form.id !== selectedFormId &&
+          form.id !== selectedItemId &&
           form.name.trim().toLowerCase() === draft.name.trim().toLowerCase(),
       )
     ) {
-      setFormsMessage('Form name already exists.');
+      setFormsMessage(`${activeItemLabel} name already exists.`);
       return;
     }
     if (draft.questions.some((question) => question.text.trim() === '')) {
@@ -254,16 +301,22 @@ export default function Forms() {
       })),
     };
     try {
-      const saved = selectedFormId === null
-        ? await createForm(payload)
-        : await updateForm(selectedFormId, payload);
-      setForms((current) => {
+      const saved = editorMode === 'forms'
+        ? selectedItemId === null
+          ? await createForm(payload)
+          : await updateForm(selectedItemId, payload)
+        : selectedItemId === null
+          ? await createFormTemplate(payload)
+          : await updateFormTemplate(selectedItemId, payload);
+      const updateCollection = (current: ReviewForm[]) => {
         const exists = current.some((form) => form.id === saved.id);
         return exists
           ? current.map((form) => (form.id === saved.id ? saved : form))
           : [saved, ...current];
-      });
-      selectForm(saved);
+      };
+      if (editorMode === 'forms') setForms(updateCollection);
+      else setTemplates(updateCollection);
+      selectItem(saved);
       setSelectedQuestionId(
         saved.questions.some((question) => question.id === questionIdBeforeSave)
           ? questionIdBeforeSave
@@ -274,27 +327,32 @@ export default function Forms() {
         description: saved.description,
         questions: saved.questions,
       });
-      setFormsMessage('Form saved successfully.');
+      setFormsMessage(`${activeItemLabel} saved successfully.`);
     } catch (error) {
-      setFormsMessage(error instanceof Error ? error.message : 'Form could not be saved.');
+      setFormsMessage(error instanceof Error ? error.message : `${activeItemLabel} could not be saved.`);
     } finally {
       setIsSavingForm(false);
     }
   }
 
-  async function removeForm() {
-    if (selectedFormId === null || isSavingForm) return;
+  async function removeItem() {
+    if (selectedItemId === null || isSavingForm) return;
     setIsSavingForm(true);
     setFormsMessage('');
     try {
-      await deleteForm(selectedFormId);
-      const remaining = forms.filter((form) => form.id !== selectedFormId);
-      setForms(remaining);
-      if (remaining.length > 0) selectForm(remaining[0]);
-      else startNewForm();
-      setFormsMessage('Form deleted.');
+      if (editorMode === 'forms') await deleteForm(selectedItemId);
+      else await deleteFormTemplate(selectedItemId);
+      const remaining = activeItems.filter((form) => form.id !== selectedItemId);
+      if (editorMode === 'forms') setForms(remaining);
+      else setTemplates(remaining);
+      if (remaining.length > 0) selectItem(remaining[0]);
+      else startNewItem({
+        ...emptyForm(),
+        name: editorMode === 'forms' ? 'Untitled form' : 'Untitled template',
+      });
+      setFormsMessage(`${activeItemLabel} deleted.`);
     } catch (error) {
-      setFormsMessage(error instanceof Error ? error.message : 'Form could not be deleted.');
+      setFormsMessage(error instanceof Error ? error.message : `${activeItemLabel} could not be deleted.`);
     } finally {
       setIsSavingForm(false);
     }
@@ -305,25 +363,24 @@ export default function Forms() {
       <div className="main-content forms-editor-main">
         <section className="forms-editor-hello">
           <h1>Form editor</h1>
-          <p>Create reusable questionnaires only. Campaign assignment happens elsewhere.</p>
+          <p>Create reusable questionnaires and templates. Campaign assignment happens elsewhere.</p>
         </section>
 
         <section className="forms-editor-page-head">
           <div className="forms-editor-title">
-            <h2>Questionnaire builder</h2>
-            <p>Build reusable questions and save them to the database.</p>
+            <h2>{activeItemLabel} builder</h2>
+            <p>Build reusable questions and save the selected {activeItemLabelLower} to the database.</p>
           </div>
         </section>
 
         <section className="forms-editor-workspace">
           <aside className="card forms-editor-card forms-list-panel">
             <div className="forms-editor-card-head">
-              <h3>Forms</h3>
               <div className="forms-list-actions">
                 <button
                   className="btn btn-primary"
                   type="button"
-                  onClick={saveForm}
+                  onClick={saveItem}
                   disabled={isSavingForm || !hasUnsavedChanges}
                 >
                   {isSavingForm ? 'Saving...' : 'Save'}
@@ -336,56 +393,138 @@ export default function Forms() {
                 >
                   Discard
                 </button>
-                <button className="btn btn-secondary" type="button" onClick={() => startNewForm()}>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={openCreateModal}
+                >
                   Create
                 </button>
                 <button
                   className="btn btn-secondary forms-danger-action"
                   type="button"
-                  onClick={removeForm}
-                  disabled={selectedFormId === null || isSavingForm}
+                  onClick={removeItem}
+                  disabled={selectedItemId === null || isSavingForm}
                 >
                   Delete
                 </button>
               </div>
             </div>
+            <div className="forms-editor-mode-switch" role="tablist" aria-label="Editor mode">
+              <button
+                className={editorMode === 'forms' ? 'active' : ''}
+                type="button"
+                onClick={() => switchMode('forms')}
+              >
+                Forms
+              </button>
+              <button
+                className={editorMode === 'templates' ? 'active' : ''}
+                type="button"
+                onClick={() => switchMode('templates')}
+              >
+                Templates
+              </button>
+            </div>
             <div className="forms-editor-list">
-              {isLoadingForms && <div className="forms-editor-state">Loading forms...</div>}
-              {!isLoadingForms && forms.length === 0 && (
-                <div className="forms-editor-state">No forms have been added yet.</div>
+              {isLoadingActiveItems && (
+                <div className="forms-editor-state">Loading {activeItemLabelLower}s...</div>
               )}
-              {forms.map((form) => (
+              {!isLoadingActiveItems && activeItems.length === 0 && (
+                <div className="forms-editor-state">No {activeItemLabelLower}s have been added yet.</div>
+              )}
+              {activeItems.map((form) => (
                 <button
-                  className={`forms-editor-form-item${selectedFormId === form.id ? ' active' : ''}`}
+                  className={`forms-editor-form-item${selectedItemId === form.id ? ' active' : ''}`}
                   key={form.id}
                   type="button"
-                  onClick={() => selectForm(form)}
+                  onClick={() => selectItem(form)}
                 >
                   <strong>{form.name}</strong>
                   <span>{form.questions.length} questions</span>
                 </button>
               ))}
             </div>
-            <div className="forms-editor-card-head">
-              <div>
-                <h3>Templates</h3>
-                <span>Reusable starting points for new forms.</span>
+          </aside>
+
+          {isCreateModalOpen && (
+            <div className="forms-editor-modal-backdrop" role="presentation">
+              <div className="forms-editor-modal" role="dialog" aria-modal="true" aria-labelledby="forms-create-title">
+                <div className="forms-editor-modal-head">
+                  <div>
+                    <h3 id="forms-create-title">Create {activeItemLabelLower}</h3>
+                    <p>Name the new {activeItemLabelLower} before editing its questions.</p>
+                  </div>
+                  <button className="forms-editor-modal-close" type="button" onClick={closeCreateModal}>
+                    ×
+                  </button>
+                </div>
+                <div className="forms-editor-modal-body">
+                  <label className="form-field forms-editor-field" htmlFor="forms-create-name">
+                    <span className="form-label">Name</span>
+                    <input
+                      id="forms-create-name"
+                      className="form-control"
+                      value={createItemName}
+                      onChange={(event) => setCreateItemName(event.target.value)}
+                      autoFocus
+                    />
+                  </label>
+                  {editorMode === 'forms' && (
+                    <div className="forms-editor-create-options">
+                      <div className="forms-editor-create-tabs" aria-label="Create form source">
+                        <button
+                          className={formCreateSource === 'empty' ? 'active' : ''}
+                          type="button"
+                          onClick={() => setFormCreateSource('empty')}
+                        >
+                          Empty form
+                        </button>
+                        <button
+                          className={formCreateSource === 'template' ? 'active' : ''}
+                          type="button"
+                          onClick={() => setFormCreateSource('template')}
+                          disabled={templates.length === 0 && !isLoadingTemplates}
+                        >
+                          From template
+                        </button>
+                      </div>
+                      {formCreateSource === 'template' && (
+                        <select
+                          className="form-control forms-editor-template-select"
+                          aria-label="Choose a template"
+                          value={selectedTemplateId ?? ''}
+                          onChange={(event) => setSelectedTemplateId(Number(event.target.value))}
+                          disabled={isLoadingTemplates || templates.length === 0}
+                        >
+                          {isLoadingTemplates && <option value="">Loading templates...</option>}
+                          {!isLoadingTemplates && templates.length === 0 && <option value="">No templates</option>}
+                          {templates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                  {formsMessage !== '' && (
+                    <div className="forms-editor-modal-message">
+                      {formsMessage}
+                    </div>
+                  )}
+                </div>
+                <div className="forms-editor-modal-actions">
+                  <button className="btn btn-secondary" type="button" onClick={closeCreateModal}>
+                    Cancel
+                  </button>
+                  <button className="btn btn-primary" type="button" onClick={confirmCreateItem}>
+                    Create
+                  </button>
+                </div>
               </div>
             </div>
-            <div className="forms-editor-list">
-              {templates.map((template) => (
-                <button
-                  className="forms-editor-template-item"
-                  key={template.name}
-                  type="button"
-                  onClick={() => startFromTemplate(template)}
-                >
-                  <strong>{template.name}</strong>
-                  <span>Use and customize</span>
-                </button>
-              ))}
-            </div>
-          </aside>
+          )}
 
           <section className="card forms-editor-card forms-editor-panel">
             <div className="forms-editor-form-title">
@@ -510,9 +649,6 @@ export default function Forms() {
                       updateDraftQuestion(selectedQuestion.id, { helpText: event.target.value })
                     }
                   />
-                </div>
-                <div className="forms-editor-note">
-                  Saved questions are stored in the database as the form's question JSON.
                 </div>
               </div>
             ) : (

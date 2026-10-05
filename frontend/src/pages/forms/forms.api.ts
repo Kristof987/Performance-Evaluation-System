@@ -62,8 +62,8 @@ function mapForm(form: FormResponse): ReviewForm {
   };
 }
 
-async function requestForms<T>(path: string, options: RequestInit, fallback: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}/forms${path}`, options);
+async function requestApi<T>(path: string, options: RequestInit, fallback: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, options);
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const detail =
@@ -74,14 +74,55 @@ async function requestForms<T>(path: string, options: RequestInit, fallback: str
 }
 
 export async function fetchForms(signal: AbortSignal): Promise<ReviewForm[]> {
-  const forms = await requestForms<FormResponse[]>('', { signal }, 'Forms could not be loaded.');
+  const forms = await requestApi<FormResponse[]>('/forms', { signal }, 'Forms could not be loaded.');
   return forms.map(mapForm);
+}
+
+export async function fetchFormTemplates(signal: AbortSignal): Promise<ReviewForm[]> {
+  const templates = await requestApi<FormResponse[]>(
+    '/form-templates',
+    { signal },
+    'Templates could not be loaded.',
+  );
+  return templates.map(mapForm);
+}
+
+export async function createFormTemplate(form: ReviewFormValues): Promise<ReviewForm> {
+  return mapForm(
+    await requestApi<FormResponse>(
+      '/form-templates',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      },
+      'Template could not be saved.',
+    ),
+  );
+}
+
+export async function updateFormTemplate(id: number, form: ReviewFormValues): Promise<ReviewForm> {
+  return mapForm(
+    await requestApi<FormResponse>(
+      `/form-templates/${id}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      },
+      'Template could not be updated.',
+    ),
+  );
+}
+
+export async function deleteFormTemplate(id: number): Promise<void> {
+  await requestApi(`/form-templates/${id}`, { method: 'DELETE' }, 'Template could not be deleted.');
 }
 
 export async function createForm(form: ReviewFormValues): Promise<ReviewForm> {
   return mapForm(
-    await requestForms<FormResponse>(
-      '',
+    await requestApi<FormResponse>(
+      '/forms',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -94,8 +135,8 @@ export async function createForm(form: ReviewFormValues): Promise<ReviewForm> {
 
 export async function updateForm(id: number, form: ReviewFormValues): Promise<ReviewForm> {
   return mapForm(
-    await requestForms<FormResponse>(
-      `/${id}`,
+    await requestApi<FormResponse>(
+      `/forms/${id}`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -107,5 +148,5 @@ export async function updateForm(id: number, form: ReviewFormValues): Promise<Re
 }
 
 export async function deleteForm(id: number): Promise<void> {
-  await requestForms(`/${id}`, { method: 'DELETE' }, 'Form could not be deleted.');
+  await requestApi(`/forms/${id}`, { method: 'DELETE' }, 'Form could not be deleted.');
 }

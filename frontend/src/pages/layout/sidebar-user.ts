@@ -1,4 +1,13 @@
-type SidebarUser = { username: string; profile_image_url: string | null };
+type SidebarUser = {
+  username: string;
+  profile_image_url: string | null;
+  role_name: string | null;
+};
+
+function normalizeRole(roleName: string | null) {
+  return roleName?.trim().toLowerCase() ?? '';
+}
+
 export function getSidebarUser(): SidebarUser | null {
   try {
     const stored = sessionStorage.getItem('loggedInUser');
@@ -18,10 +27,24 @@ export function getSidebarUser(): SidebarUser | null {
         typeof user.profile_image_url === 'string'
           ? user.profile_image_url
           : null,
+      role_name:
+        'role_name' in user && typeof user.role_name === 'string'
+          ? user.role_name
+          : null,
     };
   } catch {
     return null;
   }
+}
+
+export function isHrOrManagerRole(roleName: string | null) {
+  const role = normalizeRole(roleName);
+  return role === 'hr' || role === 'manager' || role.includes('manager');
+}
+
+export function getDashboardPath() {
+  const user = getSidebarUser();
+  return isHrOrManagerRole(user?.role_name ?? null) ? '/hr-home' : '/employee-home';
 }
 
 export function formatUserName(username: string) {

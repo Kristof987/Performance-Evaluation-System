@@ -2,6 +2,7 @@ import './Login.css';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { ChangeEvent, SubmitEvent } from 'react';
+import { isHrOrManagerRole } from '../layout/sidebar-user';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -43,7 +44,7 @@ function Login() {
     const loggedInUser = await response.json();
     console.log('Login successful', loggedInUser);
     sessionStorage.setItem('loggedInUser', JSON.stringify(loggedInUser));
-    navigate('/hr-home', { replace: true });
+    navigate(isHrOrManagerRole(loggedInUser.role_name ?? null) ? '/hr-home' : '/employee-home', { replace: true });
   }
 
   return (

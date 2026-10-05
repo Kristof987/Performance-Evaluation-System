@@ -7,9 +7,9 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.database import engine, Base, SessionLocal
-import backend.database.models as models
-import backend.database.schemas as schemas
+from database import engine, Base, SessionLocal
+import models
+import schemas
 
 #Base.metadata.create_all(bind=engine)
 
@@ -60,21 +60,27 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/login", response_model=schemas.UserResponse)
 def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
-    user = (
-        db.query(models.User)
+    result = (
+        db.query(models.User, models.CompanyRole.name.label("role_name"))
+        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
         .filter(models.User.username == user_login.username.strip())
         .filter(models.User.is_active.is_(True))
         .first()
     )
 
-    if user is None:
+    if result is None:
         raise HTTPException(status_code=401, detail="Nem letezo vagy inaktiv user")
+
+    user, role_name = result
 
     user.last_login = func.now()
     db.commit()
     db.refresh(user)
 
-    return user
+    return {
+        **user.__dict__,
+        "role_name": role_name,
+    }
 
 
 @app.get("/people", response_model=schemas.PeopleResponse)
@@ -855,29 +861,45 @@ def get_forms(db: Session = Depends(get_db)):
     return db.query(models.Form).order_by(models.Form.id.desc()).all()
 
 
+@app.get("/form-templates", response_model=list[schemas.FormTemplateResponse])
+def get_form_templates(db: Session = Depends(get_db)):
+    return db.query(models.FormTemplate).order_by(models.FormTemplate.id.asc()).all()
+
+
+def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, item_id: int | None = None):
+    name = payload.name.strip()
+    if name == "":
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    existing_query = db.query(model).filter(func.lower(model.name) == name.lower())
+    if item_id is not None:
+        existing_query = existing_query.filter(model.id != item_id)
+    if existing_query.first() is not None:
+        raise HTTPException(status_code=400, detail="Name already exists")
+
+    return {
+        "name": name,
+        "description": payload.description.strip() if payload.description is not None else None,
+        "questions": payload.questions,
+    }
+
+
 @app.post("/forms", response_model=schemas.FormResponse)
 def create_form(form: schemas.FormCreate, db: Session = Depends(get_db)):
-    name = form.name.strip()
-    if name == "":
-        raise HTTPException(status_code=400, detail="Form name is required")
-
-    existing_form = (
-        db.query(models.Form)
-        .filter(func.lower(models.Form.name) == name.lower())
-        .first()
-    )
-    if existing_form is not None:
-        raise HTTPException(status_code=400, detail="Form name already exists")
-
-    new_form = models.Form(
-        name=name,
-        description=form.description.strip() if form.description is not None else None,
-        questions=form.questions,
-    )
+    new_form = models.Form(**validate_form_like_payload(form, models.Form, db))
     db.add(new_form)
     db.commit()
     db.refresh(new_form)
     return new_form
+
+
+@app.post("/form-templates", response_model=schemas.FormTemplateResponse)
+def create_form_template(template: schemas.FormCreate, db: Session = Depends(get_db)):
+    new_template = models.FormTemplate(**validate_form_like_payload(template, models.FormTemplate, db))
+    db.add(new_template)
+    db.commit()
+    db.refresh(new_template)
+    return new_template
 
 
 @app.put("/forms/{form_id}", response_model=schemas.FormResponse)
@@ -885,25 +907,27 @@ def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Dep
     form = db.query(models.Form).filter(models.Form.id == form_id).first()
     if form is None:
         raise HTTPException(status_code=404, detail="Form not found")
-    name = form_update.name.strip()
-    if name == "":
-        raise HTTPException(status_code=400, detail="Form name is required")
-
-    existing_form = (
-        db.query(models.Form)
-        .filter(models.Form.id != form_id)
-        .filter(func.lower(models.Form.name) == name.lower())
-        .first()
-    )
-    if existing_form is not None:
-        raise HTTPException(status_code=400, detail="Form name already exists")
-
-    form.name = name
-    form.description = form_update.description.strip() if form_update.description is not None else None
-    form.questions = form_update.questions
+    values = validate_form_like_payload(form_update, models.Form, db, form_id)
+    form.name = values["name"]
+    form.description = values["description"]
+    form.questions = values["questions"]
     db.commit()
     db.refresh(form)
     return form
+
+
+@app.put("/form-templates/{template_id}", response_model=schemas.FormTemplateResponse)
+def update_form_template(template_id: int, template_update: schemas.FormUpdate, db: Session = Depends(get_db)):
+    template = db.query(models.FormTemplate).filter(models.FormTemplate.id == template_id).first()
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    values = validate_form_like_payload(template_update, models.FormTemplate, db, template_id)
+    template.name = values["name"]
+    template.description = values["description"]
+    template.questions = values["questions"]
+    db.commit()
+    db.refresh(template)
+    return template
 
 
 @app.delete("/forms/{form_id}")
@@ -913,5 +937,16 @@ def delete_form(form_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Form not found")
 
     db.delete(form)
+    db.commit()
+    return {"deleted": True}
+
+
+@app.delete("/form-templates/{template_id}")
+def delete_form_template(template_id: int, db: Session = Depends(get_db)):
+    template = db.query(models.FormTemplate).filter(models.FormTemplate.id == template_id).first()
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    db.delete(template)
     db.commit()
     return {"deleted": True}

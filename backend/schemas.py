@@ -160,6 +160,7 @@ class UserResponse(BaseModel):
     username: str
     email: EmailStr
     company_role_id: int
+    role_name: str | None = None
     system_role_id: int
     profile_image_url: str | None
     is_active: bool
@@ -337,6 +338,17 @@ class FormUpdate(BaseModel):
 
 
 class FormResponse(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    questions: list[dict[str, Any]]
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class FormTemplateResponse(BaseModel):
     id: int
     name: str
     description: str | None
