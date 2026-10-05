@@ -15,8 +15,9 @@ import {
   getDashboardPath,
   getSidebarUser,
   getUserInitials,
+  isHrOrManagerRole,
 } from './sidebar-user';
-export type SidebarPage = 'hr-home' | 'employee-home' | 'people' | 'campaigns' | 'forms';
+export type SidebarPage = 'hr-home' | 'employee-home' | 'people' | 'campaigns' | 'forms' | 'results';
 type SidebarProps = {
   activePage: SidebarPage;
   isSidebarCollapsed: boolean;
@@ -33,6 +34,7 @@ export default function Sidebar({
     sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
   const dashboardPath = getDashboardPath();
   const isDashboardActive = activePage === 'hr-home' || activePage === 'employee-home';
+  const isHrOrManager = isHrOrManagerRole(sidebarUser?.role_name ?? null);
   return (
     <aside className="sidebar">
       <button
@@ -62,43 +64,57 @@ export default function Sidebar({
           <LayoutDashboard size={17} />
           <span className="nav-item-label">Dashboard</span>
         </Link>
-        <Link
-          className={activePage === 'people' ? 'nav-item active' : 'nav-item'}
-          aria-current={activePage === 'people' ? 'page' : undefined}
-          to="/people"
-          style={{ textDecoration: 'none' }}
-        >
-          <Users size={17} />
-          <span className="nav-item-label">People</span>
-        </Link>
-        <Link
-          className={
-            activePage === 'campaigns' ? 'nav-item active' : 'nav-item'
-          }
-          aria-current={activePage === 'campaigns' ? 'page' : undefined}
-          to="/campaigns"
-          style={{ textDecoration: 'none' }}
-        >
-          <ClipboardPen size={17} />
-          <span className="nav-item-label">Campaigns</span>
-        </Link>
-        <Link
-          className={activePage === 'forms' ? 'nav-item active' : 'nav-item'}
-          aria-current={activePage === 'forms' ? 'page' : undefined}
-          to="/forms"
-          style={{ textDecoration: 'none' }}
-        >
-          <Files size={17} />
-          <span className="nav-item-label">Forms</span>
-        </Link>
-        <div className="nav-item">
-          <ChartNoAxesCombined size={17} />
-          <span className="nav-item-label">Reports</span>
-        </div>
-        <div className="nav-item">
-          <Settings size={17} />
-          <span className="nav-item-label">Settings</span>
-        </div>
+        {isHrOrManager ? (
+          <>
+            <Link
+              className={activePage === 'people' ? 'nav-item active' : 'nav-item'}
+              aria-current={activePage === 'people' ? 'page' : undefined}
+              to="/people"
+              style={{ textDecoration: 'none' }}
+            >
+              <Users size={17} />
+              <span className="nav-item-label">People</span>
+            </Link>
+            <Link
+              className={
+                activePage === 'campaigns' ? 'nav-item active' : 'nav-item'
+              }
+              aria-current={activePage === 'campaigns' ? 'page' : undefined}
+              to="/campaigns"
+              style={{ textDecoration: 'none' }}
+            >
+              <ClipboardPen size={17} />
+              <span className="nav-item-label">Campaigns</span>
+            </Link>
+            <Link
+              className={activePage === 'forms' ? 'nav-item active' : 'nav-item'}
+              aria-current={activePage === 'forms' ? 'page' : undefined}
+              to="/forms"
+              style={{ textDecoration: 'none' }}
+            >
+              <Files size={17} />
+              <span className="nav-item-label">Forms</span>
+            </Link>
+            <div className="nav-item">
+              <ChartNoAxesCombined size={17} />
+              <span className="nav-item-label">Reports</span>
+            </div>
+            <div className="nav-item">
+              <Settings size={17} />
+              <span className="nav-item-label">Settings</span>
+            </div>
+          </>
+        ) : (
+          <Link
+            className={activePage === 'results' ? 'nav-item active' : 'nav-item'}
+            aria-current={activePage === 'results' ? 'page' : undefined}
+            to="/results"
+            style={{ textDecoration: 'none' }}
+          >
+            <ChartNoAxesCombined size={17} />
+            <span className="nav-item-label">Results</span>
+          </Link>
+        )}
       </nav>
 
       <div className="sidebar-spacer" />
