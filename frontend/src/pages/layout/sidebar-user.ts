@@ -1,4 +1,5 @@
 type SidebarUser = {
+  id: number;
   username: string;
   profile_image_url: string | null;
   role_name: string | null;
@@ -17,10 +18,13 @@ export function getSidebarUser(): SidebarUser | null {
       typeof user !== 'object' ||
       user === null ||
       !('username' in user) ||
-      typeof user.username !== 'string'
+      typeof user.username !== 'string' ||
+      !('id' in user) ||
+      typeof user.id !== 'number'
     )
       return null;
     return {
+      id: user.id,
       username: user.username,
       profile_image_url:
         'profile_image_url' in user &&

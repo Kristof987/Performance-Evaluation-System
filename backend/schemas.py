@@ -173,6 +173,23 @@ class UserResponse(BaseModel):
     }
 
 
+class AssignedEvaluationResponse(BaseModel):
+    id: int
+    campaign_id: int
+    campaign_name: str
+    form_id: int
+    form_name: str
+    form_description: str | None
+    evaluatee_id: int
+    evaluatee_name: str
+    status_name: str
+    due_date: date | None
+    finish_date: date | None
+    question_count: int
+    answered_count: int
+    created_at: datetime
+
+
 class PeopleGroupResponse(BaseModel):
     id: int
     name: str

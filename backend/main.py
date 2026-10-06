@@ -610,6 +610,64 @@ def get_campaign_participant_count(campaign_id: int, db: Session):
     return len(evaluator_ids | evaluatee_ids)
 
 
+@app.get("/users/{user_id}/assigned-evaluations", response_model=list[schemas.AssignedEvaluationResponse])
+def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == user_id)
+        .filter(models.User.is_active.is_(True))
+        .first()
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    rows = (
+        db.query(
+            models.FilledForm,
+            models.Campaign,
+            models.Form,
+            models.FormStatus,
+            models.User,
+        )
+        .join(models.Campaign, models.Campaign.id == models.FilledForm.campaign_id)
+        .join(models.Form, models.Form.id == models.FilledForm.form_id)
+        .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
+        .join(models.User, models.User.id == models.FilledForm.evaluatee_id)
+        .filter(models.FilledForm.evaluator_id == user_id)
+        .order_by(
+            models.FilledForm.finish_date.isnot(None).asc(),
+            models.Campaign.end_date.asc().nullslast(),
+            models.FilledForm.created_at.desc(),
+        )
+        .all()
+    )
+
+    evaluations = []
+    for filled_form, campaign, form, status, evaluatee in rows:
+        questions = form.questions if isinstance(form.questions, list) else []
+        answers = filled_form.answers if isinstance(filled_form.answers, list) else []
+        answered_count = sum(1 for answer in answers if isinstance(answer, dict) and len(answer) > 0)
+
+        evaluations.append({
+            "id": filled_form.id,
+            "campaign_id": campaign.id,
+            "campaign_name": campaign.name,
+            "form_id": form.id,
+            "form_name": form.name,
+            "form_description": form.description,
+            "evaluatee_id": evaluatee.id,
+            "evaluatee_name": evaluatee.username,
+            "status_name": status.name,
+            "due_date": campaign.end_date,
+            "finish_date": filled_form.finish_date,
+            "question_count": len(questions),
+            "answered_count": min(answered_count, len(questions)) if len(questions) > 0 else answered_count,
+            "created_at": filled_form.created_at,
+        })
+
+    return evaluations
+
+
 @app.get("/dashboard", response_model=schemas.DashboardResponse)
 def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = Depends(get_db)):
     campaigns = (
