@@ -1,4 +1,13 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
+import {
+  Calendar,
+  ClipboardCheck,
+  MessageCircle,
+  Target,
+  TrendingUp,
+} from 'lucide-react';
+import reviewEmptyIcon from '../../assets/review-empty-icon.png';
 import AppLayout from '../layout/AppLayout';
 import { formatUserName, getSidebarUser } from '../layout/sidebar-user';
 import { fetchAssignedEvaluations, type AssignedEvaluation } from './employee-home.api';
@@ -6,10 +15,25 @@ import './employee-home.css';
 
 type WorkFilter = 'open' | 'submitted' | 'all';
 
-const activity = [
-  ['Self-assessment draft saved', '12 minutes ago'],
-  ['Peer feedback request received', 'Yesterday'],
-  ['Mid-Year cycle opened', 'May 10'],
+const reviewHighlights = [
+  {
+    title: 'Top strengths',
+    icon: TrendingUp,
+    items: [
+      'Clear ownership and follow-through',
+      'Helpful communication with teammates',
+      'Reliable delivery on committed work',
+    ],
+  },
+  {
+    title: 'Development focus',
+    icon: Target,
+    items: [
+      'Share progress earlier when risks appear',
+      'Delegate smaller tasks more confidently',
+      'Make technical decisions easier to follow',
+    ],
+  },
 ];
 
 function formatShortDate(value: string | null) {
@@ -38,6 +62,12 @@ function getEvaluationStatus(evaluation: AssignedEvaluation) {
   return evaluation.statusName || 'Not started';
 }
 
+function getEvaluationAction(evaluation: AssignedEvaluation) {
+  if (evaluation.finishDate !== null) return 'View answers';
+  if (getEvaluationProgress(evaluation) > 0) return 'Continue';
+  return 'Start';
+}
+
 function getEvaluationMeta(evaluation: AssignedEvaluation) {
   const questionLabel = evaluation.questionCount === 1 ? 'question' : 'questions';
   return `${evaluation.campaignName} • about ${formatUserName(evaluation.evaluateeName)} • ${evaluation.questionCount} ${questionLabel}`;
@@ -45,7 +75,6 @@ function getEvaluationMeta(evaluation: AssignedEvaluation) {
 
 export default function EmployeeHome() {
   const user = getSidebarUser();
-  const userName = user === null ? 'Employee' : formatUserName(user.username);
   const [assignedEvaluations, setAssignedEvaluations] = useState<AssignedEvaluation[]>([]);
   const [workFilter, setWorkFilter] = useState<WorkFilter>('open');
   const [isLoadingWork, setIsLoadingWork] = useState(true);
@@ -91,147 +120,145 @@ export default function EmployeeHome() {
     assignedEvaluations.length === 0
       ? 0
       : Math.round((submittedEvaluations.length / assignedEvaluations.length) * 100);
-  const cycleTitle = isLoadingWork
-    ? 'Loading assigned questionnaires'
-    : currentEvaluation?.campaignName ?? 'No assigned questionnaires';
-  const cycleDescription =
-    currentEvaluation === null
-      ? 'There are no questionnaires assigned to you yet.'
-      : 'Complete the forms assigned to you. Results become visible after manager approval.';
+  const hasActiveReviewTasks = openEvaluations.length > 0;
+  const cycleName = currentEvaluation?.campaignName ?? 'Next review cycle';
+  const nextCycleDate = currentEvaluation?.dueDate ?? '2026-11-01';
 
   return (
     <AppLayout activePage="employee-home" pageClassName="employee-home-page">
       <div className="main-content employee-home-main">
         <div className="topbar employee-topbar">
-          <div className="greeting">
-            <div className="greeting-title">Good morning, {userName}</div>
-            <div className="greeting-date">
-              You have {openEvaluations.length} open review {openEvaluations.length === 1 ? 'action' : 'actions'}.
-            </div>
-          </div>
-          <div className="button-group">
-            <button className="icon-button" type="button" aria-label="Notifications">
-              <span />
-            </button>
-            <button className="icon-button" type="button" aria-label="More actions">
-              <span />
-            </button>
+          <div className="employee-dashboard-heading">
+            <h1>Dashboard</h1>
           </div>
         </div>
 
-        <section className="card employee-cycle-card">
-          <div className="employee-cycle-copy">
-            <div className="employee-kicker">Current cycle</div>
-            <h1>{cycleTitle}</h1>
-            <p>
-              {cycleDescription}
-            </p>
-          </div>
-          <div className="employee-cycle-metrics">
-            <div className="employee-cycle-metric">
-              <span>Open</span>
-              <strong>{openEvaluations.length}</strong>
-              <small>To complete</small>
+        <section className={`card employee-review-panel ${!isLoadingWork && (!hasActiveReviewTasks || workError !== '') ? 'is-empty' : ''}`}>
+          {isLoadingWork ? (
+            <div className="employee-review-empty">
+              <div className="employee-empty-icon" aria-hidden="true">
+                <img src={reviewEmptyIcon} alt="" />
+              </div>
+              <div className="employee-empty-copy">
+                <span className="employee-task-pill">Loading tasks</span>
+                <h2>Loading assigned review tasks</h2>
+                <p>Questionnaires assigned to you will appear here with their due date and status.</p>
+              </div>
             </div>
-            <div className="employee-cycle-metric warning">
-              <span>Submitted</span>
-              <strong>{submittedEvaluations.length}/{assignedEvaluations.length}</strong>
-              <small>Finished</small>
+          ) : !hasActiveReviewTasks || workError !== '' ? (
+            <div className="employee-review-empty">
+              <div className="employee-empty-icon" aria-hidden="true">
+                <img src={reviewEmptyIcon} alt="" />
+              </div>
+              <div className="employee-empty-copy">
+                <span className="employee-task-pill">0 open tasks</span>
+                <h2>There is currently no form to complete.</h2>
+                <p>
+                  There is no form you need to fill out right now. When a review task is assigned, it will appear here with its due date and status.
+                </p>
+                <div className="employee-next-cycle">
+                  <Calendar size={20} />
+                  <span>Next review cycle:</span>
+                  <strong>{formatShortDate(nextCycleDate)}</strong>
+                </div>
+                <div className="employee-panel-actions">
+                  <Link className="btn btn-primary" to="/results">View previous reviews</Link>
+                  <button className="btn btn-secondary" type="button">
+                    <MessageCircle size={17} />
+                    Have a question for HR?
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="employee-cycle-metric muted">
-              <span>Progress</span>
-              <strong>{completionRate}%</strong>
-              <small>{currentEvaluation?.dueDate === null ? 'No due date' : `Due ${formatShortDate(currentEvaluation?.dueDate ?? null)}`}</small>
-            </div>
-          </div>
+          ) : (
+            <>
+              <div className="employee-review-summary">
+                <div>
+                  <span className="employee-task-pill">{cycleName} · Open</span>
+                  <h2>You have {openEvaluations.length} open review {openEvaluations.length === 1 ? 'task' : 'tasks'}</h2>
+                  <div className="employee-next-cycle">
+                    <Calendar size={18} />
+                    <span>Cycle closes:</span>
+                    <strong>{formatShortDate(currentEvaluation?.dueDate ?? null)}</strong>
+                  </div>
+                </div>
+                <div className="employee-review-progress">
+                  <span>Submitted</span>
+                  <strong>{submittedEvaluations.length} / {assignedEvaluations.length}</strong>
+                  <div className="employee-progress-line">
+                    <span style={{ width: `${completionRate}%` }} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="employee-work-table">
+                {visibleEvaluations.map((evaluation) => {
+                  const tone = getEvaluationTone(evaluation);
+                  return (
+                    <div className="employee-work-row" key={evaluation.id}>
+                      <div className="employee-work-icon" aria-hidden="true">
+                        <ClipboardCheck size={17} />
+                      </div>
+                      <div className="employee-work-task">
+                        <strong>{evaluation.formName}</strong>
+                        <span>{getEvaluationMeta(evaluation)}</span>
+                      </div>
+                      <div className="employee-work-due">
+                        <span>Due</span>
+                        <strong>{formatShortDate(evaluation.dueDate)}</strong>
+                      </div>
+                      <span className={`employee-status ${tone}`}>{getEvaluationStatus(evaluation)}</span>
+                      <button className={tone === 'progress' ? 'btn btn-primary employee-row-action' : 'btn btn-secondary employee-row-action'} type="button">
+                        {getEvaluationAction(evaluation)}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button className="employee-hr-question" type="button">
+                <MessageCircle size={15} />
+                Have a question for HR?
+              </button>
+
+              <div className="employee-filter-tabs" aria-label="Assigned work filter">
+                <button className={workFilter === 'open' ? 'active' : ''} type="button" onClick={() => setWorkFilter('open')}>Open</button>
+                <button className={workFilter === 'submitted' ? 'active' : ''} type="button" onClick={() => setWorkFilter('submitted')}>Submitted</button>
+                <button className={workFilter === 'all' ? 'active' : ''} type="button" onClick={() => setWorkFilter('all')}>All</button>
+              </div>
+            </>
+          )}
         </section>
 
-        <div className="employee-section-row">
-          <div className="employee-section-title">
-            <h2>Assigned work</h2>
-            <p>Questionnaires assigned to you are shown here.</p>
-          </div>
-          <div className="employee-filter-tabs" aria-label="Assigned work filter">
-            <button className={workFilter === 'open' ? 'active' : ''} type="button" onClick={() => setWorkFilter('open')}>Open</button>
-            <button className={workFilter === 'submitted' ? 'active' : ''} type="button" onClick={() => setWorkFilter('submitted')}>Submitted</button>
-            <button className={workFilter === 'all' ? 'active' : ''} type="button" onClick={() => setWorkFilter('all')}>All</button>
-          </div>
-        </div>
-
-        <section className="employee-workspace">
-          <div className="card employee-work-table">
-            <div className="employee-work-header">
-              <span>Task</span>
-              <span>Due</span>
-              <span>Status</span>
+        <section className="employee-results-section">
+          <div className="employee-section-row">
+            <div className="employee-section-title">
+              <h2>Latest published review highlights</h2>
+              <p>A quick reminder of insights from your most recent review.</p>
             </div>
-            {isLoadingWork && (
-              <div className="employee-work-empty">
-                Loading assigned questionnaires...
-              </div>
-            )}
-            {!isLoadingWork && workError !== '' && (
-              <div className="employee-work-empty">
-                No questionnaires have been assigned to you yet.
-              </div>
-            )}
-            {!isLoadingWork && workError === '' && visibleEvaluations.length === 0 && (
-              <div className="employee-work-empty">
-                No questionnaires have been assigned to you yet.
-              </div>
-            )}
-            {!isLoadingWork && workError === '' && visibleEvaluations.map((evaluation) => {
-              const tone = getEvaluationTone(evaluation);
+            <div className="employee-results-actions">
+              <span>Q1 2024</span>
+              <Link to="/results">Open full results</Link>
+            </div>
+          </div>
+
+          <div className="employee-highlights-grid">
+            {reviewHighlights.map((highlight) => {
+              const Icon = highlight.icon;
               return (
-                <div className="employee-work-row" key={evaluation.id}>
-                  <div className="employee-work-task">
-                    <strong>{evaluation.formName}</strong>
-                    <span>{getEvaluationMeta(evaluation)}</span>
-                    <div className={`employee-progress-line ${tone}`}>
-                      <span style={{ width: `${getEvaluationProgress(evaluation)}%` }} />
-                    </div>
-                  </div>
-                  <strong className="employee-work-due">{formatShortDate(evaluation.dueDate)}</strong>
-                  <span className={`employee-status ${tone}`}>{getEvaluationStatus(evaluation)}</span>
+                <div className="card employee-highlight-card" key={highlight.title}>
+                  <h3>
+                    <Icon size={21} />
+                    {highlight.title}
+                  </h3>
+                  <ol>
+                    {highlight.items.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ol>
                 </div>
               );
             })}
-          </div>
-
-          <aside className="employee-side-stack">
-            <div className="card employee-next-card">
-              <div className="employee-kicker">Next step</div>
-              {nextEvaluation === null ? (
-                <>
-                  <h2>You are all caught up</h2>
-                  <p>No assigned questionnaires need your input right now.</p>
-                </>
-              ) : (
-                <>
-                  <h2>Continue {nextEvaluation.formName}</h2>
-                  <p>{getEvaluationMeta(nextEvaluation)}</p>
-                  <button className="btn btn-primary" type="button">Continue form</button>
-                </>
-              )}
-            </div>
-            <div className="card employee-next-card">
-              <h2>Results</h2>
-              <p>Scores and comments are private to you and will appear here after the cycle is published.</p>
-              <span className="employee-locked-pill">Locked until published</span>
-            </div>
-          </aside>
-        </section>
-
-        <section className="card employee-activity-card">
-          <h2>Recent activity</h2>
-          <div className="employee-activity-list">
-            {activity.map(([label, time]) => (
-              <div className="employee-activity-row" key={label}>
-                <span className="employee-activity-dot" />
-                <strong>{label}</strong>
-                <span>{time}</span>
-              </div>
-            ))}
           </div>
         </section>
       </div>

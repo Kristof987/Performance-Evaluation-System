@@ -925,6 +925,186 @@ def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, d
     }
 
 
+@app.get("/campaigns/{campaign_id}/groups", response_model=schemas.CampaignGroupsResponse)
+def get_campaign_groups(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
+    assigned_group_ids = [
+        group_id
+        for (group_id,) in db.query(models.campaign_company_groups.c.company_group_id)
+        .filter(models.campaign_company_groups.c.campaign_id == campaign_id)
+        .all()
+    ]
+
+    return {
+        "available_groups": groups,
+        "assigned_group_ids": assigned_group_ids,
+    }
+
+
+@app.put("/campaigns/{campaign_id}/groups", response_model=schemas.CampaignGroupsResponse)
+def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpdate, db: Session = Depends(get_db)):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    unique_group_ids = sorted(set(payload.group_ids))
+    if len(unique_group_ids) > 0:
+        matching_count = (
+            db.query(models.CompanyGroup)
+            .filter(models.CompanyGroup.id.in_(unique_group_ids))
+            .count()
+        )
+        if matching_count != len(unique_group_ids):
+            raise HTTPException(status_code=400, detail="One or more groups do not exist")
+
+    db.execute(
+        models.campaign_company_groups.delete().where(
+            models.campaign_company_groups.c.campaign_id == campaign_id
+        )
+    )
+    for group_id in unique_group_ids:
+        db.execute(
+            models.campaign_company_groups.insert().values(
+                campaign_id=campaign_id,
+                company_group_id=group_id,
+            )
+        )
+    db.commit()
+
+    groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
+    return {
+        "available_groups": groups,
+        "assigned_group_ids": unique_group_ids,
+    }
+
+
+def get_campaign_assigned_group_ids(campaign_id: int, db: Session):
+    return [
+        group_id
+        for (group_id,) in db.query(models.campaign_company_groups.c.company_group_id)
+        .filter(models.campaign_company_groups.c.campaign_id == campaign_id)
+        .all()
+    ]
+
+
+def get_group_roles(group_id: int, db: Session):
+    return (
+        db.query(models.CompanyRole)
+        .join(models.User, models.User.company_role_id == models.CompanyRole.id)
+        .join(models.user_company_groups, models.user_company_groups.c.user_id == models.User.id)
+        .filter(models.user_company_groups.c.company_group_id == group_id)
+        .filter(models.User.is_active.is_(True))
+        .distinct()
+        .order_by(models.CompanyRole.name.asc())
+        .all()
+    )
+
+
+def build_campaign_rule_matrix(campaign_id: int, db: Session):
+    assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db)
+    groups = []
+    if len(assigned_group_ids) > 0:
+        groups = (
+            db.query(models.CompanyGroup)
+            .filter(models.CompanyGroup.id.in_(assigned_group_ids))
+            .order_by(models.CompanyGroup.name.asc())
+            .all()
+        )
+
+    existing_rules = {
+        (rule.company_group_id, rule.evaluator_role_id, rule.evaluatee_role_id): rule
+        for rule in db.query(models.CampaignEvaluationRule)
+        .filter(models.CampaignEvaluationRule.campaign_id == campaign_id)
+        .all()
+    }
+
+    matrices = []
+    for group in groups:
+        roles = get_group_roles(group.id, db)
+        role_pairs = []
+        for evaluator_role in roles:
+            for evaluatee_role in roles:
+                rule = existing_rules.get((group.id, evaluator_role.id, evaluatee_role.id))
+                role_pairs.append({
+                    "evaluator_role_id": evaluator_role.id,
+                    "evaluator_role_name": evaluator_role.name,
+                    "evaluatee_role_id": evaluatee_role.id,
+                    "evaluatee_role_name": evaluatee_role.name,
+                    "form_id": rule.form_id if rule is not None else None,
+                    "rule_id": rule.id if rule is not None else None,
+                })
+        matrices.append({
+            "group_id": group.id,
+            "group_name": group.name,
+            "role_pairs": role_pairs,
+        })
+
+    forms = db.query(models.Form).order_by(models.Form.name.asc()).all()
+    return {
+        "forms": [{"id": form.id, "name": form.name} for form in forms],
+        "groups": matrices,
+    }
+
+
+@app.get("/campaigns/{campaign_id}/evaluation-rules", response_model=schemas.CampaignEvaluationRulesResponse)
+def get_campaign_evaluation_rules(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return build_campaign_rule_matrix(campaign_id, db)
+
+
+@app.put("/campaigns/{campaign_id}/evaluation-rules", response_model=schemas.CampaignEvaluationRulesResponse)
+def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.CampaignEvaluationRulesUpdate, db: Session = Depends(get_db)):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    assigned_group_ids = set(get_campaign_assigned_group_ids(campaign_id, db))
+    form_ids = {form_id for (form_id,) in db.query(models.Form.id).all()}
+    valid_role_pairs_by_group = {}
+    for group_id in assigned_group_ids:
+        role_ids = {role.id for role in get_group_roles(group_id, db)}
+        valid_role_pairs_by_group[group_id] = {
+            (evaluator_role_id, evaluatee_role_id)
+            for evaluator_role_id in role_ids
+            for evaluatee_role_id in role_ids
+        }
+
+    seen_pairs = set()
+    for rule in payload.rules:
+        if rule.company_group_id not in assigned_group_ids:
+            raise HTTPException(status_code=400, detail="Rule group is not assigned to this campaign")
+        if rule.form_id not in form_ids:
+            raise HTTPException(status_code=400, detail="Rule form does not exist")
+        pair = (rule.evaluator_role_id, rule.evaluatee_role_id)
+        if pair not in valid_role_pairs_by_group.get(rule.company_group_id, set()):
+            raise HTTPException(status_code=400, detail="Rule role pair is not valid for the selected group")
+        unique_key = (rule.company_group_id, rule.evaluator_role_id, rule.evaluatee_role_id)
+        if unique_key in seen_pairs:
+            raise HTTPException(status_code=400, detail="Duplicate rule for the same group and role pair")
+        seen_pairs.add(unique_key)
+
+    db.query(models.CampaignEvaluationRule).filter(
+        models.CampaignEvaluationRule.campaign_id == campaign_id
+    ).delete()
+    for rule in payload.rules:
+        db.add(models.CampaignEvaluationRule(
+            campaign_id=campaign_id,
+            company_group_id=rule.company_group_id,
+            evaluator_role_id=rule.evaluator_role_id,
+            evaluatee_role_id=rule.evaluatee_role_id,
+            form_id=rule.form_id,
+        ))
+    db.commit()
+
+    return build_campaign_rule_matrix(campaign_id, db)
+
+
 @app.get("/forms", response_model=list[schemas.FormResponse])
 def get_forms(db: Session = Depends(get_db)):
     return db.query(models.Form).order_by(models.Form.id.desc()).all()

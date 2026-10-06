@@ -29,6 +29,63 @@ export type CampaignResponse = {
   issued_forms_count: number;
 };
 
+export type CampaignGroup = {
+  id: number;
+  name: string;
+  description: string | null;
+};
+
+export type CampaignGroups = {
+  availableGroups: CampaignGroup[];
+  assignedGroupIds: number[];
+};
+
+export type CampaignGroupsResponse = {
+  available_groups: CampaignGroup[];
+  assigned_group_ids: number[];
+};
+
+export type CampaignRuleForm = {
+  id: number;
+  name: string;
+};
+
+export type CampaignRolePairRule = {
+  evaluatorRoleId: number;
+  evaluatorRoleName: string;
+  evaluateeRoleId: number;
+  evaluateeRoleName: string;
+  formId: number | null;
+  ruleId: number | null;
+};
+
+export type CampaignGroupRuleMatrix = {
+  groupId: number;
+  groupName: string;
+  rolePairs: CampaignRolePairRule[];
+};
+
+export type CampaignEvaluationRules = {
+  forms: CampaignRuleForm[];
+  groups: CampaignGroupRuleMatrix[];
+};
+
+export type CampaignEvaluationRulesResponse = {
+  forms: CampaignRuleForm[];
+  groups: Array<{
+    group_id: number;
+    group_name: string;
+    role_pairs: Array<{
+      evaluator_role_id: number;
+      evaluator_role_name: string;
+      evaluatee_role_id: number;
+      evaluatee_role_name: string;
+      form_id: number | null;
+      rule_id: number | null;
+    }>;
+  }>;
+};
+
 export type CampaignFormValues = {
   name: string;
   description: string;

@@ -17,7 +17,7 @@ import {
   getUserInitials,
   isHrOrManagerRole,
 } from './sidebar-user';
-export type SidebarPage = 'hr-home' | 'employee-home' | 'people' | 'campaigns' | 'forms' | 'results';
+export type SidebarPage = 'hr-home' | 'employee-home' | 'employee-review-preview' | 'people' | 'campaigns' | 'forms' | 'results';
 type SidebarProps = {
   activePage: SidebarPage;
   isSidebarCollapsed: boolean;

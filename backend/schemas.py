@@ -284,6 +284,10 @@ class CampaignResponse(BaseModel):
     }
 
 
+class CampaignGroupsUpdate(BaseModel):
+    group_ids: list[int] = Field(default_factory=list)
+
+
 class DashboardCampaignSummary(BaseModel):
     id: int
     name: str
@@ -341,6 +345,47 @@ class CompanyGroupResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+
+class CampaignGroupsResponse(BaseModel):
+    available_groups: list[CompanyGroupResponse]
+    assigned_group_ids: list[int]
+
+
+class CampaignRuleFormOption(BaseModel):
+    id: int
+    name: str
+
+
+class CampaignRolePairRule(BaseModel):
+    evaluator_role_id: int
+    evaluator_role_name: str
+    evaluatee_role_id: int
+    evaluatee_role_name: str
+    form_id: int | None = None
+    rule_id: int | None = None
+
+
+class CampaignGroupRuleMatrix(BaseModel):
+    group_id: int
+    group_name: str
+    role_pairs: list[CampaignRolePairRule]
+
+
+class CampaignEvaluationRulesResponse(BaseModel):
+    forms: list[CampaignRuleFormOption]
+    groups: list[CampaignGroupRuleMatrix]
+
+
+class CampaignEvaluationRuleUpdateItem(BaseModel):
+    company_group_id: int
+    evaluator_role_id: int
+    evaluatee_role_id: int
+    form_id: int
+
+
+class CampaignEvaluationRulesUpdate(BaseModel):
+    rules: list[CampaignEvaluationRuleUpdateItem] = Field(default_factory=list)
 
 class FormCreate(BaseModel):
     name: str
