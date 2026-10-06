@@ -5,7 +5,7 @@ import type {
 } from './campaign.types';
 import { mapCampaignFromResponse } from './campaign.utils';
 
-const API_BASE_URL = 'http://localhost:8000';
+import { API_BASE_URL } from '../../config';
 
 async function requestCampaigns<T>(
   path: string,

@@ -1,0 +1,67 @@
+name: Deploy backend to Azure
+
+on:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  RESOURCE_GROUP: perfeval-rg
+  CONTAINER_ENVIRONMENT: perfeval-env
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate deployment names
+        id: names
+        shell: bash
+        run: |
+          BRANCH="${GITHUB_REF_NAME,,}"
+
+          SAFE_BRANCH=$(echo "$BRANCH" \
+            | sed 's/[^a-z0-9-]/-/g' \
+            | sed 's/^-*//' \
+            | sed 's/-*$//' \
+            | cut -c1-15)
+
+          BRANCH_HASH=$(echo -n "$GITHUB_REF_NAME" \
+            | sha1sum \
+            | cut -c1-6)
+
+          BACKEND_APP="pf-be-${SAFE_BRANCH}-${BRANCH_HASH}"
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          BACKEND_IMAGE="ghcr.io/${OWNER}/perfeval-backend:${GITHUB_SHA}"
+
+          echo "backend_app=$BACKEND_APP" >> "$GITHUB_OUTPUT"
+          echo "backend_image=$BACKEND_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build backend Docker image
+        run: |
+          docker build \
+            -t "${{ steps.names.outputs.backend_image }}" \
+            ./backend
+
+      - name: Push backend Docker image
+        run: |
+          docker push "${{ steps.names.outputs.backend_image }}"

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 import type { ChangeEvent, SubmitEvent } from 'react';
 import { isHrOrManagerRole } from '../layout/sidebar-user';
 
-const API_BASE_URL = 'http://localhost:8000';
+import { API_BASE_URL } from '../../config';
 
 function Login() {
   const [username, setUsername] = useState('');

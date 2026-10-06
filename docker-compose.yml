@@ -17,6 +17,7 @@ services:
   backend:
     build:
       context: ./backend
+      dockerfile: Dockerfile.dev
 
     container_name: performance-evaluation-backend
 
@@ -35,6 +36,7 @@ services:
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile.dev
 
     container_name: performance-evaluation-frontend
 

@@ -13,7 +13,7 @@ import {
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-const API_BASE_URL = 'http://localhost:8000';
+import { API_BASE_URL } from '../../config';
 
 type Campaign = {
   id: number;
