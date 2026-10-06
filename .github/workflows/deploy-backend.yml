@@ -113,3 +113,16 @@ jobs:
                 "DATABASE_URL=secretref:database-url"
 
           fi
+          
+      - name: Show backend URL
+        id: backend-url
+        shell: bash
+        run: |
+          FQDN=$(az containerapp show \
+            --name "${{ steps.names.outputs.backend_app }}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            -o tsv)
+
+          echo "url=https://$FQDN" >> "$GITHUB_OUTPUT"
+          echo "Backend URL: https://$FQDN"
