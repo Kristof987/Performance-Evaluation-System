@@ -59,6 +59,7 @@ class FormStatusResponse(BaseModel):
 
 class FilledFormCreate(BaseModel):
     campaign_id: int
+    company_group_id: int | None = None
     evaluator_id: int
     evaluatee_id: int
     form_id: int
@@ -70,6 +71,7 @@ class FilledFormCreate(BaseModel):
 class FilledFormResponse(BaseModel):
     id: int
     campaign_id: int
+    company_group_id: int | None = None
     evaluator_id: int
     evaluatee_id: int
     form_id: int
@@ -406,6 +408,48 @@ class CampaignEvaluationRuleUpdateItem(BaseModel):
 
 class CampaignEvaluationRulesUpdate(BaseModel):
     rules: list[CampaignEvaluationRuleUpdateItem] = Field(default_factory=list)
+
+
+class CampaignEvaluationMatrixEmployee(BaseModel):
+    id: int
+    name: str
+    role_id: int
+    role_name: str
+
+
+class CampaignEvaluationMatrixAssignment(BaseModel):
+    evaluator_id: int
+    evaluatee_id: int
+    form_id: int
+    filled_form_id: int
+    is_completed: bool = False
+
+
+class CampaignGroupEvaluationMatrix(BaseModel):
+    group_id: int
+    group_name: str
+    employees: list[CampaignEvaluationMatrixEmployee]
+    assignments: list[CampaignEvaluationMatrixAssignment]
+
+
+class CampaignEvaluationMatrixResponse(BaseModel):
+    groups: list[CampaignGroupEvaluationMatrix]
+
+
+class CampaignEvaluationMatrixUpdateItem(BaseModel):
+    company_group_id: int
+    evaluator_id: int
+    evaluatee_id: int
+
+
+class CampaignEvaluationMatrixUpdate(BaseModel):
+    assignments: list[CampaignEvaluationMatrixUpdateItem] = Field(default_factory=list)
+
+
+class CampaignEvaluationMatrixUpdateResponse(CampaignEvaluationMatrixResponse):
+    created_count: int = 0
+    removed_count: int = 0
+    kept_completed_count: int = 0
 
 class FormCreate(BaseModel):
     name: str

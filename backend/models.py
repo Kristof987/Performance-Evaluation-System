@@ -124,6 +124,12 @@ class FilledForm(Base):
         nullable=False,
     )
 
+    company_group_id = Column(
+        Integer,
+        ForeignKey("company_groups.id"),
+        nullable=True,
+    )
+
     evaluator_id = Column(
         Integer,
         ForeignKey("users.id"),

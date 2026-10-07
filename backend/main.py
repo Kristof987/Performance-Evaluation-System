@@ -1058,6 +1058,18 @@ def get_group_roles(group_id: int, db: Session):
     )
 
 
+def get_group_employees(group_id: int, db: Session):
+    return (
+        db.query(models.User, models.CompanyRole)
+        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
+        .join(models.user_company_groups, models.user_company_groups.c.user_id == models.User.id)
+        .filter(models.user_company_groups.c.company_group_id == group_id)
+        .filter(models.User.is_active.is_(True))
+        .order_by(models.User.username.asc())
+        .all()
+    )
+
+
 def build_campaign_rule_matrix(campaign_id: int, db: Session):
     assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db)
     groups = []
@@ -1102,6 +1114,99 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session):
         "forms": [{"id": form.id, "name": form.name} for form in forms],
         "groups": matrices,
     }
+
+
+def get_or_create_default_form_status(db: Session):
+    status = (
+        db.query(models.FormStatus)
+        .filter(func.lower(models.FormStatus.name) == "not started")
+        .first()
+    )
+    if status is not None:
+        return status
+
+    status = models.FormStatus(name="Not started")
+    db.add(status)
+    db.flush()
+    return status
+
+
+def get_form_id_for_employee_pair(campaign_id: int, group_id: int, evaluator, evaluatee, db: Session):
+    rule = (
+        db.query(models.CampaignEvaluationRule)
+        .filter(models.CampaignEvaluationRule.campaign_id == campaign_id)
+        .filter(models.CampaignEvaluationRule.company_group_id == group_id)
+        .filter(models.CampaignEvaluationRule.evaluator_role_id == evaluator.company_role_id)
+        .filter(models.CampaignEvaluationRule.evaluatee_role_id == evaluatee.company_role_id)
+        .first()
+    )
+    return rule.form_id if rule is not None else None
+
+
+def build_campaign_evaluation_matrix(campaign_id: int, db: Session):
+    assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db)
+    groups = []
+    if len(assigned_group_ids) > 0:
+        groups = (
+            db.query(models.CompanyGroup)
+            .filter(models.CompanyGroup.id.in_(assigned_group_ids))
+            .order_by(models.CompanyGroup.name.asc())
+            .all()
+        )
+
+    forms_by_pair = {
+        (rule.company_group_id, rule.evaluator_role_id, rule.evaluatee_role_id): rule.form_id
+        for rule in db.query(models.CampaignEvaluationRule)
+        .filter(models.CampaignEvaluationRule.campaign_id == campaign_id)
+        .all()
+    }
+    filled_forms_by_key = {
+        (
+            filled_form.company_group_id,
+            filled_form.evaluator_id,
+            filled_form.evaluatee_id,
+            filled_form.form_id,
+        ): filled_form
+        for filled_form in db.query(models.FilledForm)
+        .filter(models.FilledForm.campaign_id == campaign_id)
+        .filter(models.FilledForm.company_group_id.isnot(None))
+        .all()
+    }
+
+    matrices = []
+    for group in groups:
+        employee_rows = get_group_employees(group.id, db)
+        employees = [user for user, _role in employee_rows]
+        matrices.append({
+            "group_id": group.id,
+            "group_name": group.name,
+            "employees": [
+                {
+                    "id": user.id,
+                    "name": user.username,
+                    "role_id": role.id,
+                    "role_name": role.name,
+                }
+                for user, role in employee_rows
+            ],
+            "assignments": [
+                {
+                    "evaluator_id": evaluator.id,
+                    "evaluatee_id": evaluatee.id,
+                    "form_id": form_id,
+                    "filled_form_id": filled_form.id,
+                    "is_completed": filled_form.finish_date is not None,
+                }
+                for evaluator in employees
+                for evaluatee in employees
+                for form_id in [forms_by_pair.get((group.id, evaluator.company_role_id, evaluatee.company_role_id))]
+                if form_id is not None
+                for filled_form in [filled_forms_by_key.get((group.id, evaluator.id, evaluatee.id, form_id))]
+                if filled_form is not None
+            ],
+        })
+
+    return {"groups": matrices}
 
 
 @app.get("/campaigns/{campaign_id}/evaluation-rules", response_model=schemas.CampaignEvaluationRulesResponse)
@@ -1157,6 +1262,144 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
     db.commit()
 
     return build_campaign_rule_matrix(campaign_id, db)
+
+
+@app.get("/campaigns/{campaign_id}/evaluation-matrix", response_model=schemas.CampaignEvaluationMatrixResponse)
+def get_campaign_evaluation_matrix(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    return build_campaign_evaluation_matrix(campaign_id, db)
+
+
+@app.put("/campaigns/{campaign_id}/evaluation-matrix", response_model=schemas.CampaignEvaluationMatrixUpdateResponse)
+def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.CampaignEvaluationMatrixUpdate, db: Session = Depends(get_db)):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    assigned_group_ids = set(get_campaign_assigned_group_ids(campaign_id, db))
+    group_members_by_group = {
+        group_id: {user.id: user for user, _role in get_group_employees(group_id, db)}
+        for group_id in assigned_group_ids
+    }
+    scoped_group_user_pairs = {
+        (group_id, evaluator_id, evaluatee_id)
+        for group_id, members in group_members_by_group.items()
+        for evaluator_id in members.keys()
+        for evaluatee_id in members.keys()
+    }
+    scoped_user_pairs = {
+        (evaluator_id, evaluatee_id)
+        for _group_id, evaluator_id, evaluatee_id in scoped_group_user_pairs
+    }
+
+    seen_assignments = set()
+    desired_assignments = set()
+    for assignment in payload.assignments:
+        if assignment.company_group_id not in assigned_group_ids:
+            raise HTTPException(status_code=400, detail="Assignment group is not assigned to this campaign")
+
+        group_members = group_members_by_group.get(assignment.company_group_id, {})
+        evaluator = group_members.get(assignment.evaluator_id)
+        evaluatee = group_members.get(assignment.evaluatee_id)
+        if evaluator is None or evaluatee is None:
+            raise HTTPException(status_code=400, detail="Assignment users must be active members of the selected group")
+
+        unique_group_pair = (assignment.company_group_id, assignment.evaluator_id, assignment.evaluatee_id)
+        if unique_group_pair in seen_assignments:
+            raise HTTPException(status_code=400, detail="Duplicate matrix assignment")
+        seen_assignments.add(unique_group_pair)
+
+        form_id = get_form_id_for_employee_pair(
+            campaign_id,
+            assignment.company_group_id,
+            evaluator,
+            evaluatee,
+            db,
+        )
+        if form_id is None:
+            raise HTTPException(status_code=400, detail="No form rule exists for this evaluator/evaluatee role relationship")
+
+        desired_assignments.add((assignment.company_group_id, assignment.evaluator_id, assignment.evaluatee_id, form_id))
+
+    status = get_or_create_default_form_status(db)
+    existing_forms = (
+        db.query(models.FilledForm)
+        .filter(models.FilledForm.campaign_id == campaign_id)
+        .all()
+    )
+    existing_by_key = {
+        (
+            filled_form.company_group_id,
+            filled_form.evaluator_id,
+            filled_form.evaluatee_id,
+            filled_form.form_id,
+        ): filled_form
+        for filled_form in existing_forms
+        if filled_form.company_group_id is not None
+    }
+
+    created_count = 0
+    for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
+        if (group_id, evaluator_id, evaluatee_id, form_id) in existing_by_key:
+            continue
+        db.add(models.FilledForm(
+            campaign_id=campaign_id,
+            company_group_id=group_id,
+            evaluator_id=evaluator_id,
+            evaluatee_id=evaluatee_id,
+            form_id=form_id,
+            status_id=status.id,
+            finish_date=None,
+            answers=[],
+        ))
+        created_count += 1
+
+    removed_count = 0
+    kept_completed_count = 0
+    for filled_form in existing_forms:
+        key = (
+            filled_form.company_group_id,
+            filled_form.evaluator_id,
+            filled_form.evaluatee_id,
+            filled_form.form_id,
+        )
+        if filled_form.company_group_id is None:
+            if (
+                filled_form.finish_date is None
+                and (filled_form.evaluator_id, filled_form.evaluatee_id) in scoped_user_pairs
+            ):
+                db.delete(filled_form)
+                removed_count += 1
+            elif filled_form.finish_date is not None:
+                kept_completed_count += 1
+            continue
+        if filled_form.company_group_id not in assigned_group_ids:
+            continue
+        if (
+            filled_form.company_group_id,
+            filled_form.evaluator_id,
+            filled_form.evaluatee_id,
+        ) not in scoped_group_user_pairs:
+            continue
+        if key in desired_assignments:
+            continue
+        if filled_form.finish_date is not None:
+            kept_completed_count += 1
+            continue
+        db.delete(filled_form)
+        removed_count += 1
+
+    db.commit()
+    matrix = build_campaign_evaluation_matrix(campaign_id, db)
+    return {
+        **matrix,
+        "created_count": created_count,
+        "removed_count": removed_count,
+        "kept_completed_count": kept_completed_count,
+    }
 
 
 @app.get("/forms", response_model=list[schemas.FormResponse])
