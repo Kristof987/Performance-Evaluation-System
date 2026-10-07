@@ -5,6 +5,32 @@
   width: 100%;
 }
 
+.employee-empty-dashboard-main {
+  gap: 18px;
+}
+
+.employee-home-page .greeting {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 5px;
+  min-width: 0;
+}
+
+.employee-home-page .greeting-title {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: -0.3px;
+  line-height: 33px;
+}
+
+.employee-home-page .greeting-date {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
 .employee-home-page .topbar {
   align-items: flex-start;
   display: flex;
@@ -316,6 +342,176 @@
   width: 100%;
 }
 
+.employee-summary-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+}
+
+.employee-summary-card {
+  background: var(--color-surface);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  min-height: 116px;
+  padding: 20px;
+}
+
+.employee-summary-card span {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.employee-summary-card strong {
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1;
+}
+
+.employee-work-overview {
+  align-items: start;
+  display: grid;
+  gap: 0;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  padding: 0;
+  width: 100%;
+}
+
+.employee-work-column {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.employee-work-column-large {
+  border-right: 1px solid var(--color-border);
+}
+
+.employee-dashboard-panel {
+  border-radius: 14px;
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.employee-panel-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.employee-panel-heading h2 {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.employee-plain-empty,
+.employee-history-empty {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.employee-plain-empty {
+  background: var(--color-surface-subtle);
+  border-radius: 8px;
+  padding: 13px 14px;
+}
+
+.employee-history-panel {
+  min-height: 118px;
+}
+
+.employee-compact-list,
+.employee-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.employee-compact-row {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0 0 12px;
+}
+
+.employee-compact-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.employee-compact-row > div,
+.employee-result-card-inline div,
+.employee-history-list div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.employee-compact-row strong,
+.employee-result-card-inline strong,
+.employee-history-list strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.employee-compact-row span,
+.employee-result-card-inline span,
+.employee-history-list span {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.employee-compact-action {
+  min-height: 34px;
+  padding: 8px 12px;
+}
+
+.employee-result-card-inline {
+  align-items: flex-start;
+  background: var(--color-surface-subtle);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 13px 14px;
+}
+
+.employee-result-card-inline a {
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.employee-history-empty,
+.employee-history-list {
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.employee-history-list div {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 10px;
+}
+
+.employee-history-list div:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
 .employee-section-row {
   align-items: flex-end;
   display: flex;
@@ -358,6 +554,81 @@
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.employee-no-results-card {
+  align-items: center;
+  background: linear-gradient(135deg, #ffffff 0%, #f4f7ff 58%, #eef9f7 100%);
+  border-color: #dce5f7;
+  border-radius: 14px;
+  display: grid;
+  gap: clamp(22px, 3vw, 42px);
+  grid-template-columns: clamp(118px, 15vw, 164px) minmax(0, 720px);
+  min-height: clamp(190px, 25vh, 250px);
+  overflow: hidden;
+  padding: clamp(24px, 4vh, 40px) clamp(28px, 5vw, 56px);
+  position: relative;
+}
+
+.employee-no-results-card::after {
+  background: radial-gradient(circle, rgba(69, 83, 196, 0.14) 0%, rgba(69, 83, 196, 0) 62%);
+  content: '';
+  height: 220px;
+  position: absolute;
+  right: -70px;
+  top: -90px;
+  width: 220px;
+}
+
+.employee-no-results-visual {
+  align-items: center;
+  background: #f7f9ff;
+  border: 1px solid #d8e1fb;
+  border-radius: 30px;
+  color: var(--color-primary);
+  display: flex;
+  height: clamp(118px, 15vw, 164px);
+  justify-content: center;
+  position: relative;
+  width: clamp(118px, 15vw, 164px);
+}
+
+.employee-no-results-visual svg {
+  position: relative;
+  z-index: 1;
+}
+
+.employee-no-results-orbit {
+  background: #c9f6ee;
+  border-radius: 999px;
+  height: 54px;
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  width: 54px;
+}
+
+.employee-no-results-copy {
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.employee-no-results-copy h2 {
+  font-family: var(--font-sans);
+  font-size: clamp(28px, min(3vw, 5vh), 42px);
+  font-weight: 700;
+  letter-spacing: -1.5px;
+  line-height: 1;
+  margin: 0 0 12px;
+}
+
+.employee-no-results-copy p {
+  color: var(--color-text-secondary);
+  font-size: clamp(14px, 1.3vw, 16px);
+  line-height: 1.42;
+  margin: 0;
+  max-width: 760px;
 }
 
 .employee-highlight-card {
@@ -727,8 +998,16 @@
   }
 
   .employee-review-empty,
-  .employee-highlights-grid {
+  .employee-highlights-grid,
+  .employee-no-results-card,
+  .employee-summary-grid,
+  .employee-work-overview {
     grid-template-columns: 1fr;
+  }
+
+  .employee-work-column-large {
+    border-bottom: 1px solid var(--color-border);
+    border-right: 0;
   }
 
   .employee-empty-icon {

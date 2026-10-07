@@ -17,6 +17,26 @@ type AssignedEvaluationResponse = {
   created_at: string;
 };
 
+type EmployeeDashboardHistoryItemResponse = {
+  id: number;
+  title: string;
+  subtitle: string;
+  status: string;
+  occurred_at: string | null;
+};
+
+type EmployeeDashboardResponse = {
+  evaluations: AssignedEvaluationResponse[];
+  open_count: number;
+  completed_count: number;
+  next_review_date: string | null;
+  campaign_date_label: string;
+  campaign_date: string | null;
+  campaign_date_empty_text: string;
+  latest_result: AssignedEvaluationResponse | null;
+  history: EmployeeDashboardHistoryItemResponse[];
+};
+
 export type AssignedEvaluation = {
   id: number;
   campaignId: number;
@@ -32,6 +52,26 @@ export type AssignedEvaluation = {
   questionCount: number;
   answeredCount: number;
   createdAt: string;
+};
+
+export type EmployeeDashboardHistoryItem = {
+  id: number;
+  title: string;
+  subtitle: string;
+  status: string;
+  occurredAt: string | null;
+};
+
+export type EmployeeDashboard = {
+  evaluations: AssignedEvaluation[];
+  openCount: number;
+  completedCount: number;
+  nextReviewDate: string | null;
+  campaignDateLabel: string;
+  campaignDate: string | null;
+  campaignDateEmptyText: string;
+  latestResult: AssignedEvaluation | null;
+  history: EmployeeDashboardHistoryItem[];
 };
 
 function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): AssignedEvaluation {
@@ -50,6 +90,26 @@ function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): Assigned
     questionCount: evaluation.question_count,
     answeredCount: evaluation.answered_count,
     createdAt: evaluation.created_at,
+  };
+}
+
+function mapEmployeeDashboard(dashboard: EmployeeDashboardResponse): EmployeeDashboard {
+  return {
+    evaluations: dashboard.evaluations.map(mapAssignedEvaluation),
+    openCount: dashboard.open_count,
+    completedCount: dashboard.completed_count,
+    nextReviewDate: dashboard.next_review_date,
+    campaignDateLabel: dashboard.campaign_date_label,
+    campaignDate: dashboard.campaign_date,
+    campaignDateEmptyText: dashboard.campaign_date_empty_text,
+    latestResult: dashboard.latest_result === null ? null : mapAssignedEvaluation(dashboard.latest_result),
+    history: dashboard.history.map((item) => ({
+      id: item.id,
+      title: item.title,
+      subtitle: item.subtitle,
+      status: item.status,
+      occurredAt: item.occurred_at,
+    })),
   };
 }
 
@@ -74,4 +134,17 @@ export async function fetchAssignedEvaluations(
     'Assigned evaluations could not be loaded.',
   );
   return evaluations.map(mapAssignedEvaluation);
+}
+
+export async function fetchEmployeeDashboard(
+  userId: number,
+  signal: AbortSignal,
+): Promise<EmployeeDashboard> {
+  return mapEmployeeDashboard(
+    await requestApi<EmployeeDashboardResponse>(
+      `/users/${userId}/employee-dashboard`,
+      { signal },
+      'Employee dashboard could not be loaded.',
+    ),
+  );
 }

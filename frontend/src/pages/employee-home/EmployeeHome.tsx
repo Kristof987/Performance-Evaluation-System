@@ -1,43 +1,28 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import {
-  Calendar,
-  ClipboardCheck,
-  MessageCircle,
-  Target,
-  TrendingUp,
-} from 'lucide-react';
-import reviewEmptyIcon from '../../assets/review-empty-icon.png';
 import AppLayout from '../layout/AppLayout';
 import { formatUserName, getSidebarUser } from '../layout/sidebar-user';
-import { fetchAssignedEvaluations, type AssignedEvaluation } from './employee-home.api';
+import {
+  fetchEmployeeDashboard,
+  type AssignedEvaluation,
+  type EmployeeDashboard,
+} from './employee-home.api';
 import './employee-home.css';
 
-type WorkFilter = 'open' | 'submitted' | 'all';
+const emptyDashboard: EmployeeDashboard = {
+  evaluations: [],
+  openCount: 0,
+  completedCount: 0,
+  nextReviewDate: null,
+  campaignDateLabel: 'Campaign ends',
+  campaignDate: null,
+  campaignDateEmptyText: 'Not announced yet',
+  latestResult: null,
+  history: [],
+};
 
-const reviewHighlights = [
-  {
-    title: 'Top strengths',
-    icon: TrendingUp,
-    items: [
-      'Clear ownership and follow-through',
-      'Helpful communication with teammates',
-      'Reliable delivery on committed work',
-    ],
-  },
-  {
-    title: 'Development focus',
-    icon: Target,
-    items: [
-      'Share progress earlier when risks appear',
-      'Delegate smaller tasks more confidently',
-      'Make technical decisions easier to follow',
-    ],
-  },
-];
-
-function formatShortDate(value: string | null) {
-  if (value === null) return 'No due date';
+function formatShortDate(value: string | null, emptyText = 'Not announced yet') {
+  if (value === null) return emptyText;
   return new Intl.DateTimeFormat('en-GB', {
     month: 'short',
     day: 'numeric',
@@ -50,22 +35,10 @@ function getEvaluationProgress(evaluation: AssignedEvaluation) {
   return Math.round((evaluation.answeredCount / evaluation.questionCount) * 100);
 }
 
-function getEvaluationTone(evaluation: AssignedEvaluation) {
-  if (evaluation.finishDate !== null) return 'submitted';
-  if (getEvaluationProgress(evaluation) > 0) return 'progress';
-  return 'waiting';
-}
-
 function getEvaluationStatus(evaluation: AssignedEvaluation) {
   if (evaluation.finishDate !== null) return 'Submitted';
   if (getEvaluationProgress(evaluation) > 0) return 'In progress';
   return evaluation.statusName || 'Not started';
-}
-
-function getEvaluationAction(evaluation: AssignedEvaluation) {
-  if (evaluation.finishDate !== null) return 'View answers';
-  if (getEvaluationProgress(evaluation) > 0) return 'Continue';
-  return 'Start';
 }
 
 function getEvaluationMeta(evaluation: AssignedEvaluation) {
@@ -73,16 +46,47 @@ function getEvaluationMeta(evaluation: AssignedEvaluation) {
   return `${evaluation.campaignName} • about ${formatUserName(evaluation.evaluateeName)} • ${evaluation.questionCount} ${questionLabel}`;
 }
 
-export default function EmployeeHome() {
+function getFullDate() {
+  const currentDate = new Date();
+  const currentDay = currentDate.getDate().toString();
+  const currentMonth = currentDate.toLocaleDateString('en-US', {
+    month: 'long',
+  });
+  const currentYear = currentDate.getFullYear().toString();
+  const currentDayString = currentDate.toLocaleDateString('en-US', {
+    weekday: 'long',
+  });
+
+  return `${currentDayString}, ${currentDay} ${currentMonth} ${currentYear}`;
+}
+
+function getTimeBasedGreeting(date = new Date()) {
+  const hour = date.getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+type EmployeeHomeProps = {
+  forceEmptyState?: boolean;
+};
+
+export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomeProps) {
   const user = getSidebarUser();
-  const [assignedEvaluations, setAssignedEvaluations] = useState<AssignedEvaluation[]>([]);
-  const [workFilter, setWorkFilter] = useState<WorkFilter>('open');
+  const [dashboard, setDashboard] = useState<EmployeeDashboard>(emptyDashboard);
   const [isLoadingWork, setIsLoadingWork] = useState(true);
   const [workError, setWorkError] = useState('');
 
   useEffect(() => {
+    if (forceEmptyState) {
+      setDashboard(emptyDashboard);
+      setIsLoadingWork(false);
+      setWorkError('');
+      return;
+    }
+
     if (user === null) {
-      setAssignedEvaluations([]);
+      setDashboard(emptyDashboard);
       setIsLoadingWork(false);
       return;
     }
@@ -91,9 +95,9 @@ export default function EmployeeHome() {
     setIsLoadingWork(true);
     setWorkError('');
 
-    fetchAssignedEvaluations(user.id, controller.signal)
-      .then((evaluations) => {
-        setAssignedEvaluations(evaluations);
+    fetchEmployeeDashboard(user.id, controller.signal)
+      .then((loadedDashboard) => {
+        setDashboard(loadedDashboard);
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -104,162 +108,102 @@ export default function EmployeeHome() {
       });
 
     return () => controller.abort();
-  }, [user?.id]);
+  }, [forceEmptyState, user?.id]);
 
+  const assignedEvaluations = dashboard.evaluations;
   const openEvaluations = assignedEvaluations.filter((evaluation) => evaluation.finishDate === null);
-  const submittedEvaluations = assignedEvaluations.filter((evaluation) => evaluation.finishDate !== null);
-  const visibleEvaluations =
-    workFilter === 'open'
-      ? openEvaluations
-      : workFilter === 'submitted'
-        ? submittedEvaluations
-        : assignedEvaluations;
-  const nextEvaluation = openEvaluations[0] ?? null;
-  const currentEvaluation = nextEvaluation ?? assignedEvaluations[0] ?? null;
-  const completionRate =
-    assignedEvaluations.length === 0
-      ? 0
-      : Math.round((submittedEvaluations.length / assignedEvaluations.length) * 100);
-  const hasActiveReviewTasks = openEvaluations.length > 0;
-  const cycleName = currentEvaluation?.campaignName ?? 'Next review cycle';
-  const nextCycleDate = currentEvaluation?.dueDate ?? '2026-11-01';
+  const hasDashboardData = !forceEmptyState && workError === '' && assignedEvaluations.length > 0;
+  const dashboardUserName = user === null ? 'Employee' : formatUserName(user.username);
+  const greeting = getTimeBasedGreeting();
+  const latestSubmittedEvaluation = dashboard.latestResult;
 
   return (
     <AppLayout activePage="employee-home" pageClassName="employee-home-page">
-      <div className="main-content employee-home-main">
+      <div className="main-content employee-home-main employee-empty-dashboard-main">
         <div className="topbar employee-topbar">
-          <div className="employee-dashboard-heading">
-            <h1>Dashboard</h1>
+          <div className="greeting">
+            <div className="greeting-title">{greeting}, {dashboardUserName}</div>
+            <div className="greeting-date">{getFullDate()}</div>
           </div>
         </div>
 
-        <section className={`card employee-review-panel ${!isLoadingWork && (!hasActiveReviewTasks || workError !== '') ? 'is-empty' : ''}`}>
-          {isLoadingWork ? (
-            <div className="employee-review-empty">
-              <div className="employee-empty-icon" aria-hidden="true">
-                <img src={reviewEmptyIcon} alt="" />
-              </div>
-              <div className="employee-empty-copy">
-                <span className="employee-task-pill">Loading tasks</span>
-                <h2>Loading assigned review tasks</h2>
-                <p>Questionnaires assigned to you will appear here with their due date and status.</p>
-              </div>
-            </div>
-          ) : !hasActiveReviewTasks || workError !== '' ? (
-            <div className="employee-review-empty">
-              <div className="employee-empty-icon" aria-hidden="true">
-                <img src={reviewEmptyIcon} alt="" />
-              </div>
-              <div className="employee-empty-copy">
-                <span className="employee-task-pill">0 open tasks</span>
-                <h2>There is currently no form to complete.</h2>
-                <p>
-                  There is no form you need to fill out right now. When a review task is assigned, it will appear here with its due date and status.
-                </p>
-                <div className="employee-next-cycle">
-                  <Calendar size={20} />
-                  <span>Next review cycle:</span>
-                  <strong>{formatShortDate(nextCycleDate)}</strong>
-                </div>
-                <div className="employee-panel-actions">
-                  <Link className="btn btn-primary" to="/results">View previous reviews</Link>
-                  <button className="btn btn-secondary" type="button">
-                    <MessageCircle size={17} />
-                    Have a question for HR?
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="employee-review-summary">
-                <div>
-                  <span className="employee-task-pill">{cycleName} · Open</span>
-                  <h2>You have {openEvaluations.length} open review {openEvaluations.length === 1 ? 'task' : 'tasks'}</h2>
-                  <div className="employee-next-cycle">
-                    <Calendar size={18} />
-                    <span>Cycle closes:</span>
-                    <strong>{formatShortDate(currentEvaluation?.dueDate ?? null)}</strong>
-                  </div>
-                </div>
-                <div className="employee-review-progress">
-                  <span>Submitted</span>
-                  <strong>{submittedEvaluations.length} / {assignedEvaluations.length}</strong>
-                  <div className="employee-progress-line">
-                    <span style={{ width: `${completionRate}%` }} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="employee-work-table">
-                {visibleEvaluations.map((evaluation) => {
-                  const tone = getEvaluationTone(evaluation);
-                  return (
-                    <div className="employee-work-row" key={evaluation.id}>
-                      <div className="employee-work-icon" aria-hidden="true">
-                        <ClipboardCheck size={17} />
-                      </div>
-                      <div className="employee-work-task">
-                        <strong>{evaluation.formName}</strong>
-                        <span>{getEvaluationMeta(evaluation)}</span>
-                      </div>
-                      <div className="employee-work-due">
-                        <span>Due</span>
-                        <strong>{formatShortDate(evaluation.dueDate)}</strong>
-                      </div>
-                      <span className={`employee-status ${tone}`}>{getEvaluationStatus(evaluation)}</span>
-                      <button className={tone === 'progress' ? 'btn btn-primary employee-row-action' : 'btn btn-secondary employee-row-action'} type="button">
-                        {getEvaluationAction(evaluation)}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <button className="employee-hr-question" type="button">
-                <MessageCircle size={15} />
-                Have a question for HR?
-              </button>
-
-              <div className="employee-filter-tabs" aria-label="Assigned work filter">
-                <button className={workFilter === 'open' ? 'active' : ''} type="button" onClick={() => setWorkFilter('open')}>Open</button>
-                <button className={workFilter === 'submitted' ? 'active' : ''} type="button" onClick={() => setWorkFilter('submitted')}>Submitted</button>
-                <button className={workFilter === 'all' ? 'active' : ''} type="button" onClick={() => setWorkFilter('all')}>All</button>
-              </div>
-            </>
-          )}
+        <section className="employee-summary-grid" aria-label="Review summary">
+          <div className="card employee-summary-card">
+            <span>Open evaluations</span>
+            <strong>{isLoadingWork ? '...' : dashboard.openCount}</strong>
+          </div>
+          <div className="card employee-summary-card">
+            <span>Completed forms in this campaign</span>
+            <strong>{isLoadingWork ? '...' : dashboard.completedCount}</strong>
+          </div>
+          <div className="card employee-summary-card">
+            <span>{dashboard.campaignDateLabel}</span>
+            <strong>{formatShortDate(dashboard.campaignDate, dashboard.campaignDateEmptyText)}</strong>
+          </div>
         </section>
 
-        <section className="employee-results-section">
-          <div className="employee-section-row">
-            <div className="employee-section-title">
-              <h2>Latest published review highlights</h2>
-              <p>A quick reminder of insights from your most recent review.</p>
+        <section className="card employee-work-overview">
+          <div className="employee-work-column employee-work-column-large">
+            <div className="employee-panel-heading">
+              <h2>Your tasks</h2>
             </div>
-            <div className="employee-results-actions">
-              <span>Q1 2024</span>
-              <Link to="/results">Open full results</Link>
-            </div>
+            {isLoadingWork ? (
+              <p className="employee-plain-empty">Loading evaluations...</p>
+            ) : openEvaluations.length > 0 ? (
+              <div className="employee-compact-list">
+                {openEvaluations.map((evaluation) => (
+                  <div className="employee-compact-row" key={evaluation.id}>
+                    <div>
+                      <strong>{evaluation.formName}</strong>
+                      <span>{getEvaluationMeta(evaluation)} · due {formatShortDate(evaluation.dueDate)}</span>
+                    </div>
+                    <button className={getEvaluationProgress(evaluation) > 0 ? 'btn btn-primary employee-compact-action' : 'btn btn-secondary employee-compact-action'} type="button">
+                      {getEvaluationProgress(evaluation) > 0 ? 'Continue' : 'Start'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="employee-plain-empty">
+                {workError !== '' ? 'Evaluations could not be loaded.' : "You're all caught up. New evaluations will appear here."}
+              </p>
+            )}
           </div>
 
-          <div className="employee-highlights-grid">
-            {reviewHighlights.map((highlight) => {
-              const Icon = highlight.icon;
-              return (
-                <div className="card employee-highlight-card" key={highlight.title}>
-                  <h3>
-                    <Icon size={21} />
-                    {highlight.title}
-                  </h3>
-                  <ol>
-                    {highlight.items.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ol>
+          <div className="employee-work-column">
+            <div className="employee-panel-heading">
+              <h2>Latest results</h2>
+            </div>
+            {latestSubmittedEvaluation !== null ? (
+              <div className="employee-result-card-inline">
+                <div>
+                  <strong>{latestSubmittedEvaluation.campaignName}</strong>
+                  <span>{latestSubmittedEvaluation.formName} · {getEvaluationStatus(latestSubmittedEvaluation)}</span>
                 </div>
-              );
-            })}
+                <Link to="/results">View summary</Link>
+              </div>
+            ) : (
+              <p className="employee-plain-empty">No results published yet.</p>
+            )}
           </div>
+        </section>
+
+        <section className="card employee-dashboard-panel employee-history-panel">
+          <div className="employee-panel-heading">
+            <h2>History</h2>
+          </div>
+          {hasDashboardData ? (
+            <div className="employee-history-list">
+              {dashboard.history.map((item) => (
+                <div key={item.id}>
+                  <strong>{item.title}</strong>
+                  <span>{item.status} · {item.subtitle}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="employee-history-empty">No review activity yet.</div>
+          )}
         </section>
       </div>
     </AppLayout>

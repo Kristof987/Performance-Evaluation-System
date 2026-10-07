@@ -679,6 +679,60 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
     return evaluations
 
 
+@app.get("/users/{user_id}/employee-dashboard", response_model=schemas.EmployeeDashboardResponse)
+def get_employee_dashboard(user_id: int, db: Session = Depends(get_db)):
+    evaluations = get_assigned_evaluations(user_id, db)
+    open_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is None]
+    completed_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is not None]
+    active_campaign = (
+        db.query(models.Campaign)
+        .join(models.FilledForm, models.FilledForm.campaign_id == models.Campaign.id)
+        .filter(models.FilledForm.evaluator_id == user_id)
+        .filter(models.Campaign.is_active.is_(True))
+        .order_by(models.Campaign.end_date.asc().nullslast(), models.Campaign.start_date.asc())
+        .first()
+    )
+    next_campaign = None
+    if active_campaign is None:
+        next_campaign = (
+            db.query(models.Campaign)
+            .filter(models.Campaign.start_date >= date.today())
+            .filter(models.Campaign.is_active.is_(True))
+            .order_by(models.Campaign.start_date.asc())
+            .first()
+        )
+
+    campaign_date_label = "Campaign ends" if active_campaign is not None else "Next campaign"
+    campaign_date = (
+        active_campaign.end_date
+        if active_campaign is not None
+        else next_campaign.start_date if next_campaign is not None else None
+    )
+    campaign_date_empty_text = "No deadline" if active_campaign is not None else "Not announced yet"
+    latest_result = completed_evaluations[0] if len(completed_evaluations) > 0 else None
+
+    return {
+        "evaluations": evaluations,
+        "open_count": len(open_evaluations),
+        "completed_count": len(completed_evaluations),
+        "next_review_date": campaign_date,
+        "campaign_date_label": campaign_date_label,
+        "campaign_date": campaign_date,
+        "campaign_date_empty_text": campaign_date_empty_text,
+        "latest_result": latest_result,
+        "history": [
+            {
+                "id": evaluation["id"],
+                "title": evaluation["form_name"],
+                "subtitle": evaluation["campaign_name"],
+                "status": "Submitted" if evaluation["finish_date"] is not None else evaluation["status_name"],
+                "occurred_at": evaluation["finish_date"] or evaluation["created_at"],
+            }
+            for evaluation in evaluations[:3]
+        ],
+    }
+
+
 @app.get("/dashboard", response_model=schemas.DashboardResponse)
 def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = Depends(get_db)):
     campaigns = (

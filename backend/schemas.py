@@ -190,6 +190,26 @@ class AssignedEvaluationResponse(BaseModel):
     created_at: datetime
 
 
+class EmployeeDashboardHistoryItem(BaseModel):
+    id: int
+    title: str
+    subtitle: str
+    status: str
+    occurred_at: date | datetime | None = None
+
+
+class EmployeeDashboardResponse(BaseModel):
+    evaluations: list[AssignedEvaluationResponse]
+    open_count: int
+    completed_count: int
+    next_review_date: date | None = None
+    campaign_date_label: str
+    campaign_date: date | None = None
+    campaign_date_empty_text: str
+    latest_result: AssignedEvaluationResponse | None = None
+    history: list[EmployeeDashboardHistoryItem]
+
+
 class PeopleGroupResponse(BaseModel):
     id: int
     name: str
