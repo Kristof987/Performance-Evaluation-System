@@ -86,6 +86,58 @@ export type CampaignEvaluationRulesResponse = {
   }>;
 };
 
+export type CampaignEvaluationMatrixEmployee = {
+  id: number;
+  name: string;
+  roleId: number;
+  roleName: string;
+};
+
+export type CampaignEvaluationMatrixAssignment = {
+  evaluatorId: number;
+  evaluateeId: number;
+  formId: number;
+  filledFormId: number;
+  isCompleted: boolean;
+};
+
+export type CampaignGroupEvaluationMatrix = {
+  groupId: number;
+  groupName: string;
+  employees: CampaignEvaluationMatrixEmployee[];
+  assignments: CampaignEvaluationMatrixAssignment[];
+};
+
+export type CampaignEvaluationMatrix = {
+  groups: CampaignGroupEvaluationMatrix[];
+};
+
+export type CampaignEvaluationMatrixResponse = {
+  groups: Array<{
+    group_id: number;
+    group_name: string;
+    employees: Array<{
+      id: number;
+      name: string;
+      role_id: number;
+      role_name: string;
+    }>;
+    assignments: Array<{
+      evaluator_id: number;
+      evaluatee_id: number;
+      form_id: number;
+      filled_form_id: number;
+      is_completed: boolean;
+    }>;
+  }>;
+};
+
+export type CampaignEvaluationMatrixUpdateResponse = CampaignEvaluationMatrixResponse & {
+  created_count: number;
+  removed_count: number;
+  kept_completed_count: number;
+};
+
 export type CampaignFormValues = {
   name: string;
   description: string;

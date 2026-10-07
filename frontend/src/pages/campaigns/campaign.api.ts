@@ -1,5 +1,8 @@
 import type {
   Campaign,
+  CampaignEvaluationMatrix,
+  CampaignEvaluationMatrixResponse,
+  CampaignEvaluationMatrixUpdateResponse,
   CampaignEvaluationRules,
   CampaignEvaluationRulesResponse,
   CampaignFormValues,
@@ -48,6 +51,30 @@ function mapCampaignEvaluationRules(
         evaluateeRoleName: rule.evaluatee_role_name,
         formId: rule.form_id,
         ruleId: rule.rule_id,
+      })),
+    })),
+  };
+}
+
+function mapCampaignEvaluationMatrix(
+  response: CampaignEvaluationMatrixResponse,
+): CampaignEvaluationMatrix {
+  return {
+    groups: response.groups.map((group) => ({
+      groupId: group.group_id,
+      groupName: group.group_name,
+      employees: group.employees.map((employee) => ({
+        id: employee.id,
+        name: employee.name,
+        roleId: employee.role_id,
+        roleName: employee.role_name,
+      })),
+      assignments: group.assignments.map((assignment) => ({
+        evaluatorId: assignment.evaluator_id,
+        evaluateeId: assignment.evaluatee_id,
+        formId: assignment.form_id,
+        filledFormId: assignment.filled_form_id,
+        isCompleted: assignment.is_completed,
       })),
     })),
   };
@@ -190,4 +217,52 @@ export async function updateCampaignEvaluationRules(
       'Campaign form rules could not be updated.',
     ),
   );
+}
+
+export async function fetchCampaignEvaluationMatrix(
+  id: string,
+  signal: AbortSignal,
+): Promise<CampaignEvaluationMatrix> {
+  return mapCampaignEvaluationMatrix(
+    await requestCampaigns<CampaignEvaluationMatrixResponse>(
+      `/${encodeURIComponent(id)}/evaluation-matrix`,
+      { signal },
+      'Campaign evaluation matrix could not be loaded.',
+    ),
+  );
+}
+
+export async function updateCampaignEvaluationMatrix(
+  id: string,
+  assignments: Array<{
+    companyGroupId: number;
+    evaluatorId: number;
+    evaluateeId: number;
+  }>,
+): Promise<CampaignEvaluationMatrix & {
+  createdCount: number;
+  removedCount: number;
+  keptCompletedCount: number;
+}> {
+  const response = await requestCampaigns<CampaignEvaluationMatrixUpdateResponse>(
+    `/${encodeURIComponent(id)}/evaluation-matrix`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assignments: assignments.map((assignment) => ({
+          company_group_id: assignment.companyGroupId,
+          evaluator_id: assignment.evaluatorId,
+          evaluatee_id: assignment.evaluateeId,
+        })),
+      }),
+    },
+    'Campaign evaluation matrix could not be updated.',
+  );
+  return {
+    ...mapCampaignEvaluationMatrix(response),
+    createdCount: response.created_count,
+    removedCount: response.removed_count,
+    keptCompletedCount: response.kept_completed_count,
+  };
 }

@@ -1,4 +1,5 @@
 import CampaignFormsTable from './components/CampaignFormsTable';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import CampaignPage from './components/CampaignPage';
 import CampaignStats from './components/CampaignStats';
@@ -7,6 +8,7 @@ import CampaignForm from './components/CampaignForm';
 import { useCampaignDetails } from './hooks/useCampaignDetails';
 export function CampaignDetails() {
   const { id } = useParams();
+  const [activeMatrixGroupId, setActiveMatrixGroupId] = useState<number | null>(null);
   const {
     campaign,
     form,
@@ -18,28 +20,46 @@ export function CampaignDetails() {
     successMessage,
     campaignGroups,
     evaluationRules,
+    evaluationMatrix,
     selectedGroupIds,
     selectedRuleFormIds,
+    selectedMatrixAssignments,
     activeRuleKey,
     groupsMessage,
     rulesMessage,
+    matrixMessage,
     isSavingGroups,
     isSavingRules,
+    isSavingMatrix,
     hasEditChanges,
     hasGroupChanges,
     hasRuleChanges,
+    hasMatrixChanges,
     openEdit,
     closeEdit,
     updateForm,
     toggleGroup,
     updateRuleForm,
+    toggleMatrixAssignment,
+    getMatrixRuleFormId,
     activateRuleForm,
     applyRuleToMatchingGroups,
     applyGroupRulesToMatchingGroups,
     handleUpdateGroups,
     handleUpdateRules,
+    handleUpdateMatrix,
     handleUpdateCampaign,
   } = useCampaignDetails(id);
+  const activeMatrixGroup = evaluationMatrix.groups.find(
+    (group) => group.groupId === activeMatrixGroupId,
+  );
+
+  function getSelectedMatrixCount(groupId: number) {
+    return Object.entries(selectedMatrixAssignments).filter(
+      ([key, isSelected]) => isSelected && key.startsWith(`${groupId}:`),
+    ).length;
+  }
+
   if (isCampaignLoading) {
     return (
       <CampaignPage>
@@ -270,6 +290,58 @@ export function CampaignDetails() {
           </div>
         </section>
 
+        <section className="campaign-rules-card">
+          <div className="campaign-groups-heading">
+            <div>
+              <h2>Evaluation Matrix</h2>
+              <p>Select which employees should evaluate each other in every selected group.</p>
+            </div>
+            <button
+              className={hasMatrixChanges ? 'btn btn-primary' : 'btn btn-secondary'}
+              type="button"
+              disabled={isSavingMatrix || !hasMatrixChanges || hasRuleChanges}
+              onClick={handleUpdateMatrix}
+            >
+              {isSavingMatrix ? 'Saving...' : 'Save matrix'}
+            </button>
+          </div>
+
+          {evaluationMatrix.groups.length === 0 ? (
+            <div className="campaign-groups-empty">
+              Select and save at least one campaign group before setting up evaluations.
+            </div>
+          ) : (
+            <div className="campaign-matrix-group-grid">
+              {evaluationMatrix.groups.map((group) => (
+                <article className="campaign-matrix-group-card" key={group.groupId}>
+                  <div>
+                    <strong>{group.groupName}</strong>
+                    <p>
+                      {group.employees.length} employees · {getSelectedMatrixCount(group.groupId)} evaluations selected
+                    </p>
+                  </div>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    disabled={group.employees.length === 0}
+                    onClick={() => setActiveMatrixGroupId(group.groupId)}
+                  >
+                    Open matrix
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="campaign-groups-footer">
+            <span>
+              {Object.values(selectedMatrixAssignments).filter(Boolean).length} evaluations selected
+            </span>
+            {hasRuleChanges && <strong>Save form rules before editing the matrix.</strong>}
+            {matrixMessage !== '' && <strong>{matrixMessage}</strong>}
+          </div>
+        </section>
+
         <h2>Forms & assigned groups</h2>
 
         <CampaignFormsTable campaign={campaign} />
@@ -299,6 +371,121 @@ export function CampaignDetails() {
             onCancel={closeEdit}
           />
         </CampaignModal>
+      )}
+
+      {activeMatrixGroup !== undefined && (
+        <div className="campaign-modal-backdrop" role="presentation">
+          <section
+            className="campaign-modal campaign-matrix-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="campaign-matrix-title"
+          >
+            <div className="campaign-modal-header campaign-matrix-modal-header">
+              <div>
+                <span className="campaign-modal-eyebrow">Evaluation Matrix</span>
+                <h2 id="campaign-matrix-title">{activeMatrixGroup.groupName}</h2>
+                <p>
+                  {activeMatrixGroup.employees.length} employees · {getSelectedMatrixCount(activeMatrixGroup.groupId)} evaluations selected
+                </p>
+              </div>
+              <div className="campaign-matrix-modal-actions">
+                <button
+                  className={hasMatrixChanges ? 'btn btn-primary' : 'btn btn-secondary'}
+                  type="button"
+                  disabled={isSavingMatrix || !hasMatrixChanges || hasRuleChanges}
+                  onClick={handleUpdateMatrix}
+                >
+                  {isSavingMatrix ? 'Saving...' : 'Save matrix'}
+                </button>
+                <button
+                  className="campaign-modal-close"
+                  type="button"
+                  aria-label="Close evaluation matrix"
+                  onClick={() => setActiveMatrixGroupId(null)}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {hasRuleChanges && (
+              <div className="campaign-matrix-warning">
+                Save form rules before editing the evaluation matrix.
+              </div>
+            )}
+
+            <div className="campaign-matrix-table-wrap campaign-matrix-modal-table-wrap">
+              <table className="campaign-matrix-table">
+                <thead>
+                  <tr>
+                    <th>Evaluator</th>
+                    {activeMatrixGroup.employees.map((evaluatee) => (
+                      <th key={evaluatee.id}>
+                        <span>{evaluatee.name}</span>
+                        <small>{evaluatee.roleName}</small>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeMatrixGroup.employees.map((evaluator) => (
+                    <tr key={evaluator.id}>
+                      <th>
+                        <span>{evaluator.name}</span>
+                        <small>{evaluator.roleName}</small>
+                      </th>
+                      {activeMatrixGroup.employees.map((evaluatee) => {
+                        const matrixKey = `${activeMatrixGroup.groupId}:${evaluator.id}:${evaluatee.id}`;
+                        const formId = getMatrixRuleFormId(
+                          activeMatrixGroup.groupId,
+                          evaluator.roleId,
+                          evaluatee.roleId,
+                        );
+                        const assignment = activeMatrixGroup.assignments.find(
+                          (item) =>
+                            item.evaluatorId === evaluator.id &&
+                            item.evaluateeId === evaluatee.id,
+                        );
+                        const isDisabled =
+                          hasRuleChanges || formId === null || assignment?.isCompleted === true;
+                        const title =
+                          hasRuleChanges
+                            ? 'Save form rules before editing the evaluation matrix.'
+                            : formId === null
+                              ? 'No form rule is selected for these roles.'
+                              : assignment?.isCompleted === true
+                                ? 'Completed evaluations cannot be removed from the matrix.'
+                                : `${evaluator.name} evaluates ${evaluatee.name}`;
+                        return (
+                          <td key={evaluatee.id} title={title}>
+                            <input
+                              type="checkbox"
+                              checked={selectedMatrixAssignments[matrixKey] ?? false}
+                              disabled={isDisabled}
+                              onChange={() =>
+                                toggleMatrixAssignment(
+                                  activeMatrixGroup.groupId,
+                                  evaluator.id,
+                                  evaluatee.id,
+                                )
+                              }
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="campaign-matrix-modal-footer">
+              <span>{Object.values(selectedMatrixAssignments).filter(Boolean).length} total evaluations selected</span>
+              {matrixMessage !== '' && <strong>{matrixMessage}</strong>}
+            </div>
+          </section>
+        </div>
       )}
     </CampaignPage>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type {
   Campaign,
+  CampaignEvaluationMatrix,
   CampaignEvaluationRules,
   CampaignFormValues,
   CampaignGroups,
@@ -14,9 +15,11 @@ import {
 } from '../campaign.utils';
 import {
   fetchCampaign,
+  fetchCampaignEvaluationMatrix,
   fetchCampaignEvaluationRules,
   fetchCampaignGroups,
   updateCampaign,
+  updateCampaignEvaluationMatrix,
   updateCampaignEvaluationRules,
   updateCampaignGroups,
 } from '../campaign.api';
@@ -30,6 +33,10 @@ function areGroupIdsEqual(first: number[], second: number[]) {
 
 function getRuleKey(groupId: number, evaluatorRoleId: number, evaluateeRoleId: number) {
   return `${groupId}:${evaluatorRoleId}:${evaluateeRoleId}`;
+}
+
+function getMatrixKey(groupId: number, evaluatorId: number, evaluateeId: number) {
+  return `${groupId}:${evaluatorId}:${evaluateeId}`;
 }
 
 function getRuleFormMap(rules: CampaignEvaluationRules) {
@@ -53,6 +60,27 @@ function areRuleFormMapsEqual(
   return true;
 }
 
+function getMatrixAssignmentMap(matrix: CampaignEvaluationMatrix) {
+  const map: Record<string, boolean> = {};
+  for (const group of matrix.groups) {
+    for (const assignment of group.assignments) {
+      map[getMatrixKey(group.groupId, assignment.evaluatorId, assignment.evaluateeId)] = true;
+    }
+  }
+  return map;
+}
+
+function areMatrixAssignmentMapsEqual(
+  first: Record<string, boolean>,
+  second: Record<string, boolean>,
+) {
+  const keys = new Set([...Object.keys(first), ...Object.keys(second)]);
+  for (const key of keys) {
+    if ((first[key] ?? false) !== (second[key] ?? false)) return false;
+  }
+  return true;
+}
+
 export function useCampaignDetails(id: string | undefined) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [campaignGroups, setCampaignGroups] = useState<CampaignGroups>({
@@ -63,7 +91,11 @@ export function useCampaignDetails(id: string | undefined) {
     forms: [],
     groups: [],
   });
+  const [evaluationMatrix, setEvaluationMatrix] = useState<CampaignEvaluationMatrix>({
+    groups: [],
+  });
   const [selectedRuleFormIds, setSelectedRuleFormIds] = useState<Record<string, number | null>>({});
+  const [selectedMatrixAssignments, setSelectedMatrixAssignments] = useState<Record<string, boolean>>({});
   const [activeRuleKey, setActiveRuleKey] = useState<string | null>(null);
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
   const [form, setForm] = useState<CampaignFormValues>(emptyCampaignForm);
@@ -73,8 +105,10 @@ export function useCampaignDetails(id: string | undefined) {
   const [campaignError, setCampaignError] = useState('');
   const [groupsMessage, setGroupsMessage] = useState('');
   const [rulesMessage, setRulesMessage] = useState('');
+  const [matrixMessage, setMatrixMessage] = useState('');
   const [isSavingGroups, setIsSavingGroups] = useState(false);
   const [isSavingRules, setIsSavingRules] = useState(false);
+  const [isSavingMatrix, setIsSavingMatrix] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const saving = useRef(false);
@@ -86,13 +120,16 @@ export function useCampaignDetails(id: string | undefined) {
     setCampaign(null);
     setCampaignGroups({ availableGroups: [], assignedGroupIds: [] });
     setEvaluationRules({ forms: [], groups: [] });
+    setEvaluationMatrix({ groups: [] });
     setSelectedRuleFormIds({});
+    setSelectedMatrixAssignments({});
     setActiveRuleKey(null);
     setSelectedGroupIds([]);
     setForm(emptyCampaignForm);
     setCampaignError('');
     setGroupsMessage('');
     setRulesMessage('');
+    setMatrixMessage('');
     setIsEditOpen(false);
     setSaveMessage('');
     setSuccessMessage('');
@@ -107,13 +144,16 @@ export function useCampaignDetails(id: string | undefined) {
         fetchCampaign(id, controller.signal),
         fetchCampaignGroups(id, controller.signal),
         fetchCampaignEvaluationRules(id, controller.signal),
+        fetchCampaignEvaluationMatrix(id, controller.signal),
       ])
-        .then(([loaded, loadedGroups, loadedRules]) => {
+        .then(([loaded, loadedGroups, loadedRules, loadedMatrix]) => {
           if (!controller.signal.aborted) {
             setCampaign(loaded);
             setCampaignGroups(loadedGroups);
             setEvaluationRules(loadedRules);
+            setEvaluationMatrix(loadedMatrix);
             setSelectedRuleFormIds(getRuleFormMap(loadedRules));
+            setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
             setSelectedGroupIds(loadedGroups.assignedGroupIds);
             setForm(getCampaignForm(loaded));
           }
@@ -161,6 +201,10 @@ export function useCampaignDetails(id: string | undefined) {
     selectedRuleFormIds,
     getRuleFormMap(evaluationRules),
   );
+  const hasMatrixChanges = !areMatrixAssignmentMapsEqual(
+    selectedMatrixAssignments,
+    getMatrixAssignmentMap(evaluationMatrix),
+  );
 
   function toggleGroup(groupId: number) {
     setSelectedGroupIds((current) =>
@@ -170,6 +214,7 @@ export function useCampaignDetails(id: string | undefined) {
     );
     setGroupsMessage('');
     setRulesMessage('');
+    setMatrixMessage('');
     setSuccessMessage('');
   }
 
@@ -185,7 +230,30 @@ export function useCampaignDetails(id: string | undefined) {
       [getRuleKey(groupId, evaluatorRoleId, evaluateeRoleId)]: formId,
     }));
     setRulesMessage('');
+    setMatrixMessage('');
     setSuccessMessage('');
+  }
+
+  function toggleMatrixAssignment(
+    groupId: number,
+    evaluatorId: number,
+    evaluateeId: number,
+  ) {
+    const key = getMatrixKey(groupId, evaluatorId, evaluateeId);
+    setSelectedMatrixAssignments((current) => ({
+      ...current,
+      [key]: !(current[key] ?? false),
+    }));
+    setMatrixMessage('');
+    setSuccessMessage('');
+  }
+
+  function getMatrixRuleFormId(
+    groupId: number,
+    evaluatorRoleId: number,
+    evaluateeRoleId: number,
+  ) {
+    return selectedRuleFormIds[getRuleKey(groupId, evaluatorRoleId, evaluateeRoleId)] ?? null;
   }
 
   function activateRuleForm(
@@ -267,9 +335,12 @@ export function useCampaignDetails(id: string | undefined) {
       setSelectedGroupIds(saved.assignedGroupIds);
       const controller = new AbortController();
       const loadedRules = await fetchCampaignEvaluationRules(id, controller.signal);
+      const loadedMatrix = await fetchCampaignEvaluationMatrix(id, controller.signal);
       if (routeVersion.current !== version) return;
       setEvaluationRules(loadedRules);
+      setEvaluationMatrix(loadedMatrix);
       setSelectedRuleFormIds(getRuleFormMap(loadedRules));
+      setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setSuccessMessage('Campaign groups updated successfully.');
     } catch (error) {
       if (routeVersion.current === version) {
@@ -308,6 +379,11 @@ export function useCampaignDetails(id: string | undefined) {
       if (routeVersion.current !== version) return;
       setEvaluationRules(saved);
       setSelectedRuleFormIds(getRuleFormMap(saved));
+      const controller = new AbortController();
+      const loadedMatrix = await fetchCampaignEvaluationMatrix(id, controller.signal);
+      if (routeVersion.current !== version) return;
+      setEvaluationMatrix(loadedMatrix);
+      setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setSuccessMessage('Campaign form rules updated successfully.');
     } catch (error) {
       if (routeVersion.current === version) {
@@ -319,6 +395,49 @@ export function useCampaignDetails(id: string | undefined) {
       }
     } finally {
       if (routeVersion.current === version) setIsSavingRules(false);
+    }
+  }
+
+  async function handleUpdateMatrix() {
+    if (id === undefined || isSavingMatrix || !hasMatrixChanges) return;
+    const version = routeVersion.current;
+    setIsSavingMatrix(true);
+    setMatrixMessage('');
+    try {
+      const assignmentsToSave = evaluationMatrix.groups.flatMap((group) =>
+        group.employees.flatMap((evaluator) =>
+          group.employees.flatMap((evaluatee) => {
+            const key = getMatrixKey(group.groupId, evaluator.id, evaluatee.id);
+            if (!(selectedMatrixAssignments[key] ?? false)) return [];
+            return [{
+              companyGroupId: group.groupId,
+              evaluatorId: evaluator.id,
+              evaluateeId: evaluatee.id,
+            }];
+          }),
+        ),
+      );
+      const saved = await updateCampaignEvaluationMatrix(id, assignmentsToSave);
+      if (routeVersion.current !== version) return;
+      setEvaluationMatrix({ groups: saved.groups });
+      setSelectedMatrixAssignments(getMatrixAssignmentMap(saved));
+      setSuccessMessage(
+        `Evaluation matrix updated. Created: ${saved.createdCount}, removed: ${saved.removedCount}${
+          saved.keptCompletedCount > 0
+            ? `, kept completed: ${saved.keptCompletedCount}`
+            : ''
+        }.`,
+      );
+    } catch (error) {
+      if (routeVersion.current === version) {
+        setMatrixMessage(
+          error instanceof Error
+            ? error.message
+            : 'Campaign evaluation matrix could not be updated.',
+        );
+      }
+    } finally {
+      if (routeVersion.current === version) setIsSavingMatrix(false);
     }
   }
 
@@ -364,26 +483,34 @@ export function useCampaignDetails(id: string | undefined) {
     campaignError,
     campaignGroups,
     evaluationRules,
+    evaluationMatrix,
     selectedGroupIds,
     selectedRuleFormIds,
+    selectedMatrixAssignments,
     activeRuleKey,
     groupsMessage,
     rulesMessage,
+    matrixMessage,
     saveMessage,
     successMessage,
     isSavingGroups,
     isSavingRules,
+    isSavingMatrix,
     hasEditChanges,
     hasGroupChanges,
     hasRuleChanges,
+    hasMatrixChanges,
     updateForm,
     toggleGroup,
     updateRuleForm,
+    toggleMatrixAssignment,
+    getMatrixRuleFormId,
     activateRuleForm,
     applyRuleToMatchingGroups,
     applyGroupRulesToMatchingGroups,
     handleUpdateGroups,
     handleUpdateRules,
+    handleUpdateMatrix,
     openEdit,
     closeEdit,
     handleUpdateCampaign,
