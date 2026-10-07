@@ -9,6 +9,7 @@ import { useCampaignDetails } from './hooks/useCampaignDetails';
 export function CampaignDetails() {
   const { id } = useParams();
   const [activeMatrixGroupId, setActiveMatrixGroupId] = useState<number | null>(null);
+  const [minimumReviewers, setMinimumReviewers] = useState('1');
   const {
     campaign,
     form,
@@ -42,6 +43,10 @@ export function CampaignDetails() {
     updateRuleForm,
     toggleMatrixAssignment,
     getMatrixRuleFormId,
+    applyMatrixSelectAll,
+    applyMatrixSelfEvaluations,
+    applyMatrixMinimumReviewers,
+    applyMatrixDeleteAll,
     activateRuleForm,
     applyRuleToMatchingGroups,
     applyGroupRulesToMatchingGroups,
@@ -58,6 +63,11 @@ export function CampaignDetails() {
     return Object.entries(selectedMatrixAssignments).filter(
       ([key, isSelected]) => isSelected && key.startsWith(`${groupId}:`),
     ).length;
+  }
+
+  function getMinimumReviewerValue() {
+    const parsed = Number.parseInt(minimumReviewers, 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
   }
 
   if (isCampaignLoading) {
@@ -478,6 +488,58 @@ export function CampaignDetails() {
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            <div className="campaign-matrix-bulk-actions" aria-label="Matrix quick actions">
+              <button
+                className="campaign-rule-copy-btn"
+                type="button"
+                disabled={hasRuleChanges}
+                onClick={() => applyMatrixSelectAll(activeMatrixGroup.groupId)}
+              >
+                Add All
+              </button>
+              <button
+                className="campaign-rule-copy-btn"
+                type="button"
+                disabled={hasRuleChanges}
+                onClick={() => applyMatrixSelfEvaluations(activeMatrixGroup.groupId)}
+              >
+                Add Self-evaluations
+              </button>
+              <div className="campaign-matrix-minimum-action">
+                <label htmlFor="minimum-reviewers-input">Minimum reviews per Employee</label>
+                <input
+                  id="minimum-reviewers-input"
+                  className="form-control"
+                  type="number"
+                  min="0"
+                  value={minimumReviewers}
+                  disabled={hasRuleChanges}
+                  onChange={(event) => setMinimumReviewers(event.target.value)}
+                />
+                <button
+                  className="campaign-rule-copy-btn"
+                  type="button"
+                  disabled={hasRuleChanges}
+                  onClick={() =>
+                    applyMatrixMinimumReviewers(
+                      activeMatrixGroup.groupId,
+                      getMinimumReviewerValue(),
+                    )
+                  }
+                >
+                  Generate
+                </button>
+              </div>
+              <button
+                className="campaign-rule-copy-btn campaign-matrix-danger-btn"
+                type="button"
+                disabled={hasRuleChanges}
+                onClick={() => applyMatrixDeleteAll(activeMatrixGroup.groupId)}
+              >
+                Delete All
+              </button>
             </div>
 
             <div className="campaign-matrix-modal-footer">

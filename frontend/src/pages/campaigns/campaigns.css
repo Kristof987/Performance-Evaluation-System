@@ -347,6 +347,55 @@
   overflow: auto;
 }
 
+.campaign-matrix-bulk-actions {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.campaign-matrix-bulk-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.campaign-matrix-minimum-action {
+  align-items: center;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+}
+
+.campaign-matrix-minimum-action label {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  padding-left: 8px;
+  white-space: nowrap;
+}
+
+.campaign-matrix-minimum-action .form-control {
+  min-height: 34px;
+  padding: 6px 8px;
+  width: 72px;
+}
+
+.campaign-matrix-danger-btn {
+  border-color: rgba(220, 38, 38, 0.26);
+  color: var(--color-danger);
+}
+
+.campaign-matrix-danger-btn:hover {
+  background: #fef2f2;
+  border-color: rgba(220, 38, 38, 0.36);
+}
+
 .campaign-matrix-table {
   border-collapse: collapse;
   min-width: 720px;
@@ -421,9 +470,27 @@
 @media (max-width: 700px) {
   .campaign-matrix-group-card,
   .campaign-matrix-modal-actions,
+  .campaign-matrix-minimum-action,
   .campaign-matrix-modal-footer {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .campaign-matrix-bulk-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .campaign-matrix-minimum-action {
+    border-radius: 14px;
+  }
+
+  .campaign-matrix-minimum-action label {
+    padding-left: 0;
+  }
+
+  .campaign-matrix-minimum-action .form-control {
+    width: 100%;
   }
 
   .campaign-matrix-modal {

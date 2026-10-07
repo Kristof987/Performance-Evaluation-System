@@ -339,6 +339,16 @@ class DashboardFormSummary(BaseModel):
     overdue_count: int
 
 
+class DashboardParticipantSummary(BaseModel):
+    user_id: int
+    name: str
+    email: EmailStr
+    profile_image_url: str | None = None
+    role_name: str
+    groups: list[str]
+    evaluations_left: int = 0
+
+
 class DashboardUpcomingReview(BaseModel):
     campaign_id: int
     name: str
@@ -347,12 +357,21 @@ class DashboardUpcomingReview(BaseModel):
     form_count: int
 
 
+class DashboardUpcomingDeadline(BaseModel):
+    campaign_id: int
+    name: str
+    deadline_type: str
+    date: date
+
+
 class DashboardResponse(BaseModel):
     campaigns: list[DashboardCampaignSummary]
     selected_campaign_id: int | None
     metrics: DashboardMetricSummary | None
     forms: list[DashboardFormSummary]
+    participants: list[DashboardParticipantSummary]
     upcoming_reviews: list[DashboardUpcomingReview]
+    upcoming_deadlines: list[DashboardUpcomingDeadline]
 
 class CompanyGroupCreate(BaseModel):
     name: str

@@ -256,6 +256,95 @@ export function useCampaignDetails(id: string | undefined) {
     return selectedRuleFormIds[getRuleKey(groupId, evaluatorRoleId, evaluateeRoleId)] ?? null;
   }
 
+  function applyMatrixSelectAll(groupId: number) {
+    const group = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    if (group === undefined) return;
+
+    setSelectedMatrixAssignments((current) => {
+      const next = { ...current };
+      for (const evaluator of group.employees) {
+        for (const evaluatee of group.employees) {
+          const formId = getMatrixRuleFormId(group.groupId, evaluator.roleId, evaluatee.roleId);
+          if (formId === null) continue;
+          next[getMatrixKey(group.groupId, evaluator.id, evaluatee.id)] = true;
+        }
+      }
+      return next;
+    });
+    setMatrixMessage('');
+    setSuccessMessage('');
+  }
+
+  function applyMatrixSelfEvaluations(groupId: number) {
+    const group = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    if (group === undefined) return;
+
+    setSelectedMatrixAssignments((current) => {
+      const next = { ...current };
+      for (const employee of group.employees) {
+        const formId = getMatrixRuleFormId(group.groupId, employee.roleId, employee.roleId);
+        if (formId === null) continue;
+        next[getMatrixKey(group.groupId, employee.id, employee.id)] = true;
+      }
+      return next;
+    });
+    setMatrixMessage('');
+    setSuccessMessage('');
+  }
+
+  function applyMatrixMinimumReviewers(groupId: number, minimumReviewers: number) {
+    const group = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    if (group === undefined) return;
+    const normalizedMinimum = Math.max(0, Math.floor(minimumReviewers));
+
+    setSelectedMatrixAssignments((current) => {
+      const next = { ...current };
+      for (const evaluatee of group.employees) {
+        const availableEvaluators = group.employees.filter((evaluator) => {
+          if (evaluator.id === evaluatee.id) return false;
+          return getMatrixRuleFormId(group.groupId, evaluator.roleId, evaluatee.roleId) !== null;
+        });
+        let selectedCount = availableEvaluators.filter(
+          (evaluator) => next[getMatrixKey(group.groupId, evaluator.id, evaluatee.id)] ?? false,
+        ).length;
+
+        for (const evaluator of availableEvaluators) {
+          if (selectedCount >= normalizedMinimum) break;
+          const key = getMatrixKey(group.groupId, evaluator.id, evaluatee.id);
+          if (next[key] === true) continue;
+          next[key] = true;
+          selectedCount += 1;
+        }
+      }
+      return next;
+    });
+    setMatrixMessage('');
+    setSuccessMessage('');
+  }
+
+  function applyMatrixDeleteAll(groupId: number) {
+    const group = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    if (group === undefined) return;
+    const completedKeys = new Set(
+      group.assignments
+        .filter((assignment) => assignment.isCompleted)
+        .map((assignment) => getMatrixKey(group.groupId, assignment.evaluatorId, assignment.evaluateeId)),
+    );
+
+    setSelectedMatrixAssignments((current) => {
+      const next = { ...current };
+      for (const evaluator of group.employees) {
+        for (const evaluatee of group.employees) {
+          const key = getMatrixKey(group.groupId, evaluator.id, evaluatee.id);
+          next[key] = completedKeys.has(key);
+        }
+      }
+      return next;
+    });
+    setMatrixMessage('');
+    setSuccessMessage('');
+  }
+
   function activateRuleForm(
     groupId: number,
     evaluatorRoleId: number,
@@ -505,6 +594,10 @@ export function useCampaignDetails(id: string | undefined) {
     updateRuleForm,
     toggleMatrixAssignment,
     getMatrixRuleFormId,
+    applyMatrixSelectAll,
+    applyMatrixSelfEvaluations,
+    applyMatrixMinimumReviewers,
+    applyMatrixDeleteAll,
     activateRuleForm,
     applyRuleToMatchingGroups,
     applyGroupRulesToMatchingGroups,

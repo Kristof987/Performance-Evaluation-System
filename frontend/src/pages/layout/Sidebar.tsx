@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type PointerEvent } from 'react';
 import { Link } from 'react-router';
 import {
   ChartNoAxesCombined,
@@ -29,12 +29,41 @@ export default function Sidebar({
   onToggle,
 }: SidebarProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const dragStartX = useRef<number | null>(null);
+  const hasDragged = useRef(false);
+  const suppressNextClick = useRef(false);
   const sidebarUser = getSidebarUser();
   const sidebarUserName =
     sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
   const dashboardPath = getDashboardPath();
   const isDashboardActive = activePage === 'hr-home' || activePage === 'employee-home';
   const isHrOrManager = isHrOrManagerRole(sidebarUser?.role_name ?? null);
+
+  function handleTogglePointerDown(event: PointerEvent<HTMLButtonElement>) {
+    dragStartX.current = event.clientX;
+    hasDragged.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleTogglePointerMove(event: PointerEvent<HTMLButtonElement>) {
+    if (dragStartX.current === null) return;
+    if (Math.abs(event.clientX - dragStartX.current) > 6) {
+      hasDragged.current = true;
+    }
+  }
+
+  function handleTogglePointerUp(event: PointerEvent<HTMLButtonElement>) {
+    if (dragStartX.current === null) return;
+    const deltaX = event.clientX - dragStartX.current;
+    dragStartX.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+
+    if (!hasDragged.current) return;
+    suppressNextClick.current = true;
+    if (!isSidebarCollapsed && deltaX < -28) onToggle();
+    if (isSidebarCollapsed && deltaX > 28) onToggle();
+  }
+
   return (
     <aside className="sidebar">
       <button
@@ -42,7 +71,21 @@ export default function Sidebar({
         type="button"
         aria-label={isSidebarCollapsed ? 'Open sidebar' : 'Close sidebar'}
         aria-expanded={!isSidebarCollapsed}
-        onClick={onToggle}
+        title="Drag or click to resize sidebar"
+        onClick={(event) => {
+          if (suppressNextClick.current) {
+            suppressNextClick.current = false;
+            event.preventDefault();
+            return;
+          }
+          onToggle();
+        }}
+        onPointerDown={handleTogglePointerDown}
+        onPointerMove={handleTogglePointerMove}
+        onPointerUp={handleTogglePointerUp}
+        onPointerCancel={() => {
+          dragStartX.current = null;
+        }}
       >
         <span />
       </button>

@@ -621,6 +621,48 @@ def get_campaign_participant_count(campaign_id: int, db: Session):
     return len(evaluator_ids | evaluatee_ids)
 
 
+def get_campaign_participants(campaign_id: int, db: Session):
+    assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db)
+    if len(assigned_group_ids) == 0:
+        return []
+
+    rows = (
+        db.query(models.User, models.CompanyRole, models.CompanyGroup)
+        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
+        .join(models.user_company_groups, models.user_company_groups.c.user_id == models.User.id)
+        .join(models.CompanyGroup, models.CompanyGroup.id == models.user_company_groups.c.company_group_id)
+        .filter(models.user_company_groups.c.company_group_id.in_(assigned_group_ids))
+        .filter(models.User.is_active.is_(True))
+        .order_by(models.User.username.asc(), models.CompanyGroup.name.asc())
+        .all()
+    )
+
+    participants_by_id = {}
+    evaluations_left_by_user_id = dict(
+        db.query(models.FilledForm.evaluator_id, func.count(models.FilledForm.id))
+        .filter(models.FilledForm.campaign_id == campaign_id)
+        .filter(models.FilledForm.finish_date.is_(None))
+        .group_by(models.FilledForm.evaluator_id)
+        .all()
+    )
+    for user, role, group in rows:
+        participant = participants_by_id.setdefault(
+            user.id,
+            {
+                "user_id": user.id,
+                "name": user.username,
+                "email": user.email,
+                "profile_image_url": user.profile_image_url,
+                "role_name": role.name,
+                "groups": [],
+                "evaluations_left": evaluations_left_by_user_id.get(user.id, 0),
+            },
+        )
+        participant["groups"].append(group.name)
+
+    return list(participants_by_id.values())
+
+
 @app.get("/users/{user_id}/assigned-evaluations", response_model=list[schemas.AssignedEvaluationResponse])
 def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
     user = (
@@ -767,6 +809,29 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
         }
         for campaign in upcoming_campaigns
     ]
+    upcoming_deadlines = sorted(
+        [
+            {
+                "campaign_id": campaign.id,
+                "name": campaign.name,
+                "deadline_type": "Starts",
+                "date": campaign.start_date,
+            }
+            for campaign in campaigns
+            if campaign.start_date >= today
+        ]
+        + [
+            {
+                "campaign_id": campaign.id,
+                "name": campaign.name,
+                "deadline_type": "Ends",
+                "date": campaign.end_date,
+            }
+            for campaign in campaigns
+            if campaign.end_date is not None and campaign.end_date >= today
+        ],
+        key=lambda item: item["date"],
+    )[:8]
     campaign_summaries = [
         {
             "id": campaign.id,
@@ -782,7 +847,9 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
             "selected_campaign_id": None,
             "metrics": None,
             "forms": [],
+            "participants": [],
             "upcoming_reviews": upcoming_reviews,
+            "upcoming_deadlines": upcoming_deadlines,
         }
 
     assignments = (
@@ -850,7 +917,9 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
         "selected_campaign_id": selected_campaign.id,
         "metrics": metrics,
         "forms": forms,
+        "participants": get_campaign_participants(selected_campaign.id, db),
         "upcoming_reviews": upcoming_reviews,
+        "upcoming_deadlines": upcoming_deadlines,
     }
 
 

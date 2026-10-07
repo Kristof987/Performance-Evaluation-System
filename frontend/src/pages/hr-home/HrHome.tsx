@@ -1,13 +1,13 @@
 import AppLayout from '../layout/AppLayout';
-import { getSidebarUser, formatUserName } from '../layout/sidebar-user';
+import {
+  getSidebarUser,
+  formatUserName,
+  getUserInitials,
+} from '../layout/sidebar-user';
 import './hr-home.css';
 import {
   ChevronDown,
-  Search,
-  Bell,
-  Plus,
   Folder,
-  ArrowUpRight,
   BellRing,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -44,12 +44,21 @@ type DashboardForm = {
   overdue_count: number;
 };
 
-type DashboardUpcomingReview = {
+type DashboardParticipant = {
+  user_id: number;
+  name: string;
+  email: string;
+  profile_image_url: string | null;
+  role_name: string;
+  groups: string[];
+  evaluations_left: number;
+};
+
+type DashboardUpcomingDeadline = {
   campaign_id: number;
   name: string;
-  start_date: string;
-  participant_count: number;
-  form_count: number;
+  deadline_type: 'Starts' | 'Ends';
+  date: string;
 };
 
 type DashboardResponse = {
@@ -57,7 +66,8 @@ type DashboardResponse = {
   selected_campaign_id: number | null;
   metrics: DashboardMetrics | null;
   forms: DashboardForm[];
-  upcoming_reviews: DashboardUpcomingReview[];
+  participants: DashboardParticipant[];
+  upcoming_deadlines: DashboardUpcomingDeadline[];
 };
 
 function HrHome() {
@@ -68,9 +78,11 @@ function HrHome() {
   );
   const [dashboardMetrics, setDashboardMetrics] =
     useState<DashboardMetrics | null>(null);
-  const [dashboardForms, setDashboardForms] = useState<DashboardForm[]>([]);
-  const [upcomingReviews, setUpcomingReviews] = useState<
-    DashboardUpcomingReview[]
+  const [dashboardParticipants, setDashboardParticipants] = useState<
+    DashboardParticipant[]
+  >([]);
+  const [upcomingDeadlines, setUpcomingDeadlines] = useState<
+    DashboardUpcomingDeadline[]
   >([]);
   const [isCampaignListOpen, setIsCampaignListOpen] = useState(false);
   const [isDashboardLoading, setIsDashboardLoading] = useState(true);
@@ -104,8 +116,8 @@ function HrHome() {
       setCampaigns(dashboard.campaigns);
       setSelectedCampaignId(dashboard.selected_campaign_id);
       setDashboardMetrics(dashboard.metrics);
-      setDashboardForms(dashboard.forms);
-      setUpcomingReviews(dashboard.upcoming_reviews);
+      setDashboardParticipants(dashboard.participants ?? []);
+      setUpcomingDeadlines(dashboard.upcoming_deadlines ?? []);
       setDashboardError('');
     } catch (error) {
       console.log('Dashboard could not be loaded', error);
@@ -127,20 +139,12 @@ function HrHome() {
     navigate(`/campaigns/${selectedCampaign.id}`);
   };
 
-  function getCurrentUser() {
-    return sidebarUserName;
-  }
-
   function getTimeOfDay() {
     const currentHour = new Date().getHours();
 
-    if (currentHour >= 5 && currentHour < 12) {
-      return 'morning';
-    } else if (currentHour >= 12 && currentHour < 18) {
-      return 'afternoon';
-    } else {
-      return 'evening';
-    }
+    if (currentHour >= 5 && currentHour < 12) return 'morning';
+    if (currentHour >= 12 && currentHour < 18) return 'afternoon';
+    return 'evening';
   }
 
   function getFullDate() {
@@ -177,46 +181,26 @@ function HrHome() {
     }).format(new Date(`${value}T00:00:00`));
   }
 
-  function getProgressPercent(submittedCount: number, assignmentCount: number) {
-    return assignmentCount === 0
-      ? 0
-      : Math.round((submittedCount / assignmentCount) * 100);
-  }
-
   return (
     <AppLayout activePage="hr-home" pageClassName="hr-home-page">
       <div className="main-content">
         <div className="topbar">
           <div className="greeting">
             <div className="greeting-title">
-              Good {getTimeOfDay()}, {getCurrentUser()}!
+              Good {getTimeOfDay()}, {sidebarUserName}
             </div>
             <div className="greeting-date">{getFullDate()}</div>
           </div>
-          <div className="button-group">
-            <div className="btn btn-secondary icon-button">
-              <Search size={16} />
-            </div>
-            <div className="btn btn-secondary icon-button">
-              <Bell size={16} />
-            </div>
-          </div>
+          <aside className="dashboard-tip" aria-label="Dashboard tip">
+            <strong>Did you know?</strong>
+            <span>
+              Campaigns with clear role-based review rules are easier to track and usually need fewer manual follow-ups.
+            </span>
+          </aside>
         </div>
 
         <div className="section-header">
           <div className="overview-title">Campaign overview</div>
-          {!isDashboardLoading && campaigns.length > 0 && (
-            <div className="button-group">
-              <div className="btn btn-secondary dashboard-button">
-                <ChevronDown size={15} color="#5A6079" />
-                <span>All groups</span>
-              </div>
-              <div className="btn btn-primary dashboard-button">
-                <Plus size={15} />
-                <span>Add form to campaign</span>
-              </div>
-            </div>
-          )}
         </div>
 
         {isDashboardLoading ? (
@@ -347,66 +331,55 @@ function HrHome() {
               <div className="workspace">
                 <div className="forms-section">
                   <div className="section-header">
-                    <div className="section-title">Forms in this campaign</div>
-                    <div className="section-link">View all forms →</div>
+                    <div className="section-title">Participants</div>
+                    <button className="campaign-details-link" type="button">
+                      View full completion status →
+                    </button>
                   </div>
 
-                  <div className="card forms-table">
-                    <div className="forms-table-header">
-                      <div className="forms-table-heading col-form">Form</div>
-                      <div className="forms-table-heading col-completion">
-                        Completion
+                  <div className="card participants-table">
+                    <div className="participants-table-header">
+                      <div className="participants-table-heading col-participant">Employee</div>
+                      <div className="participants-table-heading col-role">Role</div>
+                      <div className="participants-table-heading col-groups">Groups</div>
+                      <div className="participants-table-heading col-evaluations-left">
+                        Evaluations left
                       </div>
-                      <div className="forms-table-heading col-closes">
-                        Closes
-                      </div>
-                      <div className="forms-table-heading col-action"></div>
                     </div>
 
-                    {dashboardForms.length === 0 && (
+                    {dashboardParticipants.length === 0 && (
                       <div className="forms-empty-state">
-                        No forms are assigned to this campaign.
+                        No participants are assigned to this campaign.
                       </div>
                     )}
 
-                    {dashboardForms.map((form) => {
-                      const progressPercent = getProgressPercent(
-                        form.submitted_count,
-                        form.assignment_count,
-                      );
-
-                      return (
-                        <div className="form-row" key={form.form_id}>
-                          <div className="form-info">
-                            <div className="form-name">{form.name}</div>
-                            <div className="form-audience">{form.audience}</div>
-                          </div>
-                          <div className="form-progress">
-                            <div className="form-progress-label">
-                              {form.submitted_count} / {form.assignment_count}{' '}
-                              submitted
+                    {dashboardParticipants.map((participant) => (
+                      <div className="participant-row" key={participant.user_id}>
+                        <div className="user-avatar participant-avatar">
+                          {participant.profile_image_url ? (
+                            <img
+                              src={participant.profile_image_url}
+                              alt={participant.name}
+                            />
+                          ) : (
+                            <div className="user-initials">
+                              {getUserInitials(participant.name)}
                             </div>
-                            <div className="progress-track">
-                              <div
-                                className="progress-fill"
-                                style={{ width: `${progressPercent}%` }}
-                              ></div>
-                            </div>
-                          </div>
-                          <div className="form-deadline">
-                            <div className="form-due-date">
-                              {formatShortDate(form.due_date)}
-                            </div>
-                            <div className="form-overdue">
-                              {form.overdue_count} overdue
-                            </div>
-                          </div>
-                          <div className="btn btn-secondary form-open-button">
-                            <ArrowUpRight size={15} />
-                          </div>
+                          )}
                         </div>
-                      );
-                    })}
+                        <div className="participant-info">
+                          <div className="participant-name">{participant.name}</div>
+                          <div className="participant-email">{participant.email}</div>
+                        </div>
+                        <div className="participant-role">{participant.role_name}</div>
+                        <div className="participant-groups">
+                          {participant.groups.join(', ')}
+                        </div>
+                        <div className="participant-evaluations-left">
+                          {participant.evaluations_left}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -448,27 +421,28 @@ function HrHome() {
 
         <div className="upcoming-section">
           <div className="section-header">
-            <div className="section-title">Upcoming reviews</div>
-            <div className="section-link">Manage schedule →</div>
+            <div className="section-title">Upcoming deadlines</div>
           </div>
           <div className="upcoming-list">
-            {upcomingReviews.length === 0 && (
+            {upcomingDeadlines.length === 0 && (
               <div className="upcoming-item">
-                <div className="upcoming-name">No upcoming reviews</div>
+                <div className="upcoming-name">No upcoming deadlines</div>
                 <div className="upcoming-meta">
-                  Create a campaign with a future start date to show it here.
+                  Campaign start and end dates will show here.
                 </div>
               </div>
             )}
-            {upcomingReviews.map((review) => (
-              <div className="upcoming-item" key={review.campaign_id}>
+            {upcomingDeadlines.map((deadline) => (
+              <div
+                className="upcoming-item"
+                key={`${deadline.campaign_id}:${deadline.deadline_type}`}
+              >
                 <div className="upcoming-date">
-                  {formatShortDate(review.start_date)}
+                  {formatShortDate(deadline.date)}
                 </div>
-                <div className="upcoming-name">{review.name}</div>
+                <div className="upcoming-name">{deadline.name}</div>
                 <div className="upcoming-meta">
-                  {review.participant_count} participants · {review.form_count}{' '}
-                  forms
+                  Campaign {deadline.deadline_type.toLowerCase()}
                 </div>
               </div>
             ))}

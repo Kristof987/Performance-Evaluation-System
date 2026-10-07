@@ -40,7 +40,7 @@
   border: 1px solid #e0e3ef;
   border-radius: 999px;
   box-shadow: 0 8px 18px rgba(23, 26, 43, 0.08);
-  cursor: pointer;
+  cursor: ew-resize;
   display: flex;
   height: 52px;
   justify-content: center;
@@ -52,6 +52,8 @@
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease;
+  touch-action: none;
+  user-select: none;
   width: 24px;
   z-index: 4;
 }
