@@ -1,40 +1,74 @@
 import './UpcomingDeadlines.css';
+import { Flag, Play } from 'lucide-react';
+
 import type { DashboardUpcomingDeadline } from '../hrHome.types';
-import { formatShortDate } from '../utils/hrHome.utils';
+import { formatRelativeDate, parseDateOnly } from '../utils/hrHome.utils';
 
 type UpcomingDeadlinesProps = {
   deadlines: DashboardUpcomingDeadline[];
+  onOpenCampaign: (campaignId: number) => void;
 };
 
-function UpcomingDeadlines({ deadlines }: UpcomingDeadlinesProps) {
+function formatTimelineMonth(value: string): string {
+  return new Intl.DateTimeFormat('en-GB', { month: 'short' })
+    .format(parseDateOnly(value))
+    .toUpperCase();
+}
+
+function formatTimelineDay(value: string): string {
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric' }).format(
+    parseDateOnly(value),
+  );
+}
+
+function getDeadlineLabel(deadlineType: DashboardUpcomingDeadline['deadline_type']) {
+  return deadlineType === 'Starts' ? 'Campaign starts' : 'Campaign ends';
+}
+
+function UpcomingDeadlines({ deadlines, onOpenCampaign }: UpcomingDeadlinesProps) {
+  const visibleDeadlines = deadlines.slice(0, 4);
+
   return (
-    <div className="upcoming-section">
+    <section className="upcoming-section" aria-labelledby="upcoming-title">
       <div className="section-header">
-        <div className="section-title">Upcoming deadlines</div>
+        <div className="section-title" id="upcoming-title">
+          Upcoming deadlines
+        </div>
       </div>
-      <div className="upcoming-list">
-        {deadlines.length === 0 && (
-          <div className="upcoming-item">
-            <div className="upcoming-name">No upcoming deadlines</div>
-            <div className="upcoming-meta">
-              Campaign start and end dates will show here.
-            </div>
+      <div className="card upcoming-timeline">
+        {visibleDeadlines.length === 0 && (
+          <div className="upcoming-empty">
+            <strong>No upcoming campaign dates</strong>
+            <span>Campaign start and end dates will show here.</span>
           </div>
         )}
-        {deadlines.map((deadline) => (
-          <div
-            className="upcoming-item"
-            key={`${deadline.campaign_id}:${deadline.deadline_type}`}
+        {visibleDeadlines.map((deadline) => (
+          <button
+            className="upcoming-timeline-item"
+            key={`${deadline.campaign_id}:${deadline.deadline_type}:${deadline.date}`}
+            type="button"
+            onClick={() => onOpenCampaign(deadline.campaign_id)}
           >
-            <div className="upcoming-date">{formatShortDate(deadline.date)}</div>
-            <div className="upcoming-name">{deadline.name}</div>
-            <div className="upcoming-meta">
-              Campaign {deadline.deadline_type.toLowerCase()}
-            </div>
-          </div>
+            <span className="upcoming-date-block" aria-hidden="true">
+              <span>{formatTimelineMonth(deadline.date)}</span>
+              <strong>{formatTimelineDay(deadline.date)}</strong>
+            </span>
+            <span className="upcoming-event-main">
+              <strong>{deadline.name}</strong>
+              <span>
+                {deadline.deadline_type === 'Starts' ? (
+                  <Play size={12} aria-hidden="true" />
+                ) : (
+                  <Flag size={12} aria-hidden="true" />
+                )}
+                {getDeadlineLabel(deadline.deadline_type)}
+              </span>
+            </span>
+            <span className="upcoming-relative">{formatRelativeDate(deadline.date)}</span>
+          </button>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 

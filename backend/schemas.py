@@ -314,6 +314,8 @@ class DashboardCampaignSummary(BaseModel):
     id: int
     name: str
     is_active: bool
+    start_date: date
+    end_date: date | None = None
 
 
 class DashboardMetricSummary(BaseModel):

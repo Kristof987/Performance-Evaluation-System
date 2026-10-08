@@ -40,6 +40,10 @@ function HrHome() {
     navigate(`/campaigns/${selectedCampaign.id}`);
   };
 
+  const campaignDetailsHandler = (campaignId: number) => {
+    navigate(`/campaigns/${campaignId}`);
+  };
+
   return (
     <AppLayout activePage="hr-home" pageClassName="hr-home-page">
       <div className="main-content">
@@ -61,19 +65,23 @@ function HrHome() {
 
         {!isLoading && metrics !== null && campaigns.length > 0 && (
           <>
-            <MetricsGrid metrics={metrics} />
+            <MetricsGrid metrics={metrics} campaigns={campaigns} />
 
             <div className="workspace">
               <ParticipantsSection participants={participants} />
               <NextActions
                 metrics={metrics}
                 campaignName={selectedCampaign?.name}
+                onOpenCampaign={selectedCampaignDetailsHandler}
               />
             </div>
           </>
         )}
 
-        <UpcomingDeadlines deadlines={upcomingDeadlines} />
+        <UpcomingDeadlines
+          deadlines={upcomingDeadlines}
+          onOpenCampaign={campaignDetailsHandler}
+        />
       </div>
     </AppLayout>
   );

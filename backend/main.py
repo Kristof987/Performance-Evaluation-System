@@ -870,13 +870,15 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
             for campaign in campaigns
             if campaign.end_date is not None and campaign.end_date >= today
         ],
-        key=lambda item: item["date"],
+        key=lambda item: (item["date"], item["deadline_type"], item["name"], item["campaign_id"]),
     )[:8]
     campaign_summaries = [
         {
             "id": campaign.id,
             "name": campaign.name,
             "is_active": campaign.is_active,
+            "start_date": campaign.start_date,
+            "end_date": campaign.end_date,
         }
         for campaign in campaigns
     ]

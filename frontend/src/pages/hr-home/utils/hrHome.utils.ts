@@ -44,6 +44,52 @@ export function formatShortDate(value: string | null): string {
   }).format(new Date(`${value}T00:00:00`));
 }
 
+export function parseDateOnly(value: string): Date {
+  return new Date(`${value}T00:00:00`);
+}
+
+export function getLocalDateOnly(currentDate = new Date()): Date {
+  return new Date(
+    currentDate.getFullYear(),
+    currentDate.getMonth(),
+    currentDate.getDate(),
+  );
+}
+
+export function getDaysBetweenDates(fromDate: Date, toDate: Date): number {
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const from = getLocalDateOnly(fromDate).getTime();
+  const to = getLocalDateOnly(toDate).getTime();
+
+  return Math.round((to - from) / millisecondsPerDay);
+}
+
+export function formatCompactDate(value: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+  }).format(parseDateOnly(value));
+}
+
+export function formatRelativeDate(value: string): string {
+  const days = getDaysBetweenDates(getLocalDateOnly(), parseDateOnly(value));
+
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  if (days > 1) return `In ${days} days`;
+  if (days === -1) return 'Yesterday';
+  return `${Math.abs(days)} days ago`;
+}
+
+export function formatStartsIn(value: string): string {
+  const days = getDaysBetweenDates(getLocalDateOnly(), parseDateOnly(value));
+
+  if (days === 1) return 'Starts tomorrow';
+  if (days > 1) return `Starts in ${days} days`;
+  if (days === 0) return 'Starts today';
+  return 'Already started';
+}
+
 export function getCampaignStatusLabel(
   isActive: boolean | undefined,
 ): 'Active' | 'Closed' {

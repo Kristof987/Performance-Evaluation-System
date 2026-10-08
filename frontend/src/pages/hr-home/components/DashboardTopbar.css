@@ -12,6 +12,7 @@
   flex-direction: column;
   flex: 1 1 auto;
   gap: 5px;
+  justify-content: center;
   min-width: 0;
 }
 .greeting-title {
@@ -25,25 +26,76 @@
   color: var(--color-text-muted);
   font-size: 13px;
 }
-.dashboard-tip {
-  background: linear-gradient(135deg, #ffffff 0%, #f7f8ff 100%);
+.hr-insights {
+  align-self: center;
+  background: var(--color-surface-subtle);
   border: 1px solid var(--color-border);
-  border-radius: 14px;
-  box-shadow: 0 12px 30px rgba(31, 42, 107, 0.05);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 10px;
   color: var(--color-text-secondary);
   display: grid;
-  flex: 0 1 420px;
-  gap: 4px;
-  padding: 12px 14px;
+  flex: 0 1 440px;
+  gap: 9px;
+  padding: 13px 15px 12px;
 }
-.dashboard-tip strong {
+.hr-insights-heading,
+.hr-insights-footer {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.hr-insights-title {
+  align-items: center;
   color: var(--color-text);
-  font-size: 12px;
-  font-weight: 800;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
 }
-.dashboard-tip span {
+.hr-insights-icon {
+  align-items: center;
+  color: var(--color-primary);
+  display: inline-flex;
+}
+.hr-insights-heading strong {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.hr-insights-heading span,
+.hr-insights-footer span,
+.hr-insights-footer a {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.hr-insights-content {
+  display: grid;
+  gap: 4px;
+}
+.hr-insights-content strong {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+.hr-insights-content p {
+  color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.45;
+  margin: 0;
+}
+.hr-insights-footer button {
+  background: transparent;
+  border: 0;
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 0;
+  white-space: nowrap;
 }
 
 @media (max-width: 640px) {
@@ -51,7 +103,7 @@
     align-items: flex-start;
     flex-wrap: wrap;
   }
-  .dashboard-tip {
+  .hr-insights {
     flex-basis: 100%;
   }
   .greeting-title,
