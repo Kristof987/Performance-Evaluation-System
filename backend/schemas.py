@@ -475,7 +475,8 @@ class CampaignEvaluationMatrixUpdateResponse(CampaignEvaluationMatrixResponse):
 class FormCreate(BaseModel):
     name: str
     description: str | None = None
-    questions: list[dict[str, Any]]
+    questions: list[dict[str, Any]] = Field(default_factory=list)
+    source_template_id: int | None = None
 
 
 class FormUpdate(BaseModel):

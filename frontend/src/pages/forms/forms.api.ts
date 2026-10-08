@@ -1,11 +1,18 @@
 import { API_BASE_URL } from '../../config';
 
+export type ChoiceOption = {
+  id: string;
+  label: string;
+};
+
 export type FormQuestion = {
   id: string;
   text: string;
   type: string;
   required: boolean;
   helpText: string;
+  options?: ChoiceOption[] | string[];
+  [key: string]: unknown;
 };
 
 export type ReviewForm = {
@@ -19,6 +26,7 @@ export type ReviewFormValues = {
   name: string;
   description: string;
   questions: FormQuestion[];
+  source_template_id?: number;
 };
 
 type FormResponse = {
@@ -31,6 +39,7 @@ type FormResponse = {
 function mapQuestion(question: unknown, index: number): FormQuestion {
   const item = question && typeof question === 'object' ? question : {};
   return {
+    ...item,
     id:
       'id' in item && typeof item.id === 'string'
         ? item.id
@@ -129,6 +138,28 @@ export async function createForm(form: ReviewFormValues): Promise<ReviewForm> {
         body: JSON.stringify(form),
       },
       'Form could not be saved.',
+    ),
+  );
+}
+
+export async function createFormFromTemplate(
+  name: string,
+  description: string,
+  templateId: number,
+): Promise<ReviewForm> {
+  return mapForm(
+    await requestApi<FormResponse>(
+      '/forms',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description,
+          source_template_id: templateId,
+        }),
+      },
+      'Form could not be created from template.',
     ),
   );
 }

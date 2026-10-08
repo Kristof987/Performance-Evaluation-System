@@ -1,5 +1,7 @@
+from copy import deepcopy
 from datetime import date
 import os
+from uuid import uuid4
 
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -1523,6 +1525,69 @@ def get_form_templates(db: Session = Depends(get_db)):
     return db.query(models.FormTemplate).order_by(models.FormTemplate.id.asc()).all()
 
 
+def clone_template_questions(questions: list[dict]):
+    cloned_questions = deepcopy(questions)
+    for question in cloned_questions:
+        if isinstance(question, dict):
+            question["id"] = str(uuid4())
+    return cloned_questions
+
+
+def validate_choice_question_options(question: dict, question_index: int):
+    question_type = question.get("type")
+    if question_type not in {"Single choice", "Multiple choice"}:
+        return
+
+    options = question.get("options")
+    if not isinstance(options, list):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Question {question_index + 1} needs at least two answer options",
+        )
+
+    normalized_ids = []
+    normalized_labels = []
+    for option_index, option in enumerate(options):
+        if not isinstance(option, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {question_index + 1} option {option_index + 1} is invalid",
+            )
+        option_id = option.get("id")
+        option_label = option.get("label")
+        if not isinstance(option_id, str) or option_id.strip() == "":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {question_index + 1} option {option_index + 1} needs an id",
+            )
+        if not isinstance(option_label, str) or option_label.strip() == "":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {question_index + 1} option {option_index + 1} needs a label",
+            )
+        normalized_ids.append(option_id.strip())
+        normalized_labels.append(option_label.strip().lower())
+
+    if len(normalized_labels) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Question {question_index + 1} needs at least two answer options",
+        )
+    if len(set(normalized_ids)) != len(normalized_ids):
+        raise HTTPException(status_code=400, detail=f"Question {question_index + 1} has duplicate option ids")
+    if len(set(normalized_labels)) != len(normalized_labels):
+        raise HTTPException(status_code=400, detail=f"Question {question_index + 1} has duplicate option labels")
+
+
+def validate_question_definitions(questions: list[dict]):
+    if not isinstance(questions, list):
+        raise HTTPException(status_code=400, detail="Questions must be a list")
+    for index, question in enumerate(questions):
+        if not isinstance(question, dict):
+            raise HTTPException(status_code=400, detail=f"Question {index + 1} is invalid")
+        validate_choice_question_options(question, index)
+
+
 def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, item_id: int | None = None):
     name = payload.name.strip()
     if name == "":
@@ -1534,6 +1599,8 @@ def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, 
     if existing_query.first() is not None:
         raise HTTPException(status_code=400, detail="Name already exists")
 
+    validate_question_definitions(payload.questions)
+
     return {
         "name": name,
         "description": payload.description.strip() if payload.description is not None else None,
@@ -1543,7 +1610,13 @@ def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, 
 
 @app.post("/forms", response_model=schemas.FormResponse)
 def create_form(form: schemas.FormCreate, db: Session = Depends(get_db)):
-    new_form = models.Form(**validate_form_like_payload(form, models.Form, db))
+    values = validate_form_like_payload(form, models.Form, db)
+    if form.source_template_id is not None:
+        template = db.query(models.FormTemplate).filter(models.FormTemplate.id == form.source_template_id).first()
+        if template is None:
+            raise HTTPException(status_code=404, detail="Template not found")
+        values["questions"] = clone_template_questions(template.questions)
+    new_form = models.Form(**values)
     db.add(new_form)
     db.commit()
     db.refresh(new_form)
