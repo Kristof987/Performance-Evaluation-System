@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent } from 'react';
+import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { Link } from 'react-router';
 import {
   ChartNoAxesCombined,
@@ -17,55 +17,109 @@ import {
   getUserInitials,
   isHrOrManagerRole,
 } from './sidebar-user';
-export type SidebarPage = 'hr-home' | 'employee-home' | 'employee-review-preview' | 'people' | 'campaigns' | 'forms' | 'results';
+
+export type SidebarPage =
+  | 'hr-home'
+  | 'employee-home'
+  | 'employee-review-preview'
+  | 'people'
+  | 'campaigns'
+  | 'forms'
+  | 'results';
+
 type SidebarProps = {
   activePage: SidebarPage;
   isSidebarCollapsed: boolean;
   onToggle: () => void;
 };
+
+const MIN_WIDTH = 74;
+const MAX_WIDTH = 360;
+const DEFAULT_WIDTH = 234;
+const COLLAPSE_THRESHOLD = 140;
+const DRAG_START_DISTANCE = 6;
+
+function clampWidth(value: number) {
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value));
+}
+
 export default function Sidebar({
   activePage,
   isSidebarCollapsed,
   onToggle,
 }: SidebarProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [expandedWidth, setExpandedWidth] = useState(DEFAULT_WIDTH);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+
   const dragStartX = useRef<number | null>(null);
+  const dragStartWidth = useRef(DEFAULT_WIDTH);
   const hasDragged = useRef(false);
   const suppressNextClick = useRef(false);
+
   const sidebarUser = getSidebarUser();
   const sidebarUserName =
     sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
   const dashboardPath = getDashboardPath();
-  const isDashboardActive = activePage === 'hr-home' || activePage === 'employee-home';
+  const isDashboardActive =
+    activePage === 'hr-home' || activePage === 'employee-home';
   const isHrOrManager = isHrOrManagerRole(sidebarUser?.role_name ?? null);
+
+  const currentWidth =
+    dragWidth ?? (isSidebarCollapsed ? MIN_WIDTH : expandedWidth);
 
   function handleTogglePointerDown(event: PointerEvent<HTMLButtonElement>) {
     dragStartX.current = event.clientX;
+    dragStartWidth.current = isSidebarCollapsed ? MIN_WIDTH : expandedWidth;
     hasDragged.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function handleTogglePointerMove(event: PointerEvent<HTMLButtonElement>) {
     if (dragStartX.current === null) return;
-    if (Math.abs(event.clientX - dragStartX.current) > 6) {
+    const deltaX = event.clientX - dragStartX.current;
+
+    if (!hasDragged.current && Math.abs(deltaX) > DRAG_START_DISTANCE) {
       hasDragged.current = true;
+    }
+    if (hasDragged.current) {
+      setDragWidth(clampWidth(dragStartWidth.current + deltaX));
     }
   }
 
   function handleTogglePointerUp(event: PointerEvent<HTMLButtonElement>) {
     if (dragStartX.current === null) return;
-    const deltaX = event.clientX - dragStartX.current;
+    const finalWidth = clampWidth(
+      dragStartWidth.current + (event.clientX - dragStartX.current),
+    );
     dragStartX.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDragWidth(null);
 
     if (!hasDragged.current) return;
     suppressNextClick.current = true;
-    if (!isSidebarCollapsed && deltaX < -28) onToggle();
-    if (isSidebarCollapsed && deltaX > 28) onToggle();
+
+    if (finalWidth < COLLAPSE_THRESHOLD) {
+      if (!isSidebarCollapsed) onToggle();
+    } else {
+      setExpandedWidth(finalWidth);
+      if (isSidebarCollapsed) onToggle();
+    }
+  }
+
+  function handleTogglePointerCancel() {
+    dragStartX.current = null;
+    hasDragged.current = false;
+    setDragWidth(null);
   }
 
   return (
-    <aside className="sidebar">
+    <aside
+      className={dragWidth !== null ? 'sidebar is-dragging' : 'sidebar'}
+      style={{ '--sidebar-width': `${currentWidth}px` } as CSSProperties}
+    >
       <button
         className="sidebar-toggle"
         type="button"
@@ -83,9 +137,7 @@ export default function Sidebar({
         onPointerDown={handleTogglePointerDown}
         onPointerMove={handleTogglePointerMove}
         onPointerUp={handleTogglePointerUp}
-        onPointerCancel={() => {
-          dragStartX.current = null;
-        }}
+        onPointerCancel={handleTogglePointerCancel}
       >
         <span />
       </button>
