@@ -1,6 +1,17 @@
 import { getUserInitials } from '../layout/sidebar-user';
 import AppLayout from '../layout/AppLayout';
-import { useEffect, useState, type FormEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react';
+import { createPortal } from 'react-dom';
 import {
   addGroupMember,
   createEmployee,
@@ -16,8 +27,9 @@ import {
   type Group,
   type GroupFormValues,
 } from './people.api';
-import './people.css';
 import '../hr-home/hr-home.css';
+import '../hr-home/components/MetricsGrid.css';
+import './people.css';
 
 type SortKey = 'name' | 'role' | 'groups' | 'status';
 type Page<T> = {
@@ -27,6 +39,23 @@ type Page<T> = {
   from: number;
   to: number;
 };
+
+type PeopleTab = 'employees' | 'groups';
+
+type PeopleMetric = {
+  label: string;
+  value: ReactNode;
+  context: ReactNode;
+};
+
+type EmployeeFormErrors = Partial<Record<keyof EmployeeFormValues, string>>;
+
+type PendingMemberRemoval = {
+  groupId: number;
+  groupName: string;
+  employeeId: number;
+  employeeName: string;
+} | null;
 
 const emptyEmployeeForm: EmployeeFormValues = {
   name: '',
@@ -46,6 +75,22 @@ const groupTemplateUrl = new URL(
   '../../resources/upload_group_empty_template.xlsx',
   import.meta.url,
 ).href;
+
+function isValidExcelFile(file: File) {
+  return file.name.toLowerCase().endsWith('.xlsx');
+}
+
+function validateEmployeeForm(form: EmployeeFormValues): EmployeeFormErrors {
+  const errors: EmployeeFormErrors = {};
+  if (form.name.trim() === '') errors.name = 'Full name is required.';
+  if (form.role.trim() === '') errors.role = 'Role is required.';
+  if (form.email.trim() === '') {
+    errors.email = 'Email address is required.';
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+    errors.email = 'Enter a valid email address.';
+  }
+  return errors;
+}
 
 function paginate<T>(items: T[], requestedPage: number, size: number): Page<T> {
   const pages = Math.max(1, Math.ceil(items.length / size));
@@ -100,17 +145,660 @@ function Pagination({
   );
 }
 
+function PeopleHeader({
+  activeTab,
+  onAddEmployee,
+  onAddGroup,
+}: {
+  activeTab: PeopleTab;
+  onAddEmployee: () => void;
+  onAddGroup: () => void;
+}) {
+  return (
+    <section className="people-header">
+      <div>
+        <h1>People</h1>
+        <p>Manage employees and groups in your organization.</p>
+      </div>
+      <button
+        className="btn btn-primary people-button"
+        type="button"
+        onClick={activeTab === 'employees' ? onAddEmployee : onAddGroup}
+      >
+        {activeTab === 'employees' ? 'Add employee' : 'Add group'}
+      </button>
+    </section>
+  );
+}
+
+function PeopleTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: PeopleTab;
+  onChange: (tab: PeopleTab) => void;
+}) {
+  return (
+    <div className="tabs people-tabs" aria-label="People views">
+      <button
+        className={`tab${activeTab === 'employees' ? ' active' : ''}`}
+        type="button"
+        onClick={() => onChange('employees')}
+      >
+        Employees
+      </button>
+      <button
+        className={`tab${activeTab === 'groups' ? ' active' : ''}`}
+        type="button"
+        onClick={() => onChange('groups')}
+      >
+        Groups
+      </button>
+    </div>
+  );
+}
+
+function PeopleMetrics({
+  metrics,
+  label,
+}: {
+  metrics: PeopleMetric[];
+  label: string;
+}) {
+  return (
+    <section className="card kpi-section people-kpi-section" aria-label={label}>
+      {metrics.map((metric) => (
+        <div className="kpi-item" key={metric.label}>
+          <div className="kpi-label">{metric.label}</div>
+          <div className="kpi-value">{metric.value}</div>
+          <div className="kpi-context">{metric.context}</div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function DetailDrawer({
+  isOpen,
+  title,
+  titleId,
+  onClose,
+  suspendFocusTrap = false,
+  children,
+}: {
+  isOpen: boolean;
+  title: string;
+  titleId: string;
+  onClose: () => void;
+  suspendFocusTrap?: boolean;
+  children: ReactNode;
+}) {
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen || suspendFocusTrap) return undefined;
+
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const drawer = drawerRef.current;
+    const focusableSelector =
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const focusable = drawer
+      ? Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+          (element) => !element.hasAttribute('disabled'),
+        )
+      : [];
+    focusable[0]?.focus();
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== 'Tab' || drawer === null) return;
+      const currentFocusable = Array.from(
+        drawer.querySelectorAll<HTMLElement>(focusableSelector),
+      ).filter((element) => !element.hasAttribute('disabled'));
+      if (currentFocusable.length === 0) return;
+      const first = currentFocusable[0];
+      const last = currentFocusable[currentFocusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.body.classList.add('people-drawer-lock');
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.classList.remove('people-drawer-lock');
+      previousFocusRef.current?.focus();
+    };
+  }, [isOpen, suspendFocusTrap]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="people-drawer-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <aside
+        className="people-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={drawerRef}
+      >
+        <div className="people-drawer-head">
+          <h2 id={titleId}>{title}</h2>
+          <button
+            className="close"
+            type="button"
+            onClick={onClose}
+            aria-label="Close details"
+          >
+            ×
+          </button>
+        </div>
+        <div className="people-drawer-body">{children}</div>
+      </aside>
+    </div>
+  );
+}
+
+function isEmptyDescription(description: string) {
+  return description.trim() === '' || description === 'No description provided.';
+}
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <span className="people-field-error">{message}</span>;
+}
+
+function useViewportDropdownPosition(
+  isOpen: boolean,
+  anchorRef: RefObject<HTMLElement | null>,
+) {
+  const [style, setStyle] = useState<CSSProperties>({});
+
+  useLayoutEffect(() => {
+    if (!isOpen) return undefined;
+
+    function updatePosition() {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+
+      const margin = 14;
+      const gap = 6;
+      const preferredMaxHeight = 240;
+      const minimumUsefulHeight = 120;
+      const rect = anchor.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const spaceBelow = viewportHeight - rect.bottom - margin - gap;
+      const spaceAbove = rect.top - margin - gap;
+      const openDown = spaceBelow >= minimumUsefulHeight || spaceBelow >= spaceAbove;
+      const availableHeight = Math.max(
+        minimumUsefulHeight,
+        openDown ? spaceBelow : spaceAbove,
+      );
+      const maxHeight = Math.min(preferredMaxHeight, availableHeight);
+      const width = Math.min(rect.width, viewportWidth - margin * 2);
+      const left = Math.min(
+        Math.max(margin, rect.left),
+        Math.max(margin, viewportWidth - margin - width),
+      );
+      const top = openDown
+        ? Math.min(rect.bottom + gap, viewportHeight - margin - maxHeight)
+        : Math.max(margin, rect.top - gap - maxHeight);
+
+      setStyle({
+        left,
+        maxHeight,
+        position: 'fixed',
+        top,
+        width,
+      });
+    }
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [anchorRef, isOpen]);
+
+  return style;
+}
+
+function GroupMultiSelect({
+  groups,
+  selectedGroupIds,
+  onChange,
+}: {
+  groups: Group[];
+  selectedGroupIds: number[];
+  onChange: (groupIds: number[]) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownStyle = useViewportDropdownPosition(isOpen, anchorRef);
+  const selectedGroups = groups.filter((group) => selectedGroupIds.includes(group.id));
+  const filteredGroups = groups.filter((group) =>
+    group.name.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (
+        !rootRef.current?.contains(target) &&
+        !dropdownRef.current?.contains(target)
+      ) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isOpen]);
+
+  function toggleGroup(groupId: number) {
+    onChange(
+      selectedGroupIds.includes(groupId)
+        ? selectedGroupIds.filter((id) => id !== groupId)
+        : [...selectedGroupIds, groupId],
+    );
+  }
+
+  return (
+    <div className="group-multiselect" ref={rootRef}>
+      <div className="group-selected-list" aria-label="Selected groups">
+        {selectedGroups.length > 0 ? (
+          selectedGroups.map((group) => (
+            <span className="group-selected-chip" key={group.id}>
+              {group.name}
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.id)}
+                aria-label={`Remove ${group.name}`}
+              >
+                ×
+              </button>
+            </span>
+          ))
+        ) : (
+          <span className="group-empty-selection">No groups selected</span>
+        )}
+      </div>
+      <div className="group-search-control" ref={anchorRef}>
+        <input
+          className="form-control group-search-input"
+          type="search"
+          value={search}
+          onFocus={() => setIsOpen(true)}
+          onClick={() => setIsOpen(true)}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setIsOpen(true);
+          }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            setIsOpen(false);
+          } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setIsOpen(true);
+            window.requestAnimationFrame(() => {
+              dropdownRef.current
+                ?.querySelector<HTMLInputElement>('.group-option input')
+                ?.focus();
+            });
+          }
+        }}
+          placeholder="Search and add groups..."
+          aria-label="Search groups"
+          aria-expanded={isOpen}
+          aria-controls="group-multiselect-options"
+        />
+        <button
+          className="group-dropdown-toggle"
+          type="button"
+          onClick={() => setIsOpen((current) => !current)}
+          aria-label={isOpen ? 'Close group options' : 'Open group options'}
+          aria-expanded={isOpen}
+        >
+          ▾
+        </button>
+      </div>
+      {isOpen && createPortal(
+        <div
+          className="group-option-list"
+          id="group-multiselect-options"
+          role="group"
+          aria-label="Available groups"
+          ref={dropdownRef}
+          style={dropdownStyle}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              setIsOpen(false);
+            }
+          }}
+        >
+          {groups.length === 0 && <span>No groups available.</span>}
+          {groups.length > 0 && filteredGroups.length === 0 && (
+            <span>No groups match your search.</span>
+          )}
+          {filteredGroups.map((group) => (
+            <label className="group-option" key={group.id}>
+              <input
+                type="checkbox"
+                checked={selectedGroupIds.includes(group.id)}
+                onChange={() => toggleGroup(group.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.stopPropagation();
+                    setIsOpen(false);
+                  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    const options = Array.from(
+                      dropdownRef.current?.querySelectorAll<HTMLInputElement>(
+                        '.group-option input',
+                      ) ?? [],
+                    );
+                    const currentIndex = options.indexOf(event.currentTarget);
+                    const nextIndex =
+                      event.key === 'ArrowDown'
+                        ? Math.min(options.length - 1, currentIndex + 1)
+                        : Math.max(0, currentIndex - 1);
+                    options[nextIndex]?.focus();
+                  }
+                }}
+              />
+              <span>{group.name}</span>
+            </label>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+function EmployeeCombobox({
+  employees,
+  selectedEmployeeId,
+  search,
+  onSearchChange,
+  onSelect,
+}: {
+  employees: Employee[];
+  selectedEmployeeId: string;
+  search: string;
+  onSearchChange: (value: string) => void;
+  onSelect: (employeeId: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownStyle = useViewportDropdownPosition(isOpen, anchorRef);
+  const selectedEmployee = employees.find(
+    (employee) => String(employee.id) === selectedEmployeeId,
+  );
+  const filteredEmployees = employees.filter((employee) =>
+    `${employee.name} ${employee.email}`
+      .toLowerCase()
+      .includes(search.trim().toLowerCase()),
+  );
+  const inputValue = selectedEmployee && !isOpen ? selectedEmployee.name : search;
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (
+        !rootRef.current?.contains(target) &&
+        !dropdownRef.current?.contains(target)
+      ) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isOpen]);
+
+  return (
+    <div className="employee-combobox" ref={rootRef}>
+      <div className="employee-combobox-control" ref={anchorRef}>
+        <input
+          className="form-control"
+          type="search"
+          value={inputValue}
+          onFocus={() => setIsOpen(true)}
+          onClick={() => setIsOpen(true)}
+          onChange={(event) => {
+            onSearchChange(event.target.value);
+            onSelect('');
+            setIsOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              setIsOpen(false);
+            } else if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setIsOpen(true);
+              window.requestAnimationFrame(() => {
+                dropdownRef.current
+                  ?.querySelector<HTMLButtonElement>('.employee-combobox-option')
+                  ?.focus();
+              });
+            }
+          }}
+          placeholder="Search employees..."
+          aria-label="Search employees to add"
+          aria-expanded={isOpen}
+          aria-controls="group-member-options"
+        />
+        {selectedEmployeeId !== '' && (
+          <button
+            type="button"
+            onClick={() => {
+              onSelect('');
+              onSearchChange('');
+              setIsOpen(false);
+            }}
+            aria-label="Clear selected employee"
+          >
+            ×
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setIsOpen((current) => !current)}
+          aria-label={isOpen ? 'Close employee options' : 'Open employee options'}
+          aria-expanded={isOpen}
+        >
+          ▾
+        </button>
+      </div>
+      {isOpen && createPortal(
+        <div
+          className="employee-combobox-options"
+          id="group-member-options"
+          role="listbox"
+          aria-label="Eligible employees"
+          ref={dropdownRef}
+          style={dropdownStyle}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              setIsOpen(false);
+            }
+          }}
+        >
+          {employees.length === 0 && (
+            <div className="employee-combobox-empty">
+              All employees are already members of this group.
+            </div>
+          )}
+          {employees.length > 0 && filteredEmployees.length === 0 && (
+            <div className="employee-combobox-empty">No employees match your search.</div>
+          )}
+          {filteredEmployees.map((employee) => (
+            <button
+              className="employee-combobox-option"
+              type="button"
+              key={employee.id}
+              role="option"
+              aria-selected={String(employee.id) === selectedEmployeeId}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  const options = Array.from(
+                    dropdownRef.current?.querySelectorAll<HTMLButtonElement>(
+                      '.employee-combobox-option',
+                    ) ?? [],
+                  );
+                  const currentIndex = options.indexOf(event.currentTarget);
+                  const nextIndex =
+                    event.key === 'ArrowDown'
+                      ? Math.min(options.length - 1, currentIndex + 1)
+                      : Math.max(0, currentIndex - 1);
+                  options[nextIndex]?.focus();
+                }
+              }}
+              onClick={() => {
+                onSelect(String(employee.id));
+                onSearchChange('');
+                setIsOpen(false);
+              }}
+            >
+              <strong>{employee.name}</strong>
+              <span>{employee.email}</span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+function ImportPanel({
+  title,
+  description,
+  file,
+  message,
+  errors,
+  templateUrl,
+  templateName,
+  uploadLabel,
+  uploadingLabel,
+  isUploading,
+  onFileChange,
+  onUpload,
+}: {
+  title: string;
+  description: string;
+  file: File | null;
+  message: string;
+  errors: string[];
+  templateUrl: string;
+  templateName: string;
+  uploadLabel: string;
+  uploadingLabel: string;
+  isUploading: boolean;
+  onFileChange: (file: File | null) => void;
+  onUpload: () => void;
+}) {
+  const hasValidFile = file !== null && isValidExcelFile(file);
+
+  return (
+    <>
+      <div className="upload-box">
+        <strong>{title}</strong>
+        <p>{description}</p>
+        <label className="file-picker">
+          <input
+            type="file"
+            accept=".xlsx"
+            onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
+          />
+          <span>{file?.name ?? 'Choose Excel file'}</span>
+        </label>
+        {file !== null && !isValidExcelFile(file) && (
+          <div className="people-form-message">Upload an .xlsx file.</div>
+        )}
+      </div>
+      {(message !== '' || errors.length > 0) && (
+        <div className="people-form-message" aria-live="polite">
+          {message !== '' && <p>{message}</p>}
+          {errors.length > 0 && (
+            <ul>
+              {errors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <div className="modal-actions">
+        <a
+          className="btn btn-secondary people-button"
+          href={templateUrl}
+          download={templateName}
+        >
+          Download template
+        </a>
+        <button
+          className="btn btn-primary people-button"
+          type="button"
+          onClick={onUpload}
+          disabled={isUploading || !hasValidFile}
+        >
+          {isUploading ? uploadingLabel : uploadLabel}
+        </button>
+      </div>
+    </>
+  );
+}
+
 export default function People() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [isPeopleLoading, setIsPeopleLoading] = useState(true);
   const [peopleError, setPeopleError] = useState('');
-  const [activePeopleTab, setActivePeopleTab] = useState<'employees' | 'groups'>(
-    'employees',
-  );
+  const [activePeopleTab, setActivePeopleTab] = useState<PeopleTab>('employees');
   const [employeeForm, setEmployeeForm] =
     useState<EmployeeFormValues>(emptyEmployeeForm);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
+  const [employeeFormErrors, setEmployeeFormErrors] = useState<EmployeeFormErrors>({});
   const [employeeFormMessage, setEmployeeFormMessage] = useState('');
   const [isSavingEmployee, setIsSavingEmployee] = useState(false);
   const [employeeImportFile, setEmployeeImportFile] = useState<File | null>(null);
@@ -127,15 +815,18 @@ export default function People() {
   >('groupManualPanel');
   const [groupForm, setGroupForm] = useState<GroupFormValues>(emptyGroupForm);
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
+  const [shouldRestoreGroupDrawer, setShouldRestoreGroupDrawer] = useState(false);
   const [groupFormMessage, setGroupFormMessage] = useState('');
   const [isSavingGroup, setIsSavingGroup] = useState(false);
-  const [groupModalEmployeeId, setGroupModalEmployeeId] = useState('');
   const [sidePanelEmployeeId, setSidePanelEmployeeId] = useState('');
+  const [groupMemberSearch, setGroupMemberSearch] = useState('');
   const [groupMemberMessage, setGroupMemberMessage] = useState('');
   const [isAddingGroupMember, setIsAddingGroupMember] = useState(false);
   const [removingGroupMemberId, setRemovingGroupMemberId] = useState<number | null>(
     null,
   );
+  const [pendingMemberRemoval, setPendingMemberRemoval] =
+    useState<PendingMemberRemoval>(null);
   const [groupImportFile, setGroupImportFile] = useState<File | null>(null);
   const [groupImportMessage, setGroupImportMessage] = useState('');
   const [groupImportErrors, setGroupImportErrors] = useState<string[]>([]);
@@ -152,21 +843,28 @@ export default function People() {
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
   const selectedGroup =
-    groups.find((group) => group.id === selectedGroupId) ?? groups[0] ?? null;
+    groups.find((group) => group.id === selectedGroupId) ?? null;
   const selectedEmployee =
-    employees.find((employee) => employee.id === selectedEmployeeId) ??
-    employees[0] ??
-    null;
+    employees.find((employee) => employee.id === selectedEmployeeId) ?? null;
+  const memberManagementGroup =
+    selectedGroup ??
+    (editingGroupId !== null
+      ? groups.find((group) => group.id === editingGroupId) ?? null
+      : null);
 
   function applyPeopleData(people: { employees: Employee[]; groups: Group[] }) {
     setEmployees(people.employees);
     setGroups(people.groups);
-    if (people.employees.length > 0) {
-      setSelectedEmployeeId((current) => current ?? people.employees[0].id);
-    }
-    if (people.groups.length > 0) {
-      setSelectedGroupId((current) => current ?? people.groups[0].id);
-    }
+    setSelectedEmployeeId((current) =>
+      current !== null && people.employees.some((employee) => employee.id === current)
+        ? current
+        : null,
+    );
+    setSelectedGroupId((current) =>
+      current !== null && people.groups.some((group) => group.id === current)
+        ? current
+        : null,
+    );
   }
 
   useEffect(() => {
@@ -212,16 +910,13 @@ export default function People() {
       .includes(groupSearch.toLowerCase()),
   );
   const groupPagination = paginate(filteredGroups, groupPage, 5);
-  const members = selectedGroup
+  const members = memberManagementGroup
     ? employees.filter((employee) =>
-        employee.groups.includes(selectedGroup.name),
+        employee.groups.includes(memberManagementGroup.name),
       )
     : [];
   const selectedGroupAvailableEmployees = selectedGroup
     ? employees.filter((employee) => !employee.groupIds.includes(selectedGroup.id))
-    : [];
-  const editingGroupAvailableEmployees = editingGroupId
-    ? employees.filter((employee) => !employee.groupIds.includes(editingGroupId))
     : [];
   const activeEmployees = employees.filter(
     (employee) => employee.status === 'Active',
@@ -249,6 +944,88 @@ export default function People() {
     : [];
   const averageMembersPerGroup =
     groups.length > 0 ? Math.round(totalGroupMemberships / groups.length) : 0;
+  const employeeFiltersActive =
+    employeeSearch.trim() !== '' ||
+    groupFilter !== 'All groups' ||
+    statusFilter !== 'All statuses';
+  const groupFiltersActive = groupSearch.trim() !== '';
+  const employeeMetrics: PeopleMetric[] = [
+    {
+      label: 'Total employees',
+      value: employees.length,
+      context: `Across ${groups.length} groups`,
+    },
+    {
+      label: 'Active employees',
+      value: activeEmployees,
+      context: 'Enabled accounts',
+    },
+    {
+      label: 'Without a group',
+      value: missingGroupEmployees,
+      context: 'No group assigned',
+    },
+    {
+      label: 'Multiple groups',
+      value: multiGroupEmployees,
+      context: 'In 2+ groups',
+    },
+  ];
+  const groupMetrics: PeopleMetric[] = [
+    {
+      label: 'Total groups',
+      value: groups.length,
+      context: 'Available for campaigns',
+    },
+    {
+      label: 'Group memberships',
+      value: totalGroupMemberships,
+      context: 'Total member assignments',
+    },
+    {
+      label: 'Empty groups',
+      value: emptyGroups,
+      context: 'No assigned members',
+    },
+    {
+      label: 'Largest group',
+      value: largestGroup?.memberCount ?? 0,
+      context:
+        largestGroups.length > 0
+          ? largestGroups.map((group) => group.name).join(', ')
+          : `${averageMembersPerGroup} avg members`,
+    },
+  ];
+
+  function handlePeopleTabChange(tab: PeopleTab) {
+    setActivePeopleTab(tab);
+    setSelectedEmployeeId(null);
+    setSelectedGroupId(null);
+    setGroupMemberMessage('');
+    setSidePanelEmployeeId('');
+  }
+
+  function openEmployeeDrawer(employee: Employee) {
+    setSelectedEmployeeId(employee.id);
+  }
+
+  function openGroupDrawer(group: Group) {
+    setSelectedGroupId(group.id);
+    setGroupMemberMessage('');
+    setSidePanelEmployeeId('');
+  }
+
+  function handleInteractiveRowKeyDown(
+    event: KeyboardEvent<HTMLTableRowElement>,
+    action: () => void,
+  ) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.target instanceof HTMLElement && event.target.closest('button, a, input, select, textarea')) {
+      return;
+    }
+    event.preventDefault();
+    action();
+  }
 
   function handleSort(key: SortKey) {
     setSort((current) => ({
@@ -259,26 +1036,21 @@ export default function People() {
     setEmployeePage(1);
   }
 
-  function selectGroup(group: Group) {
-    setSelectedGroupId(group.id);
-  }
-
   function openAddGroupModal() {
     setEditingGroupId(null);
+    setShouldRestoreGroupDrawer(false);
     setGroupForm(emptyGroupForm);
     setGroupFormMessage('');
-    setGroupModalEmployeeId('');
     setGroupMemberMessage('');
     setGroupTab('groupManualPanel');
     setIsGroupsModalOpen(true);
   }
 
   function openEditGroupModal(group: Group) {
+    setShouldRestoreGroupDrawer(selectedGroupId === group.id);
     setEditingGroupId(group.id);
-    setSelectedGroupId(group.id);
     setGroupForm({ name: group.name, description: group.description });
     setGroupFormMessage('');
-    setGroupModalEmployeeId('');
     setGroupMemberMessage('');
     setGroupTab('groupManualPanel');
     setIsGroupsModalOpen(true);
@@ -287,10 +1059,11 @@ export default function People() {
   function closeGroupModal() {
     if (isSavingGroup || isImportingGroups) return;
     setIsGroupsModalOpen(false);
+    if (!shouldRestoreGroupDrawer) setSelectedGroupId(null);
+    setShouldRestoreGroupDrawer(false);
     setEditingGroupId(null);
     setGroupForm(emptyGroupForm);
     setGroupFormMessage('');
-    setGroupModalEmployeeId('');
     setGroupMemberMessage('');
     setGroupImportFile(null);
     setGroupImportMessage('');
@@ -329,6 +1102,8 @@ export default function People() {
       applyPeopleData(people);
       setGroupPage(1);
       setIsGroupsModalOpen(false);
+      if (!shouldRestoreGroupDrawer) setSelectedGroupId(null);
+      setShouldRestoreGroupDrawer(false);
       setEditingGroupId(null);
       setGroupForm(emptyGroupForm);
     } catch (error) {
@@ -353,8 +1128,8 @@ export default function People() {
       await addGroupMember(groupId, Number(employeeId));
       const people = await fetchPeople(new AbortController().signal);
       applyPeopleData(people);
-      setGroupModalEmployeeId('');
       setSidePanelEmployeeId('');
+      setGroupMemberSearch('');
     } catch (error) {
       setGroupMemberMessage(
         error instanceof Error ? error.message : 'Employee could not be added to the group.',
@@ -364,17 +1139,33 @@ export default function People() {
     }
   }
 
-  async function handleRemoveGroupMember(groupId: number, employeeId: number) {
-    if (removingGroupMemberId !== null) return;
+  function requestRemoveGroupMember(groupId: number, employeeId: number) {
+    const group = groups.find((item) => item.id === groupId);
+    const employee = employees.find((item) => item.id === employeeId);
+    if (!group || !employee) return;
+    setPendingMemberRemoval({
+      groupId,
+      groupName: group.name,
+      employeeId,
+      employeeName: employee.name,
+    });
+  }
 
-    setRemovingGroupMemberId(employeeId);
+  async function confirmRemoveGroupMember() {
+    if (removingGroupMemberId !== null || pendingMemberRemoval === null) return;
+
+    setRemovingGroupMemberId(pendingMemberRemoval.employeeId);
     setGroupMemberMessage('');
     try {
-      await removeGroupMember(groupId, employeeId);
+      await removeGroupMember(
+        pendingMemberRemoval.groupId,
+        pendingMemberRemoval.employeeId,
+      );
       const people = await fetchPeople(new AbortController().signal);
       applyPeopleData(people);
-      setGroupModalEmployeeId('');
       setSidePanelEmployeeId('');
+      setGroupMemberSearch('');
+      setPendingMemberRemoval(null);
     } catch (error) {
       setGroupMemberMessage(
         error instanceof Error
@@ -390,6 +1181,11 @@ export default function People() {
     if (isImportingGroups) return;
     if (groupImportFile === null) {
       setGroupImportMessage('Please choose an Excel file first.');
+      setGroupImportErrors([]);
+      return;
+    }
+    if (!isValidExcelFile(groupImportFile)) {
+      setGroupImportMessage('Upload an .xlsx file.');
       setGroupImportErrors([]);
       return;
     }
@@ -432,6 +1228,7 @@ export default function People() {
     setIsEmployeeModalOpen(false);
     setEditingEmployeeId(null);
     setEmployeeForm(emptyEmployeeForm);
+    setEmployeeFormErrors({});
     setEmployeeFormMessage('');
     setEmployeeImportFile(null);
     setEmployeeImportMessage('');
@@ -441,6 +1238,7 @@ export default function People() {
   function openAddEmployeeModal() {
     setEditingEmployeeId(null);
     setEmployeeForm(emptyEmployeeForm);
+    setEmployeeFormErrors({});
     setEmployeeFormMessage('');
     setEmployeeTab('manualPanel');
     setIsEmployeeModalOpen(true);
@@ -455,6 +1253,7 @@ export default function People() {
       groupIds: employee.groupIds,
     });
     setEmployeeFormMessage('');
+    setEmployeeFormErrors({});
     setEmployeeTab('manualPanel');
     setIsEmployeeModalOpen(true);
   }
@@ -465,14 +1264,13 @@ export default function People() {
   ) {
     setEmployeeForm((current) => ({ ...current, [key]: value }));
     setEmployeeFormMessage('');
+    setEmployeeFormErrors((current) => ({ ...current, [key]: undefined }));
   }
 
-  function toggleEmployeeGroup(groupId: number) {
+  function updateEmployeeGroups(groupIds: number[]) {
     setEmployeeForm((current) => ({
       ...current,
-      groupIds: current.groupIds.includes(groupId)
-        ? current.groupIds.filter((id) => id !== groupId)
-        : [...current.groupIds, groupId],
+      groupIds,
     }));
     setEmployeeFormMessage('');
   }
@@ -480,12 +1278,10 @@ export default function People() {
   async function handleCreateEmployee(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isSavingEmployee) return;
-    if (
-      employeeForm.name.trim() === '' ||
-      employeeForm.role.trim() === '' ||
-      employeeForm.email.trim() === ''
-    ) {
-      setEmployeeFormMessage('Name, role and email are required.');
+    const validationErrors = validateEmployeeForm(employeeForm);
+    setEmployeeFormErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      setEmployeeFormMessage('Review the highlighted fields.');
       return;
     }
 
@@ -508,6 +1304,7 @@ export default function People() {
       setEmployeePage(1);
       setEditingEmployeeId(null);
       setEmployeeForm(emptyEmployeeForm);
+      setEmployeeFormErrors({});
       setIsEmployeeModalOpen(false);
     } catch (error) {
       setEmployeeFormMessage(
@@ -522,6 +1319,11 @@ export default function People() {
     if (isImportingEmployees) return;
     if (employeeImportFile === null) {
       setEmployeeImportMessage('Please choose an Excel file first.');
+      setEmployeeImportErrors([]);
+      return;
+    }
+    if (!isValidExcelFile(employeeImportFile)) {
+      setEmployeeImportMessage('Upload an .xlsx file.');
       setEmployeeImportErrors([]);
       return;
     }
@@ -556,114 +1358,18 @@ export default function People() {
     <div className="people-page">
       <AppLayout activePage="people" pageClassName="">
         <main className="main">
-          <section className="hello">
-            <h1>People</h1>
-            <p>Manage employees, roles, emails and group memberships.</p>
-          </section>
+          <PeopleHeader
+            activeTab={activePeopleTab}
+            onAddEmployee={openAddEmployeeModal}
+            onAddGroup={openAddGroupModal}
+          />
 
-          <section className="page-head">
-            <div className="title">
-              <h2>
-                {activePeopleTab === 'employees'
-                  ? 'Employee directory'
-                  : 'Groups'}
-              </h2>
-              <p>
-                One employee can belong to multiple groups used in review
-                campaigns.
-              </p>
-            </div>
-            <div className="actions">
-              {activePeopleTab === 'employees' ? (
-                <button
-                  className="btn btn-primary people-button"
-                  id="addEmployeeBtn"
-                  onClick={openAddEmployeeModal}
-                >
-                  Add employee
-                </button>
-              ) : (
-                <button
-                  className="btn btn-primary people-button"
-                  id="manageGroupsBtn"
-                  onClick={openAddGroupModal}
-                >
-                  Add group
-                </button>
-              )}
-            </div>
-          </section>
+          <PeopleTabs activeTab={activePeopleTab} onChange={handlePeopleTabChange} />
 
-          <div className="tabs">
-            <button
-              className={`tab${activePeopleTab === 'employees' ? ' active' : ''}`}
-              type="button"
-              onClick={() => setActivePeopleTab('employees')}
-            >
-              Employees
-            </button>
-            <button
-              className={`tab${activePeopleTab === 'groups' ? ' active' : ''}`}
-              type="button"
-              onClick={() => setActivePeopleTab('groups')}
-            >
-              Groups
-            </button>
-          </div>
-
-          <section className="metrics">
-            {activePeopleTab === 'employees' ? (
-              <>
-                <div className="card metric">
-                  <span>Total employees</span>
-                  <strong>{employees.length}</strong>
-                  <em>Across {groups.length} groups</em>
-                </div>
-                <div className="card metric">
-                  <span>Active participants</span>
-                  <strong>{activeEmployees}</strong>
-                  <em>Included in campaigns</em>
-                </div>
-                <div className="card metric">
-                  <span>Missing group</span>
-                  <strong>{missingGroupEmployees}</strong>
-                  <em>Needs attention</em>
-                </div>
-                <div className="card metric">
-                  <span>Multiple groups</span>
-                  <strong>{multiGroupEmployees}</strong>
-                  <em>Assigned to more than one group</em>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="card metric">
-                  <span>Total groups</span>
-                  <strong>{groups.length}</strong>
-                  <em>Available for campaigns</em>
-                </div>
-                <div className="card metric">
-                  <span>Group memberships</span>
-                  <strong>{totalGroupMemberships}</strong>
-                  <em>Employees assigned to groups</em>
-                </div>
-                <div className="card metric">
-                  <span>Empty groups</span>
-                  <strong>{emptyGroups}</strong>
-                  <em>Need members</em>
-                </div>
-                <div className="card metric">
-                  <span>Largest group</span>
-                  <strong>{largestGroup?.memberCount ?? 0}</strong>
-                  <em>
-                    {largestGroups.length > 0
-                      ? largestGroups.map((group) => group.name).join(', ')
-                      : `${averageMembersPerGroup} avg members`}
-                  </em>
-                </div>
-              </>
-            )}
-          </section>
+          <PeopleMetrics
+            metrics={activePeopleTab === 'employees' ? employeeMetrics : groupMetrics}
+            label={activePeopleTab === 'employees' ? 'Employee metrics' : 'Group metrics'}
+          />
 
           {activePeopleTab === 'employees' && <section className="workspace">
             <div>
@@ -703,16 +1409,17 @@ export default function People() {
                   <option>Invited</option>
                 </select>
                 <button
-                  className="btn btn-secondary"
+                  className={`btn btn-secondary${employeeFiltersActive ? '' : ' people-reset-subtle'}`}
                   type="button"
                   onClick={resetEmployeeFilters}
+                  disabled={!employeeFiltersActive}
                 >
                   Reset
                 </button>
               </div>
 
               <div className="card table-card">
-                <table className="table">
+                <table className="table people-employee-table">
                   <thead>
                     <tr>
                       <th>
@@ -777,7 +1484,12 @@ export default function People() {
                         <tr
                           key={employee.id}
                           className={selectedEmployee?.id === employee.id ? 'people-selected-row' : ''}
-                          onClick={() => setSelectedEmployeeId(employee.id)}
+                          tabIndex={0}
+                          aria-selected={selectedEmployee?.id === employee.id}
+                          onClick={() => openEmployeeDrawer(employee)}
+                          onKeyDown={(event) =>
+                            handleInteractiveRowKeyDown(event, () => openEmployeeDrawer(employee))
+                          }
                         >
                           <td>
                             <div className="person">
@@ -856,61 +1568,6 @@ export default function People() {
               </div>
             </div>
 
-            <aside>
-              <div className="card side-card">
-                <h3>Employee details</h3>
-                {selectedEmployee ? (
-                  <>
-                    <div className="person people-detail-person">
-                      <div className="mini">
-                        {getUserInitials(selectedEmployee.name)}
-                      </div>
-                      <div>
-                        <strong>{selectedEmployee.name}</strong>
-                        <span>{selectedEmployee.email}</span>
-                      </div>
-                    </div>
-                    <div className="group-row">
-                      <div>
-                        <strong>Role</strong>
-                        <span>{selectedEmployee.role}</span>
-                      </div>
-                    </div>
-                    <div className="group-row">
-                      <div>
-                        <strong>Status</strong>
-                        <span>{selectedEmployee.status}</span>
-                      </div>
-                    </div>
-                    <div className="group-row">
-                      <div>
-                        <strong>Group(s)</strong>
-                        <span>
-                          {selectedEmployee.groups.length > 0
-                            ? selectedEmployee.groups.join(', ')
-                            : 'No group assigned'}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      className="btn btn-secondary people-button"
-                      type="button"
-                      onClick={() => openEditEmployeeModal(selectedEmployee)}
-                      style={{ width: '100%', marginTop: 12 }}
-                    >
-                      Edit employee
-                    </button>
-                  </>
-                ) : (
-                  <div className="group-row">
-                    <div>
-                      <strong>No employee selected</strong>
-                      <span>Select an employee from the table.</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </aside>
           </section>}
 
           {activePeopleTab === 'groups' && <section className="workspace">
@@ -927,19 +1584,20 @@ export default function People() {
                   placeholder="Search groups..."
                 />
                 <button
-                  className="btn btn-secondary"
+                  className={`btn btn-secondary${groupFiltersActive ? '' : ' people-reset-subtle'}`}
                   type="button"
                   onClick={() => {
                     setGroupSearch('');
                     setGroupPage(1);
                   }}
+                  disabled={!groupFiltersActive}
                 >
                   Reset
                 </button>
               </div>
 
               <div className="card table-card">
-                <table className="table">
+                <table className="table people-group-table">
                   <thead>
                     <tr>
                       <th>Group</th>
@@ -952,23 +1610,40 @@ export default function People() {
                     {!isPeopleLoading &&
                       !peopleError &&
                       groupPagination.items.map((group) => (
-                        <tr key={group.id}>
+                        <tr
+                          key={group.id}
+                          className={selectedGroup?.id === group.id ? 'people-selected-row' : ''}
+                          tabIndex={0}
+                          aria-selected={selectedGroup?.id === group.id}
+                          onClick={() => openGroupDrawer(group)}
+                          onKeyDown={(event) =>
+                            handleInteractiveRowKeyDown(event, () => openGroupDrawer(group))
+                          }
+                        >
                           <td>
                             <button
                               className={`group-table-button${selectedGroup?.id === group.id ? ' active' : ''}`}
                               type="button"
-                              onClick={() => selectGroup(group)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openGroupDrawer(group);
+                              }}
                             >
                               {group.name}
                             </button>
                           </td>
-                          <td>{group.description}</td>
-                          <td>{group.memberCount}</td>
+                          <td className="people-muted-cell">
+                            {isEmptyDescription(group.description) ? '—' : group.description}
+                          </td>
+                          <td className="people-count-cell">{group.memberCount}</td>
                           <td>
                             <button
                               className="link people-link-button"
                               type="button"
-                              onClick={() => openEditGroupModal(group)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openEditGroupModal(group);
+                              }}
                             >
                               Edit
                             </button>
@@ -1001,75 +1676,205 @@ export default function People() {
               </div>
             </div>
 
-            <aside>
-              <div className="card side-card">
-                <h3>{selectedGroup ? selectedGroup.name : 'Group members'}</h3>
-                {selectedGroup && <p>{selectedGroup.description}</p>}
-                <div className="member-list" id="groupPageMembers">
-                  {members.length > 0 ? (
-                    members.map((employee) => (
-                      <span className="member-chip" key={employee.id}>
-                        {employee.name}
-                        <button
-                          className="member-chip-remove"
-                          type="button"
-                          onClick={() =>
-                            handleRemoveGroupMember(selectedGroup.id, employee.id)
-                          }
-                          disabled={removingGroupMemberId === employee.id}
-                          aria-label={`Remove ${employee.name} from ${selectedGroup.name}`}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))
-                  ) : (
-                    <span className="member-chip">
-                      No employees in this group yet
-                    </span>
-                  )}
-                </div>
-                {selectedGroup && (
-                  <div className="people-member-add">
-                    <div>
-                      <strong>Add employee</strong>
-                      <span>Select an employee to include in this group.</span>
-                    </div>
-                    <select
-                      className="form-control"
-                      value={sidePanelEmployeeId}
-                      onChange={(event) => {
-                        setSidePanelEmployeeId(event.target.value);
-                        setGroupMemberMessage('');
-                      }}
-                    >
-                      <option value="">Select employee</option>
-                      {selectedGroupAvailableEmployees.map((employee) => (
-                        <option key={employee.id} value={employee.id}>
-                          {employee.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn btn-primary people-button"
-                      type="button"
-                      onClick={() =>
-                        handleAddGroupMember(selectedGroup.id, sidePanelEmployeeId)
-                      }
-                      disabled={isAddingGroupMember}
-                    >
-                      Add employee
-                    </button>
-                  </div>
-                )}
-                {groupMemberMessage !== '' && (
-                  <div className="people-form-message">{groupMemberMessage}</div>
-                )}
-              </div>
-            </aside>
           </section>}
         </main>
       </AppLayout>
+
+      <DetailDrawer
+        isOpen={activePeopleTab === 'employees' && selectedEmployee !== null}
+        title="Employee details"
+        titleId="employeeDetailsTitle"
+        onClose={() => setSelectedEmployeeId(null)}
+      >
+        {selectedEmployee && (
+          <div className="people-detail-stack">
+            <div className="person people-detail-person">
+              <div className="mini">{getUserInitials(selectedEmployee.name)}</div>
+              <div>
+                <strong>{selectedEmployee.name}</strong>
+                <span>{selectedEmployee.email}</span>
+              </div>
+            </div>
+
+            <dl className="people-detail-list">
+              <div>
+                <dt>Role</dt>
+                <dd>{selectedEmployee.role}</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>{selectedEmployee.status}</dd>
+              </div>
+              <div>
+                <dt>Groups</dt>
+                <dd>
+                  {selectedEmployee.groups.length > 0
+                    ? selectedEmployee.groups.join(' · ')
+                    : 'No group assigned'}
+                </dd>
+              </div>
+            </dl>
+
+            <button
+              className="btn btn-secondary people-button people-drawer-action"
+              type="button"
+              onClick={() => openEditEmployeeModal(selectedEmployee)}
+            >
+              Edit employee
+            </button>
+          </div>
+        )}
+      </DetailDrawer>
+
+      <DetailDrawer
+        isOpen={activePeopleTab === 'groups' && selectedGroup !== null}
+        title={selectedGroup?.name ?? 'Group details'}
+        titleId="groupDetailsTitle"
+        suspendFocusTrap={pendingMemberRemoval !== null}
+        onClose={() => {
+          setSelectedGroupId(null);
+          setGroupMemberMessage('');
+          setSidePanelEmployeeId('');
+          setGroupMemberSearch('');
+        }}
+      >
+        {selectedGroup && (
+          <div className="people-detail-stack">
+            <div className="people-group-summary">
+              <span>Group details</span>
+              <p>
+                {isEmptyDescription(selectedGroup.description)
+                  ? 'No description'
+                  : selectedGroup.description}
+              </p>
+            </div>
+
+            <section className="people-drawer-section">
+              <div className="people-section-head">
+                <h3>Members</h3>
+                <span>
+                  {members.length} employee{members.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              {members.length > 0 ? (
+                <div className="people-member-list" id="groupPageMembers">
+                  {members.map((employee) => (
+                    <div className="people-member-row" key={employee.id}>
+                      <div className="person">
+                        <div className="mini">{getUserInitials(employee.name)}</div>
+                        <div>
+                          <strong>{employee.name}</strong>
+                          <span>{employee.role}</span>
+                        </div>
+                      </div>
+                      <button
+                        className="link people-link-button people-remove-button"
+                        type="button"
+                        onClick={() => requestRemoveGroupMember(selectedGroup.id, employee.id)}
+                        disabled={removingGroupMemberId === employee.id}
+                        aria-label={`Remove ${employee.name} from ${selectedGroup.name}`}
+                      >
+                        {removingGroupMemberId === employee.id ? 'Removing...' : 'Remove'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="people-empty-inline">No employees in this group yet.</div>
+              )}
+            </section>
+
+            <section className="people-drawer-section people-member-add">
+              <div>
+                <strong>Add member</strong>
+                <span>Select an employee who is not already in this group.</span>
+              </div>
+              <EmployeeCombobox
+                employees={selectedGroupAvailableEmployees}
+                selectedEmployeeId={sidePanelEmployeeId}
+                search={groupMemberSearch}
+                onSearchChange={setGroupMemberSearch}
+                onSelect={(employeeId) => {
+                  setSidePanelEmployeeId(employeeId);
+                  setGroupMemberMessage('');
+                }}
+              />
+              <button
+                className="btn btn-primary people-button"
+                type="button"
+                onClick={() => handleAddGroupMember(selectedGroup.id, sidePanelEmployeeId)}
+                disabled={isAddingGroupMember || sidePanelEmployeeId === ''}
+              >
+                {isAddingGroupMember ? 'Adding...' : 'Add to group'}
+              </button>
+              {groupMemberMessage !== '' && (
+                <div className="people-form-message" aria-live="polite">
+                  {groupMemberMessage}
+                </div>
+              )}
+            </section>
+
+            <button
+              className="btn btn-secondary people-button people-drawer-action"
+              type="button"
+              onClick={() => openEditGroupModal(selectedGroup)}
+            >
+              Edit group details
+            </button>
+          </div>
+        )}
+      </DetailDrawer>
+
+      {pendingMemberRemoval !== null && (
+        <div className="modal-backdrop open" role="presentation">
+          <div
+            className="modal confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="removeMemberTitle"
+          >
+            <div className="modal-head">
+              <div>
+                <h2 id="removeMemberTitle">
+                  Remove {pendingMemberRemoval.employeeName} from {pendingMemberRemoval.groupName}?
+                </h2>
+                <p>This employee will no longer belong to this group.</p>
+              </div>
+              <button
+                className="close"
+                type="button"
+                onClick={() => setPendingMemberRemoval(null)}
+                disabled={removingGroupMemberId !== null}
+                aria-label="Cancel removal"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="modal-actions">
+                <button
+                  className="btn btn-secondary people-button"
+                  type="button"
+                  onClick={() => setPendingMemberRemoval(null)}
+                  disabled={removingGroupMemberId !== null}
+                  autoFocus
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary people-button danger-action"
+                  type="button"
+                  onClick={confirmRemoveGroupMember}
+                  disabled={removingGroupMemberId !== null}
+                >
+                  {removingGroupMemberId !== null ? 'Removing...' : 'Remove member'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div
         className={`modal-backdrop${isEmployeeModalOpen ? ' open' : ''}`}
@@ -1132,7 +1937,7 @@ export default function People() {
               <form onSubmit={handleCreateEmployee}>
               <div className="form-grid">
                 <div className="form-field field">
-                  <label className="form-label">Full name</label>
+                  <label className="form-label">Full name <span aria-hidden="true">*</span></label>
                   <input
                     className="form-control"
                     placeholder="e.g. Anna Molnár"
@@ -1140,10 +1945,12 @@ export default function People() {
                     onChange={(event) =>
                       updateEmployeeForm('name', event.target.value)
                     }
+                    aria-invalid={employeeFormErrors.name ? true : undefined}
                   />
+                  <FieldError message={employeeFormErrors.name} />
                 </div>
                 <div className="form-field field">
-                  <label className="form-label">Role</label>
+                  <label className="form-label">Role <span aria-hidden="true">*</span></label>
                   <input
                     className="form-control"
                     placeholder="e.g. Engineering Manager"
@@ -1151,10 +1958,12 @@ export default function People() {
                     onChange={(event) =>
                       updateEmployeeForm('role', event.target.value)
                     }
+                    aria-invalid={employeeFormErrors.role ? true : undefined}
                   />
+                  <FieldError message={employeeFormErrors.role} />
                 </div>
                 <div className="form-field field full">
-                  <label className="form-label">Email address</label>
+                  <label className="form-label">Email address <span aria-hidden="true">*</span></label>
                   <input
                     className="form-control"
                     type="email"
@@ -1163,23 +1972,17 @@ export default function People() {
                     onChange={(event) =>
                       updateEmployeeForm('email', event.target.value)
                     }
+                    aria-invalid={employeeFormErrors.email ? true : undefined}
                   />
+                  <FieldError message={employeeFormErrors.email} />
                 </div>
                 <div className="form-field field full">
                   <label className="form-label">Groups</label>
-                  <div className="group-checks">
-                    {groups.map((group) => (
-                      <label key={group.id}>
-                        <input
-                          type="checkbox"
-                          checked={employeeForm.groupIds.includes(group.id)}
-                          onChange={() => toggleEmployeeGroup(group.id)}
-                        />{' '}
-                        {group.name}
-                      </label>
-                    ))}
-                    {groups.length === 0 && <span>No groups available.</span>}
-                  </div>
+                  <GroupMultiSelect
+                    groups={groups}
+                    selectedGroupIds={employeeForm.groupIds}
+                    onChange={updateEmployeeGroups}
+                  />
                 </div>
               </div>
               {employeeFormMessage !== '' && (
@@ -1213,55 +2016,24 @@ export default function People() {
               className={`panel${employeeTab === 'excelPanel' ? ' active' : ''}`}
               id="excelPanel"
             >
-              <div className="upload-box">
-                <strong>Upload Excel file</strong>
-                <p>
-                  Use an .xlsx file with columns: name, role, email, groups.
-                </p>
-                <label className="file-picker">
-                  <input
-                    type="file"
-                    accept=".xlsx"
-                    onChange={(event) => {
-                      setEmployeeImportFile(event.target.files?.[0] ?? null);
-                      setEmployeeImportMessage('');
-                      setEmployeeImportErrors([]);
-                    }}
-                  />
-                  <span>
-                    {employeeImportFile?.name ?? 'Choose Excel file'}
-                  </span>
-                </label>
-              </div>
-              {(employeeImportMessage !== '' || employeeImportErrors.length > 0) && (
-                <div className="people-form-message">
-                  {employeeImportMessage !== '' && <p>{employeeImportMessage}</p>}
-                  {employeeImportErrors.length > 0 && (
-                    <ul>
-                      {employeeImportErrors.map((error) => (
-                        <li key={error}>{error}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              <div className="modal-actions">
-                <a
-                  className="btn btn-secondary people-button"
-                  href={employeeTemplateUrl}
-                  download="upload_employee_empty_template.xlsx"
-                >
-                  Download template
-                </a>
-                <button
-                  className="btn btn-primary people-button"
-                  type="button"
-                  onClick={handleImportEmployees}
-                  disabled={isImportingEmployees}
-                >
-                  {isImportingEmployees ? 'Uploading...' : 'Upload employees'}
-                </button>
-              </div>
+              <ImportPanel
+                title="Upload Excel file"
+                description="Use an .xlsx file with columns: name, role, email, groups."
+                file={employeeImportFile}
+                message={employeeImportMessage}
+                errors={employeeImportErrors}
+                templateUrl={employeeTemplateUrl}
+                templateName="upload_employee_empty_template.xlsx"
+                uploadLabel="Upload employees"
+                uploadingLabel="Uploading..."
+                isUploading={isImportingEmployees}
+                onFileChange={(file) => {
+                  setEmployeeImportFile(file);
+                  setEmployeeImportMessage('');
+                  setEmployeeImportErrors([]);
+                }}
+                onUpload={handleImportEmployees}
+              />
             </div>}
           </div>
         </div>
@@ -1276,7 +2048,7 @@ export default function People() {
         }}
       >
         <div
-          className="modal"
+          className="modal group-modal"
           role="dialog"
           aria-modal="true"
           aria-labelledby="groupsModalTitle"
@@ -1288,7 +2060,7 @@ export default function People() {
               </h2>
               <p>
                 {editingGroupId === null
-                  ? 'Create groups manually or import group names and descriptions from Excel.'
+                  ? 'Create a new group in your organization.'
                   : 'Update group name and description.'}
               </p>
             </div>
@@ -1309,7 +2081,7 @@ export default function People() {
                 type="button"
                 onClick={() => setGroupTab('groupManualPanel')}
               >
-                Manual group
+                Manual entry
               </button>
               <button
                 className={`add-tab${groupTab === 'groupExcelPanel' ? ' active' : ''}`}
@@ -1324,207 +2096,81 @@ export default function People() {
               id="groupManualPanel"
             >
               <form onSubmit={handleSaveGroup}>
-              <div className="form-grid">
-                <div className="form-field field full">
-                  <label className="form-label">Group name</label>
-                  <input
-                    className="form-control"
-                    id="groupNameInput"
-                    placeholder="e.g. Engineering"
-                    value={groupForm.name}
-                    onChange={(event) =>
-                      updateGroupForm('name', event.target.value)
-                    }
-                  />
-                </div>
-                <div className="form-field field full">
-                  <label className="form-label">Description</label>
-                  <textarea
-                    className="form-control"
-                    id="groupDescriptionInput"
-                    placeholder="Describe who belongs to this group and when it should be used…"
-                    value={groupForm.description}
-                    onChange={(event) =>
-                      updateGroupForm('description', event.target.value)
-                    }
-                  />
-                </div>
-              </div>
-              <div className="group-manager-tools">
-                <strong>Existing groups</strong>
-                <input
-                  className="form-control"
-                  id="groupSearch"
-                  value={groupSearch}
-                  onChange={(event) => {
-                    setGroupSearch(event.target.value);
-                    setGroupPage(1);
-                  }}
-                  placeholder="Search groups…"
-                />
-              </div>
-              <div className="group-manager-list" id="groupManagerList">
-                {groupPagination.items.map((group) => (
-                  <button
-                    key={group.id}
-                    className={`group-manager-row${selectedGroup?.id === group.id ? ' active' : ''}`}
-                    type="button"
-                    onClick={() => selectGroup(group)}
-                  >
-                    <strong>{group.name}</strong>
-                    <span>{group.description}</span>
-                  </button>
-                ))}
-              </div>
-              <Pagination
-                pagination={groupPagination}
-                total={filteredGroups.length}
-                noun="groups"
-                onPageChange={setGroupPage}
-              />
-              <div className="members-box">
-                <h4 id="selectedGroupTitle">
-                  {selectedGroup ? `${selectedGroup.name} members` : 'Group members'}
-                </h4>
-                <div className="member-list" id="groupMembers">
-                  {members.length > 0 ? (
-                    members.map((employee) => (
-                      <span className="member-chip" key={employee.id}>
-                        {employee.name}
-                        {selectedGroup && (
-                          <button
-                            className="member-chip-remove"
-                            type="button"
-                            onClick={() =>
-                              handleRemoveGroupMember(selectedGroup.id, employee.id)
-                            }
-                            disabled={removingGroupMemberId === employee.id}
-                            aria-label={`Remove ${employee.name} from ${selectedGroup.name}`}
-                          >
-                            ×
-                          </button>
-                        )}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="member-chip">
-                      No employees in this group yet
-                    </span>
-                  )}
-                </div>
-                {editingGroupId !== null && (
-                  <div className="people-member-add">
-                    <div>
-                      <strong>Add employee</strong>
-                      <span>Select an employee to include in this group.</span>
-                    </div>
-                    <select
+                <div className="form-grid group-form-grid">
+                  <div className="form-field field full">
+                    <label className="form-label">Group name <span aria-hidden="true">*</span></label>
+                    <input
                       className="form-control"
-                      value={groupModalEmployeeId}
-                      onChange={(event) => {
-                        setGroupModalEmployeeId(event.target.value);
-                        setGroupMemberMessage('');
-                      }}
-                    >
-                      <option value="">Select employee</option>
-                      {editingGroupAvailableEmployees.map((employee) => (
-                        <option key={employee.id} value={employee.id}>
-                          {employee.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn btn-primary people-button"
-                      type="button"
-                      onClick={() =>
-                        handleAddGroupMember(editingGroupId, groupModalEmployeeId)
+                      id="groupNameInput"
+                      placeholder="e.g. Engineering"
+                      value={groupForm.name}
+                      onChange={(event) =>
+                        updateGroupForm('name', event.target.value)
                       }
-                      disabled={isAddingGroupMember}
-                    >
-                      Add employee
-                    </button>
+                    />
                   </div>
+                  <div className="form-field field full">
+                    <label className="form-label">Description <span className="optional-label">optional</span></label>
+                    <textarea
+                      className="form-control"
+                      id="groupDescriptionInput"
+                      placeholder="Describe the purpose of this group..."
+                      value={groupForm.description}
+                      onChange={(event) =>
+                        updateGroupForm('description', event.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+                {groupFormMessage !== '' && (
+                  <div className="people-form-message" aria-live="polite">{groupFormMessage}</div>
                 )}
-              </div>
-              {groupMemberMessage !== '' && (
-                <div className="people-form-message">{groupMemberMessage}</div>
-              )}
-              {groupFormMessage !== '' && (
-                <div className="people-form-message">{groupFormMessage}</div>
-              )}
-              <div className="modal-actions">
-                <button
-                  className="btn btn-secondary people-button"
-                  type="button"
-                  id="cancelGroups"
-                  onClick={closeGroupModal}
-                  disabled={isSavingGroup}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="btn btn-primary people-button"
-                  type="submit"
-                  disabled={isSavingGroup}
-                >
-                  {isSavingGroup
-                    ? 'Saving...'
-                    : editingGroupId === null
-                      ? 'Save group'
-                      : 'Update group'}
-                </button>
-              </div>
+                <div className="modal-actions">
+                  <button
+                    className="btn btn-secondary people-button"
+                    type="button"
+                    id="cancelGroups"
+                    onClick={closeGroupModal}
+                    disabled={isSavingGroup}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn-primary people-button"
+                    type="submit"
+                    disabled={isSavingGroup}
+                  >
+                    {isSavingGroup
+                      ? 'Saving...'
+                      : editingGroupId === null
+                        ? 'Create group'
+                        : 'Save changes'}
+                  </button>
+                </div>
               </form>
             </div>
             {editingGroupId === null && <div
               className={`panel${groupTab === 'groupExcelPanel' ? ' active' : ''}`}
               id="groupExcelPanel"
             >
-              <div className="upload-box">
-                <strong>Import groups from Excel</strong>
-                <p>Use the provided .xlsx template with Group Name and Group Description columns.</p>
-                <label className="file-picker">
-                  <input
-                    type="file"
-                    accept=".xlsx"
-                    onChange={(event) => {
-                      setGroupImportFile(event.target.files?.[0] ?? null);
-                      setGroupImportMessage('');
-                      setGroupImportErrors([]);
-                    }}
-                  />
-                  <span>{groupImportFile?.name ?? 'Choose Excel file'}</span>
-                </label>
-              </div>
-              {(groupImportMessage !== '' || groupImportErrors.length > 0) && (
-                <div className="people-form-message">
-                  {groupImportMessage !== '' && <p>{groupImportMessage}</p>}
-                  {groupImportErrors.length > 0 && (
-                    <ul>
-                      {groupImportErrors.map((error) => (
-                        <li key={error}>{error}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              <div className="modal-actions">
-                <a
-                  className="btn btn-secondary people-button"
-                  href={groupTemplateUrl}
-                  download="upload_group_empty_template.xlsx"
-                >
-                  Download template
-                </a>
-                <button
-                  className="btn btn-primary people-button"
-                  type="button"
-                  onClick={handleImportGroups}
-                  disabled={isImportingGroups}
-                >
-                  {isImportingGroups ? 'Importing...' : 'Import groups'}
-                </button>
-              </div>
+              <ImportPanel
+                title="Import groups from Excel"
+                description="Use the provided .xlsx template with Group Name and Group Description columns."
+                file={groupImportFile}
+                message={groupImportMessage}
+                errors={groupImportErrors}
+                templateUrl={groupTemplateUrl}
+                templateName="upload_group_empty_template.xlsx"
+                uploadLabel="Import groups"
+                uploadingLabel="Importing..."
+                isUploading={isImportingGroups}
+                onFileChange={(file) => {
+                  setGroupImportFile(file);
+                  setGroupImportMessage('');
+                  setGroupImportErrors([]);
+                }}
+                onUpload={handleImportGroups}
+              />
             </div>}
           </div>
         </div>
