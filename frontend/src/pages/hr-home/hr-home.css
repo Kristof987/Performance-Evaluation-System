@@ -46,7 +46,7 @@
 
 /* Workspace grid: wraps ParticipantsSection + NextActions */
 .page .workspace {
-  align-items: flex-start;
+  align-items: stretch;
   display: grid;
   gap: 20px;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);

@@ -216,6 +216,27 @@ export async function addGroupMember(
   return mapGroup((await response.json()) as PeopleGroupResponse);
 }
 
+export async function removeGroupMember(
+  groupId: number,
+  employeeId: number,
+): Promise<Group> {
+  const response = await fetch(
+    `${API_BASE_URL}/people/groups/${groupId}/members/${employeeId}`,
+    { method: 'DELETE' },
+  );
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const detail =
+      body && typeof body === 'object' && 'detail' in body ? body.detail : null;
+    throw new Error(
+      typeof detail === 'string'
+        ? detail
+        : 'Employee could not be removed from the group.',
+    );
+  }
+  return mapGroup((await response.json()) as PeopleGroupResponse);
+}
+
 export async function importGroups(file: File): Promise<GroupImportResult> {
   const form = new FormData();
   form.append('file', file);

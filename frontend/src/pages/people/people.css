@@ -708,13 +708,43 @@
 }
 
 .member-chip {
+  align-items: center;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 999px;
+  display: inline-flex;
+  gap: 6px;
   padding: 6px 9px;
   color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 650;
+}
+
+.member-chip-remove {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 15px;
+  height: 16px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 16px;
+}
+
+.member-chip-remove:hover:not(:disabled) {
+  background: var(--color-surface-muted);
+  color: var(--color-danger);
+}
+
+.member-chip-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .group-checks {

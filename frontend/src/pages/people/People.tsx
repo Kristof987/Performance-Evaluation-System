@@ -8,6 +8,7 @@ import {
   fetchPeople,
   importEmployees,
   importGroups,
+  removeGroupMember,
   updateEmployee,
   updateGroup,
   type Employee,
@@ -132,6 +133,9 @@ export default function People() {
   const [sidePanelEmployeeId, setSidePanelEmployeeId] = useState('');
   const [groupMemberMessage, setGroupMemberMessage] = useState('');
   const [isAddingGroupMember, setIsAddingGroupMember] = useState(false);
+  const [removingGroupMemberId, setRemovingGroupMemberId] = useState<number | null>(
+    null,
+  );
   const [groupImportFile, setGroupImportFile] = useState<File | null>(null);
   const [groupImportMessage, setGroupImportMessage] = useState('');
   const [groupImportErrors, setGroupImportErrors] = useState<string[]>([]);
@@ -357,6 +361,28 @@ export default function People() {
       );
     } finally {
       setIsAddingGroupMember(false);
+    }
+  }
+
+  async function handleRemoveGroupMember(groupId: number, employeeId: number) {
+    if (removingGroupMemberId !== null) return;
+
+    setRemovingGroupMemberId(employeeId);
+    setGroupMemberMessage('');
+    try {
+      await removeGroupMember(groupId, employeeId);
+      const people = await fetchPeople(new AbortController().signal);
+      applyPeopleData(people);
+      setGroupModalEmployeeId('');
+      setSidePanelEmployeeId('');
+    } catch (error) {
+      setGroupMemberMessage(
+        error instanceof Error
+          ? error.message
+          : 'Employee could not be removed from the group.',
+      );
+    } finally {
+      setRemovingGroupMemberId(null);
     }
   }
 
@@ -984,6 +1010,17 @@ export default function People() {
                     members.map((employee) => (
                       <span className="member-chip" key={employee.id}>
                         {employee.name}
+                        <button
+                          className="member-chip-remove"
+                          type="button"
+                          onClick={() =>
+                            handleRemoveGroupMember(selectedGroup.id, employee.id)
+                          }
+                          disabled={removingGroupMemberId === employee.id}
+                          aria-label={`Remove ${employee.name} from ${selectedGroup.name}`}
+                        >
+                          ×
+                        </button>
                       </span>
                     ))
                   ) : (
@@ -1354,6 +1391,19 @@ export default function People() {
                     members.map((employee) => (
                       <span className="member-chip" key={employee.id}>
                         {employee.name}
+                        {selectedGroup && (
+                          <button
+                            className="member-chip-remove"
+                            type="button"
+                            onClick={() =>
+                              handleRemoveGroupMember(selectedGroup.id, employee.id)
+                            }
+                            disabled={removingGroupMemberId === employee.id}
+                            aria-label={`Remove ${employee.name} from ${selectedGroup.name}`}
+                          >
+                            ×
+                          </button>
+                        )}
                       </span>
                     ))
                   ) : (

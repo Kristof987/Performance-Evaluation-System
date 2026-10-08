@@ -425,6 +425,46 @@ def add_people_group_member(group_id: int, member: schemas.PeopleGroupMemberCrea
     }
 
 
+@app.delete(
+    "/people/groups/{group_id}/members/{user_id}",
+    response_model=schemas.PeopleGroupResponse,
+)
+def remove_people_group_member(
+    group_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+):
+    group = db.query(models.CompanyGroup).filter(models.CompanyGroup.id == group_id).first()
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    delete_result = db.execute(
+        models.user_company_groups.delete()
+        .where(models.user_company_groups.c.user_id == user_id)
+        .where(models.user_company_groups.c.company_group_id == group_id)
+    )
+    if delete_result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Employee is not in this group")
+
+    db.commit()
+
+    member_count = (
+        db.query(models.user_company_groups)
+        .filter(models.user_company_groups.c.company_group_id == group_id)
+        .count()
+    )
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "member_count": member_count,
+    }
+
+
 @app.post("/people/groups/import", response_model=schemas.PeopleGroupImportResponse)
 def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not file.filename.lower().endswith(".xlsx"):
