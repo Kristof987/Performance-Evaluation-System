@@ -1,0 +1,113 @@
+.page .forms-section {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+.participants-table {
+  align-items: stretch;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  width: 100%;
+}
+.participants-table-header {
+  align-items: center;
+  background-color: var(--color-surface-muted);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 40px minmax(160px, 1fr) minmax(110px, 150px) minmax(140px, 220px) minmax(120px, 170px);
+  padding: 12px 14px;
+  width: 100%;
+}
+.participants-table-heading {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.participants-table-heading.col-participant {
+  grid-column: 1 / span 2;
+}
+.participants-table-heading.col-evaluations-left {
+  text-align: center;
+}
+.participant-row {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 40px minmax(160px, 1fr) minmax(110px, 150px) minmax(140px, 220px) minmax(120px, 170px);
+  padding: 14px;
+  width: 100%;
+}
+.participant-avatar {
+  height: 34px;
+  width: 34px;
+}
+.participant-info {
+  min-width: 0;
+}
+.participant-name {
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.participant-email,
+.participant-groups {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.participant-role {
+  background: var(--color-surface-muted);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  justify-self: start;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+.participant-evaluations-left {
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+.forms-empty-state {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 22px 16px;
+  text-align: center;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .participant-name,
+  .participant-email,
+  .participant-groups {
+    white-space: normal;
+  }
+  .participants-table-header {
+    display: none;
+  }
+  .participant-row {
+    align-items: flex-start;
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+  .participant-role,
+  .participant-groups,
+  .participant-evaluations-left {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

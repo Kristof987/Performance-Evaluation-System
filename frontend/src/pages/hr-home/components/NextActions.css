@@ -1,0 +1,106 @@
+.page .next-actions {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+.overdue-alert {
+  align-items: flex-start;
+  background-color: var(--color-danger-bg);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 12px;
+  border: 1px solid #f0ddd4;
+  padding: 16px;
+  width: 100%;
+}
+.overdue-alert-title {
+  color: #99442f;
+  font-size: 14px;
+  font-weight: 600;
+}
+.overdue-alert-text {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  width: 100%;
+}
+.hr-home-page .reminder-button {
+  align-items: center;
+  border-radius: 8px;
+  color: #99442f;
+  display: flex;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 8px;
+  border: 1px solid #e6c9bc;
+  padding: 10px 12px;
+  white-space: nowrap;
+  min-height: 0;
+  line-height: inherit;
+  cursor: inherit;
+}
+.publish-card {
+  align-items: flex-start;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 10px;
+  padding: 16px;
+  width: 100%;
+}
+.publish-card-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.publish-card-context {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.publish-card-link {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 1200px) {
+  .page .next-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: none;
+    min-width: 0;
+    width: 100%;
+  }
+  .page .next-actions .section-title {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .page .next-actions {
+    display: flex;
+    max-width: none;
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .overdue-alert-title,
+  .publish-card-title,
+  .publish-card-context {
+    white-space: normal;
+  }
+}
+
+.hr-home-page .reminder-button:hover {
+  background: var(--color-surface);
+  border-color: #e6c9bc;
+}

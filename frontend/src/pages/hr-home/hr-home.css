@@ -1,53 +1,90 @@
-.topbar {
-  align-items: center;
-  display: flex;
-  flex-shrink: 0;
-  gap: 20px;
-  justify-content: space-between;
-  width: 100%;
-}
+/* ==========================================================
+   Page-level + shared styles for HrHome.
+   .section-header / .section-title / .campaign-details-link are
+   used by several components, so they live here.
+   ========================================================== */
+
 .hr-home-page .main-content {
   gap: 20px;
 }
-.greeting {
-  align-items: flex-start;
+.section-header {
+  align-items: center;
   display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  gap: 5px;
+  flex-shrink: 0;
+  gap: 14px;
+  justify-content: space-between;
   min-width: 0;
+  width: 100%;
 }
-.greeting-title {
-  font-family: var(--font-sans);
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.2px;
-  line-height: 30px;
+.overview-title {
+  font-size: 18px;
+  font-weight: 600;
+  white-space: nowrap;
 }
-.greeting-date {
-  color: var(--color-text-muted);
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.section-link {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.campaign-details-link {
+  background: none;
+  border: 0;
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
   font-size: 13px;
+  font-weight: 500;
+  padding: 0;
+  white-space: nowrap;
 }
-.dashboard-tip {
-  background: linear-gradient(135deg, #ffffff 0%, #f7f8ff 100%);
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  box-shadow: 0 12px 30px rgba(31, 42, 107, 0.05);
-  color: var(--color-text-secondary);
+
+/* Workspace grid: wraps ParticipantsSection + NextActions */
+.page .workspace {
+  align-items: flex-start;
   display: grid;
-  flex: 0 1 420px;
-  gap: 4px;
-  padding: 12px 14px;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  flex-shrink: 0;
+  width: 100%;
 }
-.dashboard-tip strong {
-  color: var(--color-text);
-  font-size: 12px;
-  font-weight: 800;
+
+@media (max-width: 1200px) {
+  .page .workspace {
+    grid-template-columns: 1fr;
+  }
 }
-.dashboard-tip span {
-  font-size: 12px;
-  line-height: 1.45;
+
+@media (max-width: 900px) {
+  .page .workspace {
+    grid-template-columns: 1fr;
+  }
 }
+
+@media (max-width: 640px) {
+  .section-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .overview-title,
+  .section-title,
+  .section-link,
+  .campaign-details-link {
+    white-space: normal;
+  }
+}
+
+/* ==========================================================
+   LEGACY: not referenced by HrHome or its components.
+   Kept unchanged because other pages may rely on these rules
+   while this file is loaded. Verify before deleting.
+   ========================================================== */
+
 .button-group {
   align-items: center;
   display: flex;
@@ -79,205 +116,11 @@
   cursor: inherit;
   white-space: nowrap;
 }
-.section-header {
-  align-items: center;
-  display: flex;
-  flex-shrink: 0;
-  gap: 14px;
-  justify-content: space-between;
-  min-width: 0;
-  width: 100%;
-}
-.overview-title {
-  font-size: 18px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.section-title {
-  font-size: 15px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.section-link {
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.campaign-bar {
-  align-items: center;
-  display: flex;
-  flex-shrink: 0;
-  gap: 16px;
-  justify-content: space-between;
-  width: 100%;
-}
-.campaign-selector {
-  align-items: center;
-  background-color: var(--color-surface);
-  border-radius: 8px;
-  display: flex;
-  flex-shrink: 0;
-  gap: 12px;
-  border: 1px solid var(--color-border);
-  padding: 10px 14px;
-}
-button.campaign-selector {
-  cursor: pointer;
-  font: inherit;
-}
-.campaign-selector-wrap {
-  position: relative;
-}
-.campaign-dropdown {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 18px 48px rgba(23, 26, 43, 0.12);
-  display: flex;
-  flex-direction: column;
-  left: 0;
-  margin-top: 8px;
-  min-width: 240px;
-  overflow: hidden;
-  position: absolute;
-  top: 100%;
-  z-index: 10;
-}
-.campaign-dropdown-item {
-  align-items: center;
-  background: none;
-  border: 0;
-  color: var(--color-text);
-  cursor: pointer;
-  display: flex;
-  font: inherit;
-  font-size: 13px;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 12px 14px;
-  text-align: left;
-}
-.campaign-dropdown-item:hover {
-  background-color: var(--color-bg);
-}
-.campaign-dropdown-item span:last-child {
-  color: var(--color-success);
-  font-size: 11px;
-}
-.campaign-name {
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.hr-home-page .campaign-status {
-  color: var(--color-success);
-  font-size: 11px;
-  white-space: nowrap;
-  padding: 0;
-  background: transparent;
-  font-weight: inherit;
-  border-radius: 0;
-}
-.campaign-details-link {
-  background: none;
-  border: 0;
-  color: var(--color-primary);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 0;
-  white-space: nowrap;
-}
-.empty-campaign-card {
-  align-items: center;
-  background: linear-gradient(135deg, var(--color-surface) 0%, #f7f8fd 100%);
-  border-radius: 14px;
-  box-shadow: 0 18px 45px rgba(31, 42, 107, 0.06);
-  display: flex;
-  gap: 18px;
-  justify-content: space-between;
-  padding: 20px;
-  width: 100%;
-}
-.empty-campaign-title {
-  font-size: 15px;
-  font-weight: 650;
-  margin-bottom: 5px;
-}
-.empty-campaign-text {
-  color: var(--color-text-secondary);
-  font-size: 13px;
-}
-.hr-home-page .empty-campaign-button {
-  border-radius: 9px;
-  cursor: pointer;
-  flex-shrink: 0;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 10px 14px;
-  min-height: 0;
-  line-height: inherit;
-}
-.metrics {
-  align-items: stretch;
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  flex-shrink: 0;
-  width: 100%;
-}
-.metric-card {
-  align-items: flex-start;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  height: fit-content;
-  min-width: 0;
-  padding: 16px;
-}
-.metric-label {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-}
-.metric-value {
-  font-size: 30px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.metric-value.accent {
-  color: var(--color-primary);
-}
-.metric-value.danger {
-  color: var(--color-danger);
-}
-.metric-context,
 .form-audience,
-.form-progress-label,
-.upcoming-meta {
+.form-progress-label {
   color: var(--color-text-secondary);
   font-size: 11px;
   white-space: nowrap;
-}
-.page .workspace {
-  align-items: flex-start;
-  display: grid;
-  gap: 20px;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
-  flex-shrink: 0;
-  width: 100%;
-}
-.page .forms-section {
-  align-items: flex-start;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  width: 100%;
 }
 .page .forms-table {
   align-items: flex-start;
@@ -287,82 +130,6 @@ button.campaign-selector {
   flex-shrink: 0;
   overflow: hidden;
   width: 100%;
-}
-.participants-table {
-  align-items: stretch;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  overflow: hidden;
-  width: 100%;
-}
-.participants-table-header {
-  align-items: center;
-  background-color: var(--color-surface-muted);
-  display: grid;
-  gap: 14px;
-  grid-template-columns: 40px minmax(160px, 1fr) minmax(110px, 150px) minmax(140px, 220px) minmax(120px, 170px);
-  padding: 12px 14px;
-  width: 100%;
-}
-.participants-table-heading {
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.participants-table-heading.col-participant {
-  grid-column: 1 / span 2;
-}
-.participants-table-heading.col-evaluations-left {
-  text-align: center;
-}
-.participant-row {
-  align-items: center;
-  border-top: 1px solid var(--color-border);
-  display: grid;
-  gap: 14px;
-  grid-template-columns: 40px minmax(160px, 1fr) minmax(110px, 150px) minmax(140px, 220px) minmax(120px, 170px);
-  padding: 14px;
-  width: 100%;
-}
-.participant-avatar {
-  height: 34px;
-  width: 34px;
-}
-.participant-info {
-  min-width: 0;
-}
-.participant-name {
-  font-size: 13px;
-  font-weight: 650;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.participant-email,
-.participant-groups {
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.participant-role {
-  background: var(--color-surface-muted);
-  border-radius: 999px;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  font-weight: 700;
-  justify-self: start;
-  padding: 6px 10px;
-  white-space: nowrap;
-}
-.participant-evaluations-left {
-  font-size: 13px;
-  font-weight: 700;
-  text-align: center;
 }
 .page .forms-table-header {
   align-items: center;
@@ -408,14 +175,6 @@ button.campaign-selector {
     38px;
   flex-shrink: 0;
   padding: 16px;
-  width: 100%;
-}
-.forms-empty-state {
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 22px 16px;
-  text-align: center;
   width: 100%;
 }
 .page .form-info {
@@ -485,189 +244,18 @@ button.campaign-selector {
   background: transparent;
   cursor: inherit;
 }
-.page .next-actions {
-  align-items: flex-start;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  width: 100%;
-}
-.overdue-alert {
-  align-items: flex-start;
-  background-color: var(--color-danger-bg);
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  gap: 12px;
-  border: 1px solid #f0ddd4;
-  padding: 16px;
-  width: 100%;
-}
-.overdue-alert-title {
-  color: #99442f;
-  font-size: 14px;
-  font-weight: 600;
-}
-.overdue-alert-text {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 18px;
-  width: 100%;
-}
-.hr-home-page .reminder-button {
-  align-items: center;
-  border-radius: 8px;
-  color: #99442f;
-  display: flex;
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 8px;
-  border: 1px solid #e6c9bc;
-  padding: 10px 12px;
-  white-space: nowrap;
-  min-height: 0;
-  line-height: inherit;
-  cursor: inherit;
-}
-.publish-card {
-  align-items: flex-start;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  gap: 10px;
-  padding: 16px;
-  width: 100%;
-}
-.publish-card-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-.publish-card-context {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-.publish-card-link {
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.upcoming-section {
-  align-items: flex-start;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  gap: 10px;
-  width: 100%;
-}
-.upcoming-list {
-  align-items: flex-start;
-  display: flex;
-  flex-shrink: 0;
-  gap: 20px;
-  flex-wrap: wrap;
-  width: 100%;
-}
-.upcoming-item {
-  align-items: flex-start;
-  border-top: 3px solid #97a2f0;
-  display: flex;
-  flex: 1 1 240px;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-  padding-top: 12px;
-}
-.upcoming-date {
-  color: var(--color-primary);
-  font-size: 11px;
-  font-weight: 600;
-}
-.upcoming-name {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-@media (max-width: 1200px) {
-  .page .workspace {
-    grid-template-columns: 1fr;
-  }
-  .page .next-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    max-width: none;
-    min-width: 0;
-    width: 100%;
-  }
-  .page .next-actions .section-title {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (max-width: 900px) {
-  .metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .page .workspace {
-    grid-template-columns: 1fr;
-  }
-  .page .next-actions {
-    display: flex;
-    max-width: none;
-    min-width: 0;
-    width: 100%;
-  }
-  .upcoming-list {
-    flex-wrap: wrap;
-  }
-}
 
 @media (max-width: 640px) {
-  .topbar,
-  .section-header,
-  .campaign-bar {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-  .dashboard-tip {
-    flex-basis: 100%;
-  }
-  .greeting-title,
-  .greeting-date,
-  .overview-title,
-  .section-title,
-  .section-link,
-  .campaign-name,
-  .campaign-details-link,
-  .metric-context,
   .form-name,
   .form-audience,
-  .form-progress-label,
-  .participant-name,
-  .participant-email,
-  .participant-groups,
-  .overdue-alert-title,
-  .publish-card-title,
-  .publish-card-context,
-  .upcoming-name,
-  .upcoming-meta {
+  .form-progress-label {
     white-space: normal;
   }
   .button-group {
     flex-wrap: wrap;
     max-width: 100%;
   }
-  .metric-card {
-    flex-basis: 100%;
-  }
   .page .forms-table-header {
-    display: none;
-  }
-  .participants-table-header {
     display: none;
   }
   .page .form-row {
@@ -683,31 +271,8 @@ button.campaign-selector {
   .page .form-deadline {
     width: auto;
   }
-  .participant-row {
-    align-items: flex-start;
-    grid-template-columns: 40px minmax(0, 1fr);
-  }
-  .participant-role,
-  .participant-groups,
-  .participant-evaluations-left {
-    grid-column: 2;
-    justify-self: start;
-  }
-  .upcoming-list {
-    flex-direction: column;
-  }
-  .upcoming-item {
-    flex-basis: auto;
-    width: 100%;
-  }
 }
 
-@media (max-width: 480px) {
-  .campaign-selector {
-    flex-wrap: wrap;
-    max-width: 100%;
-  }
-}
 .campaign-filter-bar {
   overflow: hidden;
 }
@@ -758,15 +323,9 @@ button.campaign-selector {
   border-color: var(--color-border);
 }
 
-.hr-home-page .dashboard-button.btn-primary:hover,
-.hr-home-page .empty-campaign-button:hover {
+.hr-home-page .dashboard-button.btn-primary:hover {
   background: var(--color-primary);
   border-color: var(--color-primary);
-}
-
-.hr-home-page .reminder-button:hover {
-  background: var(--color-surface);
-  border-color: #e6c9bc;
 }
 
 .hr-home-page .form-open-button:hover {
