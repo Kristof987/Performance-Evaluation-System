@@ -1,9 +1,12 @@
-export type CampaignStatus = 'Active' | 'Closed';
+import type { CampaignLifecycleStatus } from './campaign.lifecycle';
+export type CampaignStatus = CampaignLifecycleStatus;
 
 export type Campaign = {
   id: string;
   name: string;
   status: CampaignStatus;
+  isActive: boolean;
+  currentDate?: string;
   start: string;
   end: string;
   startDate: string;
@@ -27,6 +30,8 @@ export type CampaignResponse = {
   is_active: boolean;
   comment: string | null;
   issued_forms_count: number;
+  submitted_forms_count: number;
+  current_date: string;
 };
 
 export type CampaignGroup = {
@@ -99,6 +104,8 @@ export type CampaignEvaluationMatrixAssignment = {
   formId: number;
   filledFormId: number;
   isCompleted: boolean;
+  statusName: string;
+  hasAnswers: boolean;
 };
 
 export type CampaignGroupEvaluationMatrix = {
@@ -128,6 +135,8 @@ export type CampaignEvaluationMatrixResponse = {
       form_id: number;
       filled_form_id: number;
       is_completed: boolean;
+      status_name: string;
+      has_answers: boolean;
     }>;
   }>;
 };
@@ -136,6 +145,30 @@ export type CampaignEvaluationMatrixUpdateResponse = CampaignEvaluationMatrixRes
   created_count: number;
   removed_count: number;
   kept_completed_count: number;
+};
+
+export type CampaignSelfEvaluations = {
+  forms: CampaignRuleForm[];
+  participants: Array<{
+    employeeId: number;
+    name: string;
+    roleName: string;
+    groupNames: string[];
+    formId: number | null;
+    locked: boolean;
+  }>;
+};
+
+export type CampaignSelfEvaluationsResponse = {
+  forms: CampaignRuleForm[];
+  participants: Array<{
+    employee_id: number;
+    employee_name: string;
+    role_name: string;
+    group_names: string[];
+    form_id: number | null;
+    locked: boolean;
+  }>;
 };
 
 export type CampaignFormValues = {

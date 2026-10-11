@@ -6,8 +6,8 @@ export default function CampaignStats(props: Props) {
   if (props.campaign) {
     const campaign = props.campaign;
     return (
-      <div className="campaign-stats">
-        <div className="card campaign-stat">
+      <div className="campaign-stats" aria-label="Campaign metrics">
+        <div className="campaign-stat">
           <span>Completion rate</span>
           <strong>
             {campaign.sent === 0
@@ -15,52 +15,41 @@ export default function CampaignStats(props: Props) {
               : `${Math.round((campaign.done / campaign.sent) * 100)}%`}
           </strong>
         </div>
-        <div className="card campaign-stat">
+        <div className="campaign-stat">
           <span>Submitted</span>
           <strong>
             {campaign.done} / {campaign.sent}
           </strong>
         </div>
-        <div className="card campaign-stat">
+        <div className="campaign-stat">
           <span>
-            {campaign.status === 'Closed'
+            {campaign.status === 'Completed' || campaign.status === 'Disabled'
               ? 'Not submitted'
               : 'Awaiting submission'}
           </span>
           <strong>{campaign.sent - campaign.done}</strong>
         </div>
-        <div className="card campaign-stat">
-          <span>Forms</span>
-          <strong>{campaign.forms.length}</strong>
+        <div className="campaign-stat">
+          <span>Evaluations</span>
+          <strong>{campaign.issuedFormsCount}</strong>
         </div>
       </div>
     );
   }
   const campaignList = props.campaignList;
   return (
-    <div className="campaign-overview-stats">
-      <div className="card campaign-mini-stat">
+    <div className="campaign-overview-stats" aria-label="Campaign statistics">
+      <div className="campaign-mini-stat">
         <span>Total campaigns</span>
         <strong>{campaignList.length}</strong>
+        <small>{campaignList.filter((campaign) => campaign.status === 'Disabled').length} disabled</small>
       </div>
-      <div className="card campaign-mini-stat">
-        <span>Active</span>
-        <strong>
-          {
-            campaignList.filter((campaign) => campaign.status === 'Active')
-              .length
-          }
-        </strong>
-      </div>
-      <div className="card campaign-mini-stat">
-        <span>Closed</span>
-        <strong>
-          {
-            campaignList.filter((campaign) => campaign.status === 'Closed')
-              .length
-          }
-        </strong>
-      </div>
+      {(['Scheduled', 'Ongoing', 'Completed'] as const).map((status) => (
+        <div className="campaign-mini-stat" key={status}>
+          <span>{status}</span>
+          <strong>{campaignList.filter((campaign) => campaign.status === status).length}</strong>
+        </div>
+      ))}
     </div>
   );
 }

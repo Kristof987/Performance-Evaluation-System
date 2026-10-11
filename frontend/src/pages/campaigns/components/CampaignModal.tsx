@@ -1,13 +1,11 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 type Props = {
-  mode: 'create' | 'edit';
-  issuedFormsCount?: number;
+  mode: 'create' | 'edit' | 'copy-role' | 'copy-group' | 'copy-self';
   onClose: () => void;
   children: ReactNode;
 };
 export default function CampaignModal({
   mode,
-  issuedFormsCount = 0,
   onClose,
   children,
 }: Props) {
@@ -20,9 +18,30 @@ export default function CampaignModal({
   }, [onClose]);
   const isCreate = mode === 'create';
   const titleId = `${mode}-campaign-title`;
+  const dialogRef = useRef<HTMLElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    openerRef.current = document.activeElement as HTMLElement | null;
+    dialogRef.current?.querySelector<HTMLElement>('input, textarea, select, button')?.focus();
+    const handleFocus = (event: FocusEvent) => {
+      if (dialogRef.current && !dialogRef.current.contains(event.target as Node)) {
+        dialogRef.current.querySelector<HTMLElement>('input, textarea, select, button')?.focus();
+      }
+    };
+    document.addEventListener('focusin', handleFocus);
+    document.body.classList.add('modal-open');
+    return () => {
+      document.removeEventListener('focusin', handleFocus);
+      document.body.classList.remove('modal-open');
+      openerRef.current?.focus();
+    };
+  }, []);
   return (
-    <div className="campaign-modal-backdrop" role="presentation">
+    <div className="campaign-modal-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
       <section
+        ref={dialogRef}
         className="campaign-modal"
         role="dialog"
         aria-modal="true"
@@ -30,27 +49,17 @@ export default function CampaignModal({
       >
         <div className="campaign-modal-header">
           <div>
-            <span className="campaign-modal-eyebrow">
-              {isCreate ? 'New campaign' : 'Edit campaign'}
-            </span>
             <h2 id={titleId}>
-              {isCreate ? 'Create campaign' : 'Edit Campaign'}
+              {isCreate ? 'Create campaign' : mode === 'copy-role' ? 'Copy role pair' : mode === 'copy-group' ? 'Copy group rules' : mode === 'copy-self' ? 'Copy self-evaluation form' : 'Edit campaign'}
             </h2>
             <p>
-              {isCreate ? (
-                'Fill the fields from the Campaign model before assigning forms and groups.'
-              ) : (
-                <>
-                  Update the campaign details and period. {issuedFormsCount}{' '}
-                  questionnaires have been issued.
-                </>
-              )}
+              {isCreate ? 'Set up a new performance review campaign.' : mode === 'copy-role' ? "Apply this role pair's form assignment to matching groups." : mode === 'copy-group' ? "Apply this group's matching role-to-form rules to other selected groups." : mode === 'copy-self' ? 'Apply this questionnaire to other employees in the campaign.' : 'Update the campaign details and schedule.'}
             </p>
           </div>
           <button
             className="campaign-modal-close"
             type="button"
-            aria-label={`Close ${mode} campaign`}
+            aria-label="Close dialog"
             onClick={onClose}
           >
             ×

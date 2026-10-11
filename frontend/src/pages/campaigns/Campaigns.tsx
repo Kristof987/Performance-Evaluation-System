@@ -1,4 +1,3 @@
-import { Link } from 'react-router';
 import CampaignPage from './components/CampaignPage';
 import CampaignList from './components/CampaignList';
 import CampaignStats from './components/CampaignStats';
@@ -14,7 +13,7 @@ export function Campaigns() {
         <div className="campaign-heading">
           <div>
             <h1>Campaigns</h1>
-            <p>Current and past performance review campaigns</p>
+             <p>Create and manage performance review campaigns.</p>
           </div>
           <div className="campaign-heading-actions">
             <button
@@ -24,7 +23,6 @@ export function Campaigns() {
             >
               Create campaign
             </button>
-            <Link to="/hr-home">Back to dashboard</Link>
           </div>
         </div>
         {state.successMessage !== '' && (
@@ -46,7 +44,6 @@ export function Campaigns() {
         <CampaignModal mode="create" onClose={state.closeCreate}>
           <CampaignForm
             form={state.form}
-            createdByName={state.createdByName}
             message={state.createMessage}
             isSaving={state.isSavingCampaign}
             updateForm={state.updateForm}

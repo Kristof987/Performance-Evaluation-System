@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { X } from 'lucide-react';
+import CampaignStatusBadge from './CampaignStatusBadge';
 import type {
   Campaign,
   CampaignStatus,
@@ -28,11 +29,6 @@ export default function CampaignList({
   return (
     <>
       <div className="campaign-filter-bar">
-        <div className="campaign-filter-title">
-          <strong>Filter campaigns</strong>
-          <span>Search by name or narrow by status</span>
-        </div>
-
         <div className="campaign-filters">
           <div className="campaign-search-field">
             <input
@@ -61,12 +57,15 @@ export default function CampaignList({
             }
           >
             <option>All statuses</option>
-            <option>Active</option>
-            <option>Closed</option>
+            <option>Scheduled</option>
+            <option>Ongoing</option>
+            <option>Completed</option>
+            <option>Disabled</option>
           </select>
           <button
             className="btn btn-secondary"
             type="button"
+            disabled={searchQuery === '' && statusFilter === 'All statuses'}
             onClick={() => {
               setSearchQuery('');
               setStatusFilter('All statuses');
@@ -85,8 +84,8 @@ export default function CampaignList({
               <th>Status</th>
               <th>Period</th>
               <th>Completion</th>
-              <th>Forms</th>
-              <th></th>
+              <th>Evaluations</th>
+              <th><span className="campaign-visually-hidden">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -126,18 +125,10 @@ export default function CampaignList({
             {filteredCampaigns.map((campaign) => (
               <tr key={campaign.id}>
                 <td>
-                  <strong>{campaign.name}</strong>
+                  <Link className="campaign-name-link" to={`/campaigns/${campaign.id}`}>{campaign.name}</Link>
                 </td>
                 <td>
-                  <span
-                    className={`badge ${
-                      campaign.status === 'Active'
-                        ? 'badge-success'
-                        : 'badge-neutral'
-                    }`}
-                  >
-                    {campaign.status}
-                  </span>
+                  <CampaignStatusBadge status={campaign.status} />
                 </td>
                 <td>
                   {campaign.start} - {campaign.end}
@@ -146,12 +137,12 @@ export default function CampaignList({
                   {campaign.sent === 0
                     ? '0%'
                     : `${Math.round((campaign.done / campaign.sent) * 100)}%`}
-                  <progress value={campaign.done} max={campaign.sent || 1} />
+                  <progress aria-label={`${campaign.name} completion`} value={campaign.done} max={campaign.sent || 1} />
                 </td>
-                <td>{campaign.forms.length}</td>
+                <td>{campaign.issuedFormsCount}</td>
                 <td>
                   <Link to={`/campaigns/${campaign.id}`}>
-                    {'Manage campaign ->'}
+                    {'View details ->'}
                   </Link>
                 </td>
               </tr>

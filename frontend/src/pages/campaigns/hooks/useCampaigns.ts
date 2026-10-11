@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router';
 import type {
   Campaign,
   CampaignFormValues,
@@ -31,6 +32,7 @@ function getCurrentUser(): { id: number; username: string } | null {
 }
 
 export function useCampaigns() {
+  const navigate = useNavigate();
   const [campaignList, setCampaignList] = useState<Campaign[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] =
@@ -99,9 +101,10 @@ export function useCampaigns() {
     try {
       const saved = await createCampaign(form, user.id);
       setCampaignList((current) => [saved, ...current]);
-      setIsCreateOpen(false);
-      setForm(emptyCampaignForm);
-      setSuccessMessage('Campaign saved successfully.');
+       setIsCreateOpen(false);
+       setForm(emptyCampaignForm);
+       setSuccessMessage('Campaign saved successfully.');
+       navigate(`/campaigns/${saved.id}`);
     } catch (error) {
       setCreateMessage(
         error instanceof Error ? error.message : 'Campaign could not be saved.',

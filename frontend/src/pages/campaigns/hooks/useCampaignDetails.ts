@@ -5,8 +5,13 @@ import type {
   CampaignEvaluationRules,
   CampaignFormValues,
   CampaignGroups,
+  CampaignSelfEvaluations,
   UpdateCampaignField,
 } from '../campaign.types';
+import { previewRuleCopy, type RuleCopyRequest } from '../rule-copy';
+import { clearMatrixPairs, generateMatrixPairs, matrixDirty, matrixGroupWithSelfLocks, matrixKey, selectMatrixPairs, synchronizeSelfPair, toggleMatrixPair } from '../matrix.utils';
+import { getFormAssignmentProgress, getMatrixReadiness } from '../campaign-readiness';
+import { previewSelfCopy, selfFormMap, selfFormsDirty } from '../self-evaluations';
 import {
   areCampaignFormsEqual,
   emptyCampaignForm,
@@ -18,10 +23,12 @@ import {
   fetchCampaignEvaluationMatrix,
   fetchCampaignEvaluationRules,
   fetchCampaignGroups,
+  fetchCampaignSelfEvaluations,
   updateCampaign,
   updateCampaignEvaluationMatrix,
   updateCampaignEvaluationRules,
   updateCampaignGroups,
+  updateCampaignSelfEvaluations,
 } from '../campaign.api';
 
 function areGroupIdsEqual(first: number[], second: number[]) {
@@ -35,9 +42,7 @@ function getRuleKey(groupId: number, evaluatorRoleId: number, evaluateeRoleId: n
   return `${groupId}:${evaluatorRoleId}:${evaluateeRoleId}`;
 }
 
-function getMatrixKey(groupId: number, evaluatorId: number, evaluateeId: number) {
-  return `${groupId}:${evaluatorId}:${evaluateeId}`;
-}
+const getMatrixKey = matrixKey;
 
 function getRuleFormMap(rules: CampaignEvaluationRules) {
   const map: Record<string, number | null> = {};
@@ -62,23 +67,21 @@ function areRuleFormMapsEqual(
 
 function getMatrixAssignmentMap(matrix: CampaignEvaluationMatrix) {
   const map: Record<string, boolean> = {};
+  const selfIds = new Set<number>();
   for (const group of matrix.groups) {
     for (const assignment of group.assignments) {
       map[getMatrixKey(group.groupId, assignment.evaluatorId, assignment.evaluateeId)] = true;
+      if (assignment.evaluatorId === assignment.evaluateeId) selfIds.add(assignment.evaluatorId);
+    }
+  }
+  for (const employeeId of selfIds) {
+    for (const group of matrix.groups) {
+      if (group.employees.some((person) => person.id === employeeId)) {
+        map[getMatrixKey(group.groupId, employeeId, employeeId)] = true;
+      }
     }
   }
   return map;
-}
-
-function areMatrixAssignmentMapsEqual(
-  first: Record<string, boolean>,
-  second: Record<string, boolean>,
-) {
-  const keys = new Set([...Object.keys(first), ...Object.keys(second)]);
-  for (const key of keys) {
-    if ((first[key] ?? false) !== (second[key] ?? false)) return false;
-  }
-  return true;
 }
 
 export function useCampaignDetails(id: string | undefined) {
@@ -94,6 +97,10 @@ export function useCampaignDetails(id: string | undefined) {
   const [evaluationMatrix, setEvaluationMatrix] = useState<CampaignEvaluationMatrix>({
     groups: [],
   });
+  const [selfEvaluations, setSelfEvaluations] = useState<CampaignSelfEvaluations>({ forms: [], participants: [] });
+  const [selectedSelfForms, setSelectedSelfForms] = useState<Record<number, number | null>>({});
+  const [selfMessage, setSelfMessage] = useState('');
+  const [isSavingSelf, setIsSavingSelf] = useState(false);
   const [selectedRuleFormIds, setSelectedRuleFormIds] = useState<Record<string, number | null>>({});
   const [selectedMatrixAssignments, setSelectedMatrixAssignments] = useState<Record<string, boolean>>({});
   const [activeRuleKey, setActiveRuleKey] = useState<string | null>(null);
@@ -121,6 +128,9 @@ export function useCampaignDetails(id: string | undefined) {
     setCampaignGroups({ availableGroups: [], assignedGroupIds: [] });
     setEvaluationRules({ forms: [], groups: [] });
     setEvaluationMatrix({ groups: [] });
+    setSelfEvaluations({ forms: [], participants: [] });
+    setSelectedSelfForms({});
+    setSelfMessage('');
     setSelectedRuleFormIds({});
     setSelectedMatrixAssignments({});
     setActiveRuleKey(null);
@@ -145,13 +155,16 @@ export function useCampaignDetails(id: string | undefined) {
         fetchCampaignGroups(id, controller.signal),
         fetchCampaignEvaluationRules(id, controller.signal),
         fetchCampaignEvaluationMatrix(id, controller.signal),
+        fetchCampaignSelfEvaluations(id, controller.signal),
       ])
-        .then(([loaded, loadedGroups, loadedRules, loadedMatrix]) => {
+        .then(([loaded, loadedGroups, loadedRules, loadedMatrix, loadedSelf]) => {
           if (!controller.signal.aborted) {
             setCampaign(loaded);
             setCampaignGroups(loadedGroups);
             setEvaluationRules(loadedRules);
             setEvaluationMatrix(loadedMatrix);
+            setSelfEvaluations(loadedSelf);
+            setSelectedSelfForms(selfFormMap(loadedSelf));
             setSelectedRuleFormIds(getRuleFormMap(loadedRules));
             setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
             setSelectedGroupIds(loadedGroups.assignedGroupIds);
@@ -201,10 +214,10 @@ export function useCampaignDetails(id: string | undefined) {
     selectedRuleFormIds,
     getRuleFormMap(evaluationRules),
   );
-  const hasMatrixChanges = !areMatrixAssignmentMapsEqual(
-    selectedMatrixAssignments,
-    getMatrixAssignmentMap(evaluationMatrix),
-  );
+  const hasMatrixChanges = matrixDirty(selectedMatrixAssignments, getMatrixAssignmentMap(evaluationMatrix));
+  const hasSelfChanges = selfFormsDirty(selfEvaluations, selectedSelfForms);
+  const formProgress = getFormAssignmentProgress(evaluationRules, selectedRuleFormIds);
+  const matrixReadiness = getMatrixReadiness(formProgress, hasGroupChanges, hasRuleChanges);
 
   function toggleGroup(groupId: number) {
     setSelectedGroupIds((current) =>
@@ -239,82 +252,73 @@ export function useCampaignDetails(id: string | undefined) {
     evaluatorId: number,
     evaluateeId: number,
   ) {
-    const key = getMatrixKey(groupId, evaluatorId, evaluateeId);
-    setSelectedMatrixAssignments((current) => ({
-      ...current,
-      [key]: !(current[key] ?? false),
-    }));
+    const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
+    if (matrixReadiness !== 'ready' || !group) return;
+    if (evaluatorId === evaluateeId && hasSelfChanges) return;
+    setSelectedMatrixAssignments((current) => {
+      const next = toggleMatrixPair(group, evaluationRules, current, evaluatorId, evaluateeId, selectedSelfForms);
+      return next === current || evaluatorId !== evaluateeId ? next : synchronizeSelfPair(evaluationMatrix.groups, next, evaluatorId, Boolean(next[matrixKey(groupId, evaluatorId, evaluateeId)]));
+    });
     setMatrixMessage('');
     setSuccessMessage('');
   }
 
-  function getMatrixRuleFormId(
-    groupId: number,
-    evaluatorRoleId: number,
-    evaluateeRoleId: number,
-  ) {
-    return selectedRuleFormIds[getRuleKey(groupId, evaluatorRoleId, evaluateeRoleId)] ?? null;
-  }
-
   function applyMatrixSelectAll(groupId: number) {
-    const group = evaluationMatrix.groups.find((item) => item.groupId === groupId);
-    if (group === undefined) return;
-
-    setSelectedMatrixAssignments((current) => {
-      const next = { ...current };
-      for (const evaluator of group.employees) {
-        for (const evaluatee of group.employees) {
-          const formId = getMatrixRuleFormId(group.groupId, evaluator.roleId, evaluatee.roleId);
-          if (formId === null) continue;
-          next[getMatrixKey(group.groupId, evaluator.id, evaluatee.id)] = true;
-        }
-      }
-      return next;
-    });
-    setMatrixMessage('');
+    const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
+    if (group === undefined || matrixReadiness !== 'ready') return;
+    if (hasSelfChanges) return;
+    let next = selectMatrixPairs(group, evaluationRules, selectedMatrixAssignments, false, selectedSelfForms);
+    for (const person of group.employees) {
+      if (next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, person.id, true);
+    }
+    setSelectedMatrixAssignments(next);
+    setMatrixMessage(matrixDirty(next, selectedMatrixAssignments) ? '' : 'All eligible pairs are already selected.');
     setSuccessMessage('');
   }
 
   function applyMatrixSelfEvaluations(groupId: number) {
-    const group = evaluationMatrix.groups.find((item) => item.groupId === groupId);
-    if (group === undefined) return;
-
-    setSelectedMatrixAssignments((current) => {
-      const next = { ...current };
-      for (const employee of group.employees) {
-        const formId = getMatrixRuleFormId(group.groupId, employee.roleId, employee.roleId);
-        if (formId === null) continue;
-        next[getMatrixKey(group.groupId, employee.id, employee.id)] = true;
-      }
-      return next;
-    });
-    setMatrixMessage('');
+    const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
+    if (group === undefined || matrixReadiness !== 'ready') return;
+    if (hasSelfChanges) return;
+    let next = selectMatrixPairs(group, evaluationRules, selectedMatrixAssignments, true, selectedSelfForms);
+    const missing = group.employees.filter((person) => selectedSelfForms[person.id] == null &&
+      !group.assignments.some((item) => item.evaluatorId === person.id && item.evaluateeId === person.id)).length;
+    const protectedCount = group.employees.filter((person) => group.assignments.some((item) =>
+      item.evaluatorId === person.id && item.evaluateeId === person.id)).length;
+    for (const person of group.employees) {
+      if (next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, person.id, true);
+    }
+    setSelectedMatrixAssignments(next);
+    const skipped = [missing && `${missing} without a self-evaluation form`, protectedCount && `${protectedCount} already issued`].filter(Boolean).join(', ');
+    setMatrixMessage(`${matrixDirty(next, selectedMatrixAssignments) ? 'Eligible self-evaluations selected.' : 'No additional eligible self-evaluations are available.'}${skipped ? ` Skipped: ${skipped}.` : ''}`);
     setSuccessMessage('');
   }
 
   function applyMatrixMinimumReviewers(groupId: number, minimumReviewers: number) {
-    const group = evaluationMatrix.groups.find((item) => item.groupId === groupId);
-    if (group === undefined) return;
-    const normalizedMinimum = Math.max(0, Math.floor(minimumReviewers));
+    const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
+    if (group === undefined || matrixReadiness !== 'ready') return;
+    try {
+      const result = generateMatrixPairs(group, evaluationRules, selectedMatrixAssignments, minimumReviewers);
+      setSelectedMatrixAssignments(result.selection);
+      setMatrixMessage(result.unmet.length ? `Minimum could not be reached: ${result.unmet.join(', ')}.` : 'Requested peer-review minimum reached where eligible. Self-evaluations are not counted.');
+    } catch (error) {
+      setMatrixMessage(error instanceof Error ? error.message : 'Invalid review minimum.');
+    }
+    setSuccessMessage('');
+  }
 
+  function applyMatrixDeleteAll(groupId: number) {
+    const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
+    const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
+    if (group === undefined || matrixReadiness !== 'ready') return;
     setSelectedMatrixAssignments((current) => {
-      const next = { ...current };
-      for (const evaluatee of group.employees) {
-        const availableEvaluators = group.employees.filter((evaluator) => {
-          if (evaluator.id === evaluatee.id) return false;
-          return getMatrixRuleFormId(group.groupId, evaluator.roleId, evaluatee.roleId) !== null;
-        });
-        let selectedCount = availableEvaluators.filter(
-          (evaluator) => next[getMatrixKey(group.groupId, evaluator.id, evaluatee.id)] ?? false,
-        ).length;
-
-        for (const evaluator of availableEvaluators) {
-          if (selectedCount >= normalizedMinimum) break;
-          const key = getMatrixKey(group.groupId, evaluator.id, evaluatee.id);
-          if (next[key] === true) continue;
-          next[key] = true;
-          selectedCount += 1;
-        }
+      let next = clearMatrixPairs(group, evaluationRules, current, selectedSelfForms);
+      for (const person of group.employees) {
+        if (!next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, person.id, false);
       }
       return next;
     });
@@ -322,27 +326,50 @@ export function useCampaignDetails(id: string | undefined) {
     setSuccessMessage('');
   }
 
-  function applyMatrixDeleteAll(groupId: number) {
-    const group = evaluationMatrix.groups.find((item) => item.groupId === groupId);
-    if (group === undefined) return;
-    const completedKeys = new Set(
-      group.assignments
-        .filter((assignment) => assignment.isCompleted)
-        .map((assignment) => getMatrixKey(group.groupId, assignment.evaluatorId, assignment.evaluateeId)),
-    );
-
-    setSelectedMatrixAssignments((current) => {
-      const next = { ...current };
-      for (const evaluator of group.employees) {
-        for (const evaluatee of group.employees) {
-          const key = getMatrixKey(group.groupId, evaluator.id, evaluatee.id);
-          next[key] = completedKeys.has(key);
-        }
-      }
-      return next;
-    });
+  function discardMatrix() {
+    setSelectedMatrixAssignments(getMatrixAssignmentMap(evaluationMatrix));
     setMatrixMessage('');
-    setSuccessMessage('');
+  }
+
+  function updateSelfForm(employeeId: number, formId: number | null) {
+    if (selfEvaluations.participants.find((person) => person.employeeId === employeeId)?.locked) return;
+    setSelectedSelfForms((current) => ({ ...current, [employeeId]: formId }));
+    setSelfMessage('');
+  }
+
+  function copySelfForm(sourceId: number) {
+    if (isSavingSelf) return;
+    const preview = previewSelfCopy(selfEvaluations, selectedSelfForms, sourceId);
+    setSelectedSelfForms((current) => ({ ...current, ...preview.changes }));
+    setSelfMessage('');
+  }
+
+  function discardSelfForms() {
+    setSelectedSelfForms(selfFormMap(selfEvaluations));
+    setSelfMessage('');
+  }
+
+  async function handleUpdateSelfForms() {
+    if (id === undefined || isSavingSelf || !hasSelfChanges) return;
+    if (hasMatrixChanges) {
+      setSelfMessage('Save or discard matrix selections before changing self-evaluation forms.');
+      return;
+    }
+    const version = routeVersion.current;
+    setIsSavingSelf(true);
+    setSelfMessage('');
+    try {
+      const saved = await updateCampaignSelfEvaluations(id, selfEvaluations.participants
+        .map((person) => ({ employeeId: person.employeeId, formId: selectedSelfForms[person.employeeId] ?? null })));
+      if (routeVersion.current !== version) return;
+      setSelfEvaluations(saved);
+      setSelectedSelfForms(selfFormMap(saved));
+      setSelfMessage('Self-evaluation forms saved.');
+    } catch (error) {
+      if (routeVersion.current === version) setSelfMessage(error instanceof Error ? error.message : 'Self-evaluations could not be saved.');
+    } finally {
+      if (routeVersion.current === version) setIsSavingSelf(false);
+    }
   }
 
   function activateRuleForm(
@@ -353,67 +380,25 @@ export function useCampaignDetails(id: string | undefined) {
     setActiveRuleKey(getRuleKey(groupId, evaluatorRoleId, evaluateeRoleId));
   }
 
-  function applyRuleToMatchingGroups(
-    sourceGroupId: number,
-    evaluatorRoleId: number,
-    evaluateeRoleId: number,
-  ) {
-    const sourceKey = getRuleKey(sourceGroupId, evaluatorRoleId, evaluateeRoleId);
-    const sourceFormId = selectedRuleFormIds[sourceKey] ?? null;
-
-    setSelectedRuleFormIds((current) => {
-      const next = { ...current };
-      for (const group of evaluationRules.groups) {
-        if (group.groupId === sourceGroupId) continue;
-        const hasMatchingPair = group.rolePairs.some(
-          (pair) =>
-            pair.evaluatorRoleId === evaluatorRoleId &&
-            pair.evaluateeRoleId === evaluateeRoleId,
-        );
-        if (!hasMatchingPair) continue;
-        next[getRuleKey(group.groupId, evaluatorRoleId, evaluateeRoleId)] = sourceFormId;
-      }
-      return next;
-    });
+  function applyRuleCopy(request: RuleCopyRequest) {
+    const preview = previewRuleCopy(evaluationRules, selectedRuleFormIds, request);
+    if (!Object.keys(preview.changes).length) return;
+    setSelectedRuleFormIds((current) => ({ ...current, ...preview.changes }));
     setRulesMessage('');
     setSuccessMessage('');
   }
 
-  function applyGroupRulesToMatchingGroups(sourceGroupId: number) {
-    const sourceGroup = evaluationRules.groups.find(
-      (group) => group.groupId === sourceGroupId,
-    );
-    if (sourceGroup === undefined) return;
-
-    const sourceValues = new Map(
-      sourceGroup.rolePairs.map((pair) => [
-        `${pair.evaluatorRoleId}:${pair.evaluateeRoleId}`,
-        selectedRuleFormIds[
-          getRuleKey(sourceGroup.groupId, pair.evaluatorRoleId, pair.evaluateeRoleId)
-        ] ?? null,
-      ]),
-    );
-
-    setSelectedRuleFormIds((current) => {
-      const next = { ...current };
-      for (const group of evaluationRules.groups) {
-        if (group.groupId === sourceGroupId) continue;
-        for (const pair of group.rolePairs) {
-          const sourceFormId = sourceValues.get(
-            `${pair.evaluatorRoleId}:${pair.evaluateeRoleId}`,
-          );
-          if (sourceFormId === undefined) continue;
-          next[getRuleKey(group.groupId, pair.evaluatorRoleId, pair.evaluateeRoleId)] = sourceFormId;
-        }
-      }
-      return next;
-    });
+  function discardRules() {
+    setSelectedRuleFormIds(getRuleFormMap(evaluationRules));
     setRulesMessage('');
-    setSuccessMessage('');
   }
 
   async function handleUpdateGroups() {
     if (id === undefined || isSavingGroups || !hasGroupChanges) return;
+    if (hasRuleChanges || hasMatrixChanges || hasSelfChanges) {
+      setGroupsMessage('Save or discard form-rule, self-evaluation and matrix changes before saving groups.');
+      return;
+    }
     const version = routeVersion.current;
     setIsSavingGroups(true);
     setGroupsMessage('');
@@ -425,9 +410,12 @@ export function useCampaignDetails(id: string | undefined) {
       const controller = new AbortController();
       const loadedRules = await fetchCampaignEvaluationRules(id, controller.signal);
       const loadedMatrix = await fetchCampaignEvaluationMatrix(id, controller.signal);
+      const loadedSelf = await fetchCampaignSelfEvaluations(id, controller.signal);
       if (routeVersion.current !== version) return;
       setEvaluationRules(loadedRules);
       setEvaluationMatrix(loadedMatrix);
+      setSelfEvaluations(loadedSelf);
+      setSelectedSelfForms(selfFormMap(loadedSelf));
       setSelectedRuleFormIds(getRuleFormMap(loadedRules));
       setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setSuccessMessage('Campaign groups updated successfully.');
@@ -446,6 +434,10 @@ export function useCampaignDetails(id: string | undefined) {
 
   async function handleUpdateRules() {
     if (id === undefined || isSavingRules || !hasRuleChanges) return;
+    if (hasMatrixChanges) {
+      setRulesMessage('Save or discard matrix selections before saving form rules.');
+      return;
+    }
     const version = routeVersion.current;
     setIsSavingRules(true);
     setRulesMessage('');
@@ -488,7 +480,11 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateMatrix() {
-    if (id === undefined || isSavingMatrix || !hasMatrixChanges) return;
+    if (id === undefined || isSavingMatrix || !hasMatrixChanges || matrixReadiness !== 'ready') return;
+    if (hasSelfChanges) {
+      setMatrixMessage('Save or discard self-evaluation form changes before saving the matrix.');
+      return;
+    }
     const version = routeVersion.current;
     setIsSavingMatrix(true);
     setMatrixMessage('');
@@ -573,6 +569,15 @@ export function useCampaignDetails(id: string | undefined) {
     campaignGroups,
     evaluationRules,
     evaluationMatrix,
+    selfEvaluations,
+    selectedSelfForms,
+    selfMessage,
+    isSavingSelf,
+    hasSelfChanges,
+    updateSelfForm,
+    copySelfForm,
+    discardSelfForms,
+    handleUpdateSelfForms,
     selectedGroupIds,
     selectedRuleFormIds,
     selectedMatrixAssignments,
@@ -589,18 +594,20 @@ export function useCampaignDetails(id: string | undefined) {
     hasGroupChanges,
     hasRuleChanges,
     hasMatrixChanges,
+    formProgress,
+    matrixReadiness,
     updateForm,
     toggleGroup,
     updateRuleForm,
     toggleMatrixAssignment,
-    getMatrixRuleFormId,
     applyMatrixSelectAll,
     applyMatrixSelfEvaluations,
     applyMatrixMinimumReviewers,
     applyMatrixDeleteAll,
+    discardMatrix,
     activateRuleForm,
-    applyRuleToMatchingGroups,
-    applyGroupRulesToMatchingGroups,
+    applyRuleCopy,
+    discardRules,
     handleUpdateGroups,
     handleUpdateRules,
     handleUpdateMatrix,

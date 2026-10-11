@@ -4,6 +4,7 @@ export type Campaign = {
   is_active: boolean;
   start_date: string;
   end_date: string | null;
+  current_date?: string;
 };
 
 export type DashboardMetrics = {

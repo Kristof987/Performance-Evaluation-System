@@ -3,7 +3,8 @@ import { ChevronDown, Folder } from 'lucide-react';
 import { useState } from 'react';
 
 import type { Campaign } from '../hrHome.types';
-import { getCampaignStatusLabel } from '../utils/hrHome.utils';
+import { getCampaignLifecycleStatus } from '../../campaigns/campaign.lifecycle';
+import CampaignStatusBadge from '../../campaigns/components/CampaignStatusBadge';
 
 type CampaignBarProps = {
   isLoading: boolean;
@@ -81,9 +82,7 @@ function CampaignBar({
         >
           <Folder size={16} color="#4553C4" />
           <div className="campaign-name">{selectedCampaign?.name}</div>
-          <div className="badge badge-success campaign-status">
-            {getCampaignStatusLabel(selectedCampaign?.is_active)}
-          </div>
+          {selectedCampaign && <CampaignStatusBadge status={getCampaignLifecycleStatus(selectedCampaign)} />}
           <ChevronDown size={14} color="#5A6079" />
         </button>
         {isCampaignListOpen && (
@@ -99,7 +98,7 @@ function CampaignBar({
                 }}
               >
                 <span>{campaign.name}</span>
-                <span>{getCampaignStatusLabel(campaign.is_active)}</span>
+                <CampaignStatusBadge status={getCampaignLifecycleStatus(campaign)} />
               </button>
             ))}
           </div>

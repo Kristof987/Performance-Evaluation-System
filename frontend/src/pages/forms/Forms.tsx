@@ -743,8 +743,8 @@ export default function Forms() {
 
           <section className="card forms-editor-card forms-editor-panel">
             <div className="forms-editor-header">
-              <div>
-                <h2>{draft.name || `Untitled ${activeItemLabelLower}`}</h2>
+              <div className="forms-editor-header-title">
+                <h2 title={draft.name || `Untitled ${activeItemLabelLower}`}>{draft.name || `Untitled ${activeItemLabelLower}`}</h2>
                 <p>
                   {draft.questions.length} {draft.questions.length === 1 ? 'question' : 'questions'} · {activeItemLabel}
                 </p>
@@ -773,8 +773,6 @@ export default function Forms() {
                 >
                   {isSavingForm ? 'Saving...' : 'Save changes'}
                 </button>
-              </div>
-              <div className="forms-editor-secondary-actions">
                 <button
                   className="forms-editor-delete-link"
                   type="button"

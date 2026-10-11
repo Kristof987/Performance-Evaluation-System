@@ -1,0 +1,25 @@
+.campaign-lifecycle-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font: 650 12px var(--font-sans);
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+}
+.campaign-lifecycle-scheduled {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+.campaign-lifecycle-ongoing {
+  background: #eefaf2;
+  color: #24743c;
+}
+.campaign-lifecycle-disabled {
+  color: var(--color-text-muted);
+}
+.campaign-lifecycle-completed {
+  color: var(--color-text-secondary);
+}

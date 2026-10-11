@@ -2,23 +2,36 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  overflow: auto;
 }
 .campaign-page .campaign-field-wide,
-.campaign-page .campaign-form-summary,
 .campaign-page .campaign-modal-actions {
   grid-column: 1/-1;
 }
-.campaign-page .campaign-form-summary {
-  display: grid;
-  gap: 4px;
-  border: 1px dashed #cdd2ee;
-  background: #f8f9ff;
-  border-radius: 14px;
-  padding: 14px 16px;
-  color: var(--color-text-secondary);
+.campaign-page .campaign-enabled-control {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 9px 0;
 }
-.campaign-page .campaign-form-summary strong {
-  color: var(--color-text);
+.campaign-page .campaign-enabled-control input {
+  accent-color: var(--color-primary);
+  margin-top: 3px;
+}
+.campaign-page .campaign-enabled-control span {
+  display: grid;
+  gap: 3px;
+}
+.campaign-page .campaign-enabled-control small,
+.campaign-page .campaign-field-help,
+.campaign-page .campaign-form-guidance {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.campaign-page .campaign-form-guidance {
+  margin-top: -8px;
 }
 .campaign-page .campaign-modal-actions {
   display: flex;

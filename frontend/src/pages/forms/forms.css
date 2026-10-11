@@ -949,12 +949,21 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-header {
-  align-items: flex-start;
+  align-items: start;
   border-bottom: 1px solid #eef0f6;
-  display: flex;
+  display: grid;
   gap: 16px;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) max-content;
   padding: 16px 18px;
+}
+
+.forms-editor-panel {
+  container-name: forms-editor;
+  container-type: inline-size;
+}
+
+.forms-editor-header-title {
+  min-width: 0;
 }
 
 .forms-editor-header h2 {
@@ -964,6 +973,11 @@ button.forms-editor-nav-item {
   letter-spacing: -0.02em;
   line-height: 1.2;
   margin: 0 0 4px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .forms-editor-header p {
@@ -974,34 +988,21 @@ button.forms-editor-nav-item {
 
 .forms-editor-header-actions {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   justify-content: flex-end;
-}
-
-.forms-editor-header > div:first-child {
-  min-width: 0;
-}
-
-.forms-editor-header > div:first-child h2 {
-  overflow-wrap: anywhere;
-}
-
-.forms-editor-secondary-actions {
-  align-items: center;
-  border-left: 1px solid #eef0f6;
-  display: flex;
-  margin-left: 2px;
-  padding-left: 10px;
+  white-space: nowrap;
 }
 
 .forms-editor-delete-link {
   background: transparent;
   border: 0;
+  border-left: 1px solid #eef0f6;
   color: #9a3412;
   cursor: pointer;
   font: 700 12px var(--font-sans);
-  padding: 6px 0;
+  margin-left: 2px;
+  padding: 6px 0 6px 10px;
   text-align: left;
 }
 
@@ -1020,6 +1021,43 @@ button.forms-editor-nav-item {
 .forms-page .forms-editor-header-actions .btn {
   font-size: 12px;
   padding: 8px 10px;
+  white-space: nowrap;
+}
+
+@container forms-editor (max-width: 620px) {
+  .forms-editor-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .forms-editor-header-actions {
+    justify-content: flex-start;
+  }
+}
+
+@container forms-editor (max-width: 430px) {
+  .forms-editor-header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .forms-editor-header-actions .btn,
+  .forms-editor-delete-link {
+    width: 100%;
+  }
+
+  .forms-editor-header-actions .btn,
+  .forms-page .forms-editor-header-actions .btn {
+    font-size: 11px;
+    padding: 8px 6px;
+  }
+
+  .forms-editor-delete-link {
+    border-left: 0;
+    font-size: 11px;
+    margin-left: 0;
+    padding: 6px;
+    text-align: center;
+  }
 }
 
 .forms-editor-form-title {
@@ -1561,15 +1599,8 @@ button.forms-editor-nav-item {
     padding: 22px;
   }
 
-  .forms-page-header,
-  .forms-editor-header {
+  .forms-page-header {
     flex-direction: column;
-  }
-
-  .forms-editor-secondary-actions {
-    border-left: 0;
-    margin-left: 0;
-    padding-left: 0;
   }
 
   .forms-editor-workspace {
@@ -1596,13 +1627,11 @@ button.forms-editor-nav-item {
   }
 
   .forms-page-tabs,
-  .forms-editor-header-actions,
   .forms-editor-add-row {
     width: 100%;
   }
 
   .forms-page-tab,
-  .forms-editor-header-actions .btn,
   .forms-editor-add-row .btn {
     flex: 1;
   }

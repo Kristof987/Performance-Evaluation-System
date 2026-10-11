@@ -90,12 +90,6 @@ export function formatStartsIn(value: string): string {
   return 'Already started';
 }
 
-export function getCampaignStatusLabel(
-  isActive: boolean | undefined,
-): 'Active' | 'Closed' {
-  return isActive ? 'Active' : 'Closed';
-}
-
 export function areResultsReadyToPublish(metrics: DashboardMetrics): boolean {
   return metrics.completion_rate === 100 && metrics.assignment_count > 0;
 }

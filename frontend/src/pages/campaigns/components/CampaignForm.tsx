@@ -8,7 +8,6 @@ import { getEndDateMin, isCampaignStarted } from '../campaign.utils';
 type Props = {
   form: CampaignFormValues;
   campaign?: Campaign;
-  createdByName?: string;
   message: string;
   isSaving: boolean;
   hasChanges?: boolean;
@@ -19,7 +18,6 @@ type Props = {
 export default function CampaignForm({
   form,
   campaign,
-  createdByName = 'User',
   message,
   isSaving,
   hasChanges = true,
@@ -76,28 +74,24 @@ export default function CampaignForm({
           min={campaign ? getEndDateMin(form, campaign) : form.startDate}
           onChange={(event) => updateForm('endDate', event.target.value)}
         />
+        {campaign && campaign.issuedFormsCount > 0 && (
+          <span className="campaign-field-help">
+            End date cannot be moved earlier after questionnaires are issued.
+          </span>
+        )}
       </label>
 
-      <label className="form-field">
-        <span className="form-label">Status</span>
-        <select
-          className="form-control"
-          value={form.isActive ? 'active' : 'closed'}
-          onChange={(event) =>
-            updateForm('isActive', event.target.value === 'active')
-          }
-        >
-          <option value="active">Active</option>
-          <option value="closed">Closed</option>
-        </select>
+      <label className="campaign-enabled-control">
+        <input
+          type="checkbox"
+          checked={form.isActive}
+          onChange={(event) => updateForm('isActive', event.target.checked)}
+        />
+        <span>
+          <strong>Enabled</strong>
+          <small>Allow this campaign to run during its scheduled period.</small>
+        </span>
       </label>
-
-      {!campaign && (
-        <label className="form-field">
-          <span className="form-label">Created by</span>
-          <input className="form-control" value={createdByName} disabled />
-        </label>
-      )}
 
       <label className="form-field campaign-field-wide">
         <span className="form-label">Internal comment</span>
@@ -110,14 +104,11 @@ export default function CampaignForm({
         />
       </label>
 
-      <div className="campaign-form-summary">
-        <strong>{campaign ? 'Date rules' : 'Next step'}</strong>
-        <span>
-          {campaign
-            ? 'The start date is locked after the campaign starts. The end date cannot be before the start date, and cannot be moved earlier after questionnaires are issued.'
-            : 'After creating the campaign you can open it and attach forms, company groups, and evaluation rules.'}
+      {campaign && isCampaignStarted(campaign) && (
+        <span className="campaign-form-guidance campaign-field-wide">
+          Start date cannot be changed after the campaign begins.
         </span>
-      </div>
+      )}
 
       {message !== '' && <div className="campaign-save-message">{message}</div>}
 
@@ -130,7 +121,7 @@ export default function CampaignForm({
           type="submit"
           disabled={isSaving || !hasChanges}
         >
-          {isSaving ? 'Saving...' : campaign ? 'Save changes' : 'Save campaign'}
+          {isSaving ? 'Saving...' : campaign ? 'Save changes' : 'Create campaign'}
         </button>
       </div>
     </form>

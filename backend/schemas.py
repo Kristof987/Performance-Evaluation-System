@@ -300,6 +300,8 @@ class CampaignResponse(BaseModel):
     comment: str | None
     created_by: int
     issued_forms_count: int = 0
+    submitted_forms_count: int = 0
+    current_date: date = Field(default_factory=date.today)
 
     model_config = {
         "from_attributes": True
@@ -316,6 +318,7 @@ class DashboardCampaignSummary(BaseModel):
     is_active: bool
     start_date: date
     end_date: date | None = None
+    current_date: date = Field(default_factory=date.today)
 
 
 class DashboardMetricSummary(BaseModel):
@@ -395,9 +398,32 @@ class CampaignGroupsResponse(BaseModel):
     assigned_group_ids: list[int]
 
 
+class CampaignSelfEvaluationAssignment(BaseModel):
+    employee_id: int
+    form_id: int | None
+
+
+class CampaignSelfEvaluationsUpdate(BaseModel):
+    assignments: list[CampaignSelfEvaluationAssignment] = Field(default_factory=list)
+
+
+class CampaignSelfEvaluationParticipant(BaseModel):
+    employee_id: int
+    employee_name: str
+    role_name: str
+    group_names: list[str]
+    form_id: int | None
+    locked: bool
+
+
 class CampaignRuleFormOption(BaseModel):
     id: int
     name: str
+
+
+class CampaignSelfEvaluationsResponse(BaseModel):
+    forms: list[CampaignRuleFormOption]
+    participants: list[CampaignSelfEvaluationParticipant]
 
 
 class CampaignRolePairRule(BaseModel):
@@ -444,6 +470,8 @@ class CampaignEvaluationMatrixAssignment(BaseModel):
     form_id: int
     filled_form_id: int
     is_completed: bool = False
+    status_name: str
+    has_answers: bool = False
 
 
 class CampaignGroupEvaluationMatrix(BaseModel):

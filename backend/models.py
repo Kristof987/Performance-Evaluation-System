@@ -170,6 +170,15 @@ class FilledForm(Base):
         nullable=False,
     )
 
+
+class CampaignEmployeeSelfEvaluation(Base):
+    __tablename__ = "campaign_employee_self_evaluations"
+
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), primary_key=True)
+    employee_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    form_id = Column(Integer, ForeignKey("forms.id"), nullable=False)
+
+
 class Form(Base):
     __tablename__ = "forms"
 

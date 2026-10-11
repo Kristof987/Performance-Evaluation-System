@@ -9,6 +9,8 @@ import type {
   CampaignGroups,
   CampaignGroupsResponse,
   CampaignResponse,
+  CampaignSelfEvaluations,
+  CampaignSelfEvaluationsResponse,
 } from './campaign.types';
 import { mapCampaignFromResponse } from './campaign.utils';
 
@@ -24,9 +26,39 @@ async function requestCampaigns<T>(
     const body: unknown = await response.json().catch(() => null);
     const detail =
       body && typeof body === 'object' && 'detail' in body ? body.detail : null;
-    throw new Error(typeof detail === 'string' ? detail : fallback);
+    const message = detail && typeof detail === 'object' && 'message' in detail ? detail.message : null;
+    throw new Error(typeof detail === 'string' ? detail : typeof message === 'string' ? message : fallback);
   }
   return response.json() as Promise<T>;
+}
+
+function mapSelfEvaluations(response: CampaignSelfEvaluationsResponse): CampaignSelfEvaluations {
+  return {
+    forms: response.forms,
+    participants: response.participants.map((person) => ({
+      employeeId: person.employee_id,
+      name: person.employee_name,
+      roleName: person.role_name,
+      groupNames: person.group_names,
+      formId: person.form_id,
+      locked: person.locked,
+    })),
+  };
+}
+
+export async function fetchCampaignSelfEvaluations(id: string, signal: AbortSignal) {
+  return mapSelfEvaluations(await requestCampaigns<CampaignSelfEvaluationsResponse>(
+    `/${encodeURIComponent(id)}/self-evaluations`, { signal }, 'Self-evaluations could not be loaded.',
+  ));
+}
+
+export async function updateCampaignSelfEvaluations(id: string, assignments: Array<{ employeeId: number; formId: number | null }>) {
+  return mapSelfEvaluations(await requestCampaigns<CampaignSelfEvaluationsResponse>(
+    `/${encodeURIComponent(id)}/self-evaluations`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments: assignments.map((item) => ({ employee_id: item.employeeId, form_id: item.formId })) }),
+    }, 'Self-evaluations could not be saved.',
+  ));
 }
 
 function mapCampaignGroups(response: CampaignGroupsResponse): CampaignGroups {
@@ -75,6 +107,8 @@ function mapCampaignEvaluationMatrix(
         formId: assignment.form_id,
         filledFormId: assignment.filled_form_id,
         isCompleted: assignment.is_completed,
+        statusName: assignment.status_name,
+        hasAnswers: assignment.has_answers,
       })),
     })),
   };

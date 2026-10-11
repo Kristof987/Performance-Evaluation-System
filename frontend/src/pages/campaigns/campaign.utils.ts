@@ -3,6 +3,7 @@ import type {
   CampaignResponse,
   CampaignFormValues,
 } from './campaign.types';
+import { calendarDay, getCalendarToday, getCampaignLifecycleStatus } from './campaign.lifecycle';
 export const emptyCampaignForm: CampaignFormValues = {
   name: '',
   description: '',
@@ -26,7 +27,9 @@ export function mapCampaignFromResponse(campaign: CampaignResponse): Campaign {
   return {
     id: campaign.id.toString(),
     name: campaign.name,
-    status: campaign.is_active ? 'Active' : 'Closed',
+    status: getCampaignLifecycleStatus(campaign),
+    isActive: campaign.is_active,
+    currentDate: campaign.current_date,
     start: formatDate(campaign.start_date),
     end: formatDate(campaign.end_date ?? ''),
     startDate: campaign.start_date,
@@ -35,7 +38,7 @@ export function mapCampaignFromResponse(campaign: CampaignResponse): Campaign {
     comment: campaign.comment,
     issuedFormsCount: campaign.issued_forms_count ?? 0,
     sent: campaign.issued_forms_count ?? 0,
-    done: 0,
+    done: campaign.submitted_forms_count ?? 0,
     overdue: 0,
     forms: [],
   };
@@ -47,16 +50,13 @@ export function getCampaignForm(campaign: Campaign): CampaignFormValues {
     description: campaign.description ?? '',
     startDate: campaign.startDate,
     endDate: campaign.endDate,
-    isActive: campaign.status === 'Active',
+    isActive: campaign.isActive,
     comment: campaign.comment ?? '',
   };
 }
 
 export function isCampaignStarted(campaign: Campaign) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  return new Date(`${campaign.startDate}T00:00:00`) <= today;
+  return calendarDay(campaign.startDate) <= calendarDay(campaign.currentDate ?? getCalendarToday());
 }
 
 export function getEndDateMin(form: CampaignFormValues, campaign: Campaign) {
