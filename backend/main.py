@@ -153,6 +153,46 @@ def get_people(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/users/{user_id}/account-settings/profile", response_model=schemas.AccountSettingsProfile)
+def get_account_settings_profile(user_id: int, db: Session = Depends(get_db)):
+    result = (
+        db.query(
+            models.User,
+            models.CompanyRole.name.label("company_role"),
+            models.SystemRole.name.label("system_role"),
+        )
+        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
+        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
+        .filter(models.User.id == user_id)
+        .filter(models.User.is_active.is_(True))
+        .first()
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Account profile not found")
+
+    user, company_role, system_role = result
+    memberships = (
+        db.query(models.CompanyGroup)
+        .join(models.user_company_groups, models.user_company_groups.c.company_group_id == models.CompanyGroup.id)
+        .filter(models.user_company_groups.c.user_id == user.id)
+        .order_by(models.CompanyGroup.name.asc())
+        .all()
+    )
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "company_role": company_role,
+        "system_role": system_role,
+        "groups": [
+            {"id": group.id, "name": group.name, "description": group.description, "member_count": 0}
+            for group in memberships
+        ],
+        "is_active": user.is_active,
+        "last_login": user.last_login,
+    }
+
+
 def get_or_create_company_role(role_name: str, db: Session):
     company_role = (
         db.query(models.CompanyRole)

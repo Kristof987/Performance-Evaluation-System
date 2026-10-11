@@ -295,17 +295,21 @@
 .user-settings-menu:not(.open) {
   display: none;
 }
-.user-settings-menu button {
+.user-settings-menu button,
+.user-settings-menu a {
   background: transparent;
   border: 0;
   border-radius: 8px;
   color: var(--color-text);
   cursor: pointer;
+  display: block;
   font: 650 13px var(--font-sans);
   padding: 10px 12px;
   text-align: left;
+  text-decoration: none;
 }
-.user-settings-menu button:hover {
+.user-settings-menu button:hover,
+.user-settings-menu a:hover {
   background: var(--color-surface-muted);
 }
 .user-menu .user-settings-menu {

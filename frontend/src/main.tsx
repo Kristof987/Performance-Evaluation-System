@@ -12,6 +12,7 @@ import People from './pages/people/People'
 import Forms from './pages/forms/Forms'
 import { CampaignDetails, Campaigns } from './pages/campaigns/Campaigns'
 import CompletionStatus from './pages/completion-status/CompletionStatus'
+import SettingsPage from './pages/settings/SettingsPage'
 import './styles/shared.css'
 import { getDashboardPath } from './pages/layout/sidebar-user'
 
@@ -44,6 +45,8 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/campaigns/:id" element={<CampaignDetails />} />
         <Route path="/campaigns/:id/completion" element={<RequireLoggedInUser><CompletionStatus /></RequireLoggedInUser>} />
+        <Route path="/settings" element={<RequireLoggedInUser><Navigate to="/settings/profile" replace /></RequireLoggedInUser>} />
+        <Route path="/settings/:section" element={<RequireLoggedInUser><SettingsPage /></RequireLoggedInUser>} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

@@ -25,7 +25,8 @@ export type SidebarPage =
   | 'people'
   | 'campaigns'
   | 'forms'
-  | 'results';
+  | 'results'
+  | 'settings';
 
 type SidebarProps = {
   activePage: SidebarPage;
@@ -194,21 +195,37 @@ export default function Sidebar({
               <ChartNoAxesCombined size={17} />
               <span className="nav-item-label">Reports</span>
             </div>
-            <div className="nav-item">
+            <Link
+              className={activePage === 'settings' ? 'nav-item active' : 'nav-item'}
+              aria-current={activePage === 'settings' ? 'page' : undefined}
+              to="/settings/profile"
+              style={{ textDecoration: 'none' }}
+            >
               <Settings size={17} />
               <span className="nav-item-label">Settings</span>
-            </div>
+            </Link>
           </>
         ) : (
-          <Link
-            className={activePage === 'results' ? 'nav-item active' : 'nav-item'}
-            aria-current={activePage === 'results' ? 'page' : undefined}
-            to="/results"
-            style={{ textDecoration: 'none' }}
-          >
-            <ChartNoAxesCombined size={17} />
-            <span className="nav-item-label">Results</span>
-          </Link>
+          <>
+            <Link
+              className={activePage === 'results' ? 'nav-item active' : 'nav-item'}
+              aria-current={activePage === 'results' ? 'page' : undefined}
+              to="/results"
+              style={{ textDecoration: 'none' }}
+            >
+              <ChartNoAxesCombined size={17} />
+              <span className="nav-item-label">Results</span>
+            </Link>
+            <Link
+              className={activePage === 'settings' ? 'nav-item active' : 'nav-item'}
+              aria-current={activePage === 'settings' ? 'page' : undefined}
+              to="/settings/profile"
+              style={{ textDecoration: 'none' }}
+            >
+              <Settings size={17} />
+              <span className="nav-item-label">Settings</span>
+            </Link>
+          </>
         )}
       </nav>
 
@@ -239,7 +256,7 @@ export default function Sidebar({
         </button>
         {isUserMenuOpen && (
           <div className="user-settings-menu open">
-            <button type="button">Settings</button>
+            <Link to="/settings/profile">Settings</Link>
           </div>
         )}
       </div>

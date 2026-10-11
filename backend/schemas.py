@@ -248,6 +248,17 @@ class PeopleResponse(BaseModel):
     groups: list[PeopleGroupResponse]
 
 
+class AccountSettingsProfile(BaseModel):
+    id: int
+    username: str
+    email: EmailStr
+    company_role: str
+    system_role: str | None = None
+    groups: list[PeopleGroupResponse]
+    is_active: bool
+    last_login: datetime | None = None
+
+
 class PeopleEmployeeCreate(BaseModel):
     name: str
     email: EmailStr
