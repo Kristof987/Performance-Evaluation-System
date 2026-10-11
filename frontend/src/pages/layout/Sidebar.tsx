@@ -1,5 +1,6 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { Link } from 'react-router';
+import { useNavigate } from 'react-router';
 import {
   ChartNoAxesCombined,
   ChevronDown,
@@ -7,6 +8,7 @@ import {
   Compass,
   Files,
   LayoutDashboard,
+  LogOut,
   Settings,
   Users,
 } from 'lucide-react';
@@ -59,6 +61,7 @@ export default function Sidebar({
   const suppressNextClick = useRef(false);
 
   const sidebarUser = getSidebarUser();
+  const navigate = useNavigate();
   const sidebarUserName =
     sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
   const dashboardPath = getDashboardPath();
@@ -68,6 +71,11 @@ export default function Sidebar({
 
   const currentWidth =
     dragWidth ?? (isSidebarCollapsed ? MIN_WIDTH : expandedWidth);
+
+  function handleLogout() {
+    sessionStorage.removeItem('loggedInUser');
+    navigate('/', { replace: true });
+  }
 
   function handleTogglePointerDown(event: PointerEvent<HTMLButtonElement>) {
     dragStartX.current = event.clientX;
@@ -230,6 +238,11 @@ export default function Sidebar({
       </nav>
 
       <div className="sidebar-spacer" />
+
+      <button className="nav-item sidebar-logout" type="button" onClick={handleLogout}>
+        <LogOut size={17} />
+        <span className="nav-item-label">Log out</span>
+      </button>
 
       <div className="user-menu">
         <div className="user-avatar">
