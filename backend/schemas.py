@@ -392,6 +392,55 @@ class DashboardResponse(BaseModel):
     upcoming_reviews: list[DashboardUpcomingReview]
     upcoming_deadlines: list[DashboardUpcomingDeadline]
 
+
+class CompletionStatusSummary(BaseModel):
+    total_evaluations: int
+    not_started: int
+    in_progress: int
+    completed: int
+    overdue: int
+    completion_rate: int
+    outstanding: int
+
+
+class CompletionStatusQuestionnaireFilter(BaseModel):
+    id: int
+    name: str
+
+
+class CompletionStatusRow(BaseModel):
+    id: int
+    evaluator_id: int
+    evaluator_name: str
+    evaluator_email: EmailStr
+    evaluatee_id: int
+    evaluatee_name: str
+    evaluatee_email: EmailStr
+    questionnaire_id: int
+    questionnaire_name: str
+    status_name: str
+    status_label: str
+    due_date: date | None = None
+    completed_at: date | None = None
+    is_overdue: bool = False
+    is_self_evaluation: bool = False
+
+
+class CompletionStatusPagination(BaseModel):
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+
+
+class CompletionStatusResponse(BaseModel):
+    campaign: DashboardCampaignSummary
+    summary: CompletionStatusSummary
+    rows: list[CompletionStatusRow]
+    questionnaires: list[CompletionStatusQuestionnaireFilter]
+    pagination: CompletionStatusPagination
+    duplicate_assignment_count: int = 0
+
 class CompanyGroupCreate(BaseModel):
     name: str
     description: str | None = None

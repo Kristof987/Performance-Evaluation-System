@@ -44,6 +44,11 @@ function HrHome() {
     navigate(`/campaigns/${campaignId}`);
   };
 
+  const completionStatusHandler = () => {
+    if (selectedCampaign === null) return;
+    navigate(`/campaigns/${selectedCampaign.id}/completion`);
+  };
+
   return (
     <AppLayout activePage="hr-home" pageClassName="hr-home-page">
       <div className="main-content">
@@ -68,7 +73,7 @@ function HrHome() {
             <MetricsGrid metrics={metrics} campaigns={campaigns} />
 
             <div className="workspace">
-              <ParticipantsSection participants={participants} />
+              <ParticipantsSection participants={participants} onViewCompletionStatus={completionStatusHandler} />
               <NextActions
                 metrics={metrics}
                 campaignName={selectedCampaign?.name}

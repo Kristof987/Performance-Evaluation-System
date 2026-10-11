@@ -1,6 +1,6 @@
 import './ParticipantsSection.css';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { getUserInitials } from '../../layout/sidebar-user';
 import type { DashboardParticipant } from '../hrHome.types';
@@ -42,29 +42,23 @@ function EmptyParticipantRow() {
 
 type ParticipantsSectionProps = {
   participants: DashboardParticipant[];
+  onViewCompletionStatus: () => void;
 };
 
-function ParticipantsSection({ participants }: ParticipantsSectionProps) {
+function ParticipantsSection({ participants, onViewCompletionStatus }: ParticipantsSectionProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const totalPages = Math.max(
     1,
     Math.ceil(participants.length / PARTICIPANTS_PER_PAGE),
   );
-  const pageStart = currentPage * PARTICIPANTS_PER_PAGE;
+  const boundedPage = Math.min(currentPage, totalPages - 1);
+  const pageStart = boundedPage * PARTICIPANTS_PER_PAGE;
   const visibleParticipants = participants.slice(
     pageStart,
     pageStart + PARTICIPANTS_PER_PAGE,
   );
   const emptyRowsCount = PARTICIPANTS_PER_PAGE - visibleParticipants.length;
   const hasPagination = totalPages > 1;
-
-  useEffect(() => {
-    setCurrentPage(0);
-  }, [participants]);
-
-  useEffect(() => {
-    setCurrentPage((page) => Math.min(page, totalPages - 1));
-  }, [totalPages]);
 
   const previousPageHandler = () => {
     setCurrentPage((page) => Math.max(0, page - 1));
@@ -78,7 +72,7 @@ function ParticipantsSection({ participants }: ParticipantsSectionProps) {
     <div className="forms-section">
       <div className="section-header">
         <div className="section-title">Participants</div>
-        <button className="campaign-details-link" type="button">
+        <button className="campaign-details-link" type="button" onClick={onViewCompletionStatus}>
           View full completion status →
         </button>
       </div>
@@ -114,14 +108,14 @@ function ParticipantsSection({ participants }: ParticipantsSectionProps) {
         {hasPagination && (
           <div className="participants-pagination">
             <span className="participants-page-label">
-              {currentPage + 1} / {totalPages}
+              {boundedPage + 1} / {totalPages}
             </span>
             <div className="participants-page-actions">
               <button
                 className="participants-page-button"
                 type="button"
                 onClick={previousPageHandler}
-                disabled={currentPage === 0}
+                  disabled={boundedPage === 0}
                 aria-label="Previous participants page"
               >
                 <ChevronLeft size={16} />
@@ -130,7 +124,7 @@ function ParticipantsSection({ participants }: ParticipantsSectionProps) {
                 className="participants-page-button"
                 type="button"
                 onClick={nextPageHandler}
-                disabled={currentPage === totalPages - 1}
+                  disabled={boundedPage === totalPages - 1}
                 aria-label="Next participants page"
               >
                 <ChevronRight size={16} />

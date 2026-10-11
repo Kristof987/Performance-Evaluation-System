@@ -11,6 +11,7 @@ import EmployeeResults from './pages/employee-results/EmployeeResults'
 import People from './pages/people/People'
 import Forms from './pages/forms/Forms'
 import { CampaignDetails, Campaigns } from './pages/campaigns/Campaigns'
+import CompletionStatus from './pages/completion-status/CompletionStatus'
 import './styles/shared.css'
 import { getDashboardPath } from './pages/layout/sidebar-user'
 
@@ -42,6 +43,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/forms" element={<Forms />} />
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/campaigns/:id" element={<CampaignDetails />} />
+        <Route path="/campaigns/:id/completion" element={<RequireLoggedInUser><CompletionStatus /></RequireLoggedInUser>} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

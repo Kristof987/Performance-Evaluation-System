@@ -7,8 +7,8 @@ from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import asc, desc, func, or_
+from sqlalchemy.orm import Session, aliased
 
 from database import engine, Base, SessionLocal
 import models
@@ -1037,6 +1037,169 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
         "participants": get_campaign_participants(selected_campaign.id, db),
         "upcoming_reviews": upcoming_reviews,
         "upcoming_deadlines": upcoming_deadlines,
+    }
+
+
+def normalize_form_status(status_name: str | None, finish_date: date | None) -> tuple[str, str]:
+    if finish_date is not None:
+        return "completed", "Completed"
+    normalized = (status_name or "Not started").strip().lower()
+    if normalized in {"completed", "submitted"}:
+        return "completed", "Completed"
+    if normalized in {"in progress", "in_progress", "started"}:
+        return "in_progress", "In progress"
+    return "not_started", "Not started"
+
+
+def require_completion_status_access(campaign_id: int, requester_user_id: int, db: Session) -> models.Campaign:
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    user_role = (
+        db.query(models.User, models.CompanyRole.name.label("role_name"))
+        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
+        .filter(models.User.id == requester_user_id)
+        .filter(models.User.is_active.is_(True))
+        .first()
+    )
+    if user_role is None:
+        raise HTTPException(status_code=403, detail="User is not authorized to view completion status")
+    _, role_name = user_role
+    role = role_name.strip().lower()
+    if role != "hr" and "manager" not in role:
+        raise HTTPException(status_code=403, detail="User is not authorized to view completion status")
+    return campaign
+
+
+@app.get("/campaigns/{campaign_id}/completion-status", response_model=schemas.CompletionStatusResponse)
+def get_campaign_completion_status(
+    campaign_id: int,
+    requester_user_id: int = Query(...),
+    search: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    questionnaire_id: int | None = Query(default=None),
+    overdue_only: bool = Query(default=False),
+    sort: str = Query(default="due_date"),
+    order: str = Query(default="asc"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    campaign = require_completion_status_access(campaign_id, requester_user_id, db)
+    today = date.today()
+    evaluator = aliased(models.User)
+    evaluatee = aliased(models.User)
+    rows = (
+        db.query(
+            models.FilledForm.id,
+            models.FilledForm.evaluator_id,
+            evaluator.username.label("evaluator_name"),
+            evaluator.email.label("evaluator_email"),
+            models.FilledForm.evaluatee_id,
+            evaluatee.username.label("evaluatee_name"),
+            evaluatee.email.label("evaluatee_email"),
+            models.FilledForm.form_id.label("questionnaire_id"),
+            models.Form.name.label("questionnaire_name"),
+            models.FormStatus.name.label("status_name"),
+            models.FilledForm.finish_date,
+            models.FilledForm.company_group_id,
+        )
+        .join(evaluator, evaluator.id == models.FilledForm.evaluator_id)
+        .join(evaluatee, evaluatee.id == models.FilledForm.evaluatee_id)
+        .join(models.Form, models.Form.id == models.FilledForm.form_id)
+        .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
+        .filter(models.FilledForm.campaign_id == campaign.id)
+        .all()
+    )
+
+    def to_item(row):
+        status_key, status_label = normalize_form_status(row.status_name, row.finish_date)
+        due_date = campaign.end_date
+        is_overdue = status_key != "completed" and due_date is not None and due_date < today
+        return {
+            "id": row.id,
+            "evaluator_id": row.evaluator_id,
+            "evaluator_name": row.evaluator_name,
+            "evaluator_email": row.evaluator_email,
+            "evaluatee_id": row.evaluatee_id,
+            "evaluatee_name": row.evaluatee_name,
+            "evaluatee_email": row.evaluatee_email,
+            "questionnaire_id": row.questionnaire_id,
+            "questionnaire_name": row.questionnaire_name,
+            "status_name": row.status_name,
+            "status_key": status_key,
+            "status_label": status_label,
+            "due_date": due_date,
+            "completed_at": row.finish_date,
+            "is_overdue": is_overdue,
+            "is_self_evaluation": row.evaluator_id == row.evaluatee_id,
+            "duplicate_key": (row.evaluator_id, row.evaluatee_id, row.questionnaire_id, row.company_group_id),
+        }
+
+    all_items = [to_item(row) for row in rows]
+    duplicate_keys = {item["duplicate_key"] for item in all_items if sum(1 for other in all_items if other["duplicate_key"] == item["duplicate_key"]) > 1}
+    completed = sum(1 for item in all_items if item["status_key"] == "completed")
+    not_started = sum(1 for item in all_items if item["status_key"] == "not_started")
+    in_progress = sum(1 for item in all_items if item["status_key"] == "in_progress")
+    overdue = sum(1 for item in all_items if item["is_overdue"])
+    total = len(all_items)
+    summary = {
+        "total_evaluations": total,
+        "not_started": not_started,
+        "in_progress": in_progress,
+        "completed": completed,
+        "overdue": overdue,
+        "completion_rate": round((completed / total) * 100) if total > 0 else 0,
+        "outstanding": total - completed,
+    }
+    questionnaires = sorted(
+        {item["questionnaire_id"]: {"id": item["questionnaire_id"], "name": item["questionnaire_name"]} for item in all_items}.values(),
+        key=lambda item: (item["name"].lower(), item["id"]),
+    )
+
+    filtered = all_items
+    if search is not None and search.strip() != "":
+        term = search.strip().lower()
+        filtered = [item for item in filtered if term in item["evaluator_name"].lower() or term in item["evaluator_email"].lower() or term in item["evaluatee_name"].lower() or term in item["evaluatee_email"].lower()]
+    if status is not None and status.strip() != "":
+        status_key = status.strip().lower().replace("-", "_").replace(" ", "_")
+        filtered = [item for item in filtered if item["status_key"] == status_key]
+    if questionnaire_id is not None:
+        filtered = [item for item in filtered if item["questionnaire_id"] == questionnaire_id]
+    if overdue_only:
+        filtered = [item for item in filtered if item["is_overdue"]]
+
+    reverse = order.lower() == "desc"
+    sort_key_map = {
+        "due_date": lambda item: (item["status_key"] == "completed", item["due_date"] or date.max, item["evaluator_name"].lower(), item["id"]),
+        "status": lambda item: ({"not_started": 0, "in_progress": 1, "completed": 2}.get(item["status_key"], 3), item["is_overdue"] is False, item["id"]),
+        "evaluator": lambda item: (item["evaluator_name"].lower(), item["evaluatee_name"].lower(), item["id"]),
+        "evaluatee": lambda item: (item["evaluatee_name"].lower(), item["evaluator_name"].lower(), item["id"]),
+        "completed_at": lambda item: (item["completed_at"] or date.max, item["id"]),
+    }
+    filtered = sorted(filtered, key=sort_key_map.get(sort, sort_key_map["due_date"]), reverse=reverse)
+    total_items = len(filtered)
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    page_start = (page - 1) * page_size
+    page_rows = filtered[page_start:page_start + page_size]
+    for item in page_rows:
+        item.pop("status_key", None)
+        item.pop("duplicate_key", None)
+
+    return {
+        "campaign": {
+            "id": campaign.id,
+            "name": campaign.name,
+            "is_active": campaign.is_active,
+            "start_date": campaign.start_date,
+            "end_date": campaign.end_date,
+        },
+        "summary": summary,
+        "rows": page_rows,
+        "questionnaires": questionnaires,
+        "pagination": {"page": page, "page_size": page_size, "total_items": total_items, "total_pages": total_pages},
+        "duplicate_assignment_count": len(duplicate_keys),
     }
 
 
