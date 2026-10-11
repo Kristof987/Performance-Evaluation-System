@@ -745,8 +745,11 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
 
         evaluations.append({
             "id": filled_form.id,
+            "evaluator_id": filled_form.evaluator_id,
             "campaign_id": campaign.id,
             "campaign_name": campaign.name,
+            "campaign_start_date": campaign.start_date,
+            "campaign_is_active": campaign.is_active,
             "form_id": form.id,
             "form_name": form.name,
             "form_description": form.description,
@@ -761,6 +764,76 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
         })
 
     return evaluations
+
+
+@app.get("/users/{user_id}/assigned-evaluations/{evaluation_id}", response_model=schemas.AssignedQuestionnaireResponse)
+def get_assigned_questionnaire(user_id: int, evaluation_id: int, db: Session = Depends(get_db)):
+    evaluation = next((item for item in get_assigned_evaluations(user_id, db) if item["id"] == evaluation_id), None)
+    if evaluation is None:
+        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
+    filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).first()
+    form = db.query(models.Form).filter(models.Form.id == filled_form.form_id).first()
+    return {"evaluation": evaluation, "questions": form.questions, "answers": filled_form.answers}
+
+
+@app.put("/users/{user_id}/assigned-evaluations/{evaluation_id}", response_model=schemas.AssignedQuestionnaireResponse)
+def update_assigned_questionnaire(user_id: int, evaluation_id: int, payload: schemas.AssignedQuestionnaireUpdate, db: Session = Depends(get_db)):
+    questionnaire = get_assigned_questionnaire(user_id, evaluation_id, db)
+    evaluation = questionnaire["evaluation"]
+    today = date.today()
+    if not evaluation["campaign_is_active"] or evaluation["campaign_start_date"] > today or (evaluation["due_date"] is not None and evaluation["due_date"] < today):
+        raise HTTPException(status_code=403, detail="This questionnaire is not currently available")
+    if evaluation["finish_date"] is not None:
+        raise HTTPException(status_code=409, detail="This questionnaire has already been submitted")
+
+    questions = questionnaire["questions"]
+    by_id = {question.get("id"): question for question in questions if isinstance(question, dict)}
+    seen = set()
+    for answer in payload.answers:
+        question_id = answer.get("question_id")
+        if not isinstance(question_id, str) or question_id not in by_id or question_id in seen or set(answer) != {"question_id", "value"}:
+            raise HTTPException(status_code=400, detail="Invalid questionnaire answer")
+        seen.add(question_id)
+        question = by_id[question_id]
+        value = answer["value"]
+        kind = question.get("type")
+        options = question.get("options", question.get("choices", []))
+        choices = [option if isinstance(option, str) else option.get("id", option.get("value", option.get("label"))) for option in options] if isinstance(options, list) else []
+        if kind in {"Scale 1-5", "Scale 1-10"}:
+            valid = isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= (10 if kind == "Scale 1-10" else 5)
+        elif kind == "Single choice":
+            valid = isinstance(value, str) and value in choices
+        elif kind == "Multiple choice":
+            valid = isinstance(value, list) and len(value) == len(set(str(item) for item in value)) and all(isinstance(item, str) and item in choices for item in value)
+        elif kind == "Text":
+            valid = isinstance(value, str) and value.strip() != ""
+        elif kind == "Number":
+            valid = isinstance(value, (int, float)) and not isinstance(value, bool)
+        elif kind == "Date":
+            try:
+                valid = isinstance(value, str) and len(value) == 10 and date.fromisoformat(value).isoformat() == value
+            except ValueError:
+                valid = False
+        else:
+            valid = False
+        if not valid:
+            raise HTTPException(status_code=400, detail="Invalid questionnaire answer")
+    if payload.submit and (not questions or any(question.get("required") and question.get("id") not in seen for question in questions)):
+        raise HTTPException(status_code=400, detail="Answer all required questions before submitting")
+
+    filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).first()
+    filled_form.answers = payload.answers
+    status_name = "Completed" if payload.submit else "In progress"
+    status = db.query(models.FormStatus).filter(func.lower(models.FormStatus.name) == status_name.lower()).first()
+    if status is None:
+        status = models.FormStatus(name=status_name)
+        db.add(status)
+        db.flush()
+    filled_form.status_id = status.id
+    if payload.submit:
+        filled_form.finish_date = today
+    db.commit()
+    return get_assigned_questionnaire(user_id, evaluation_id, db)
 
 
 @app.get("/users/{user_id}/employee-dashboard", response_model=schemas.EmployeeDashboardResponse)

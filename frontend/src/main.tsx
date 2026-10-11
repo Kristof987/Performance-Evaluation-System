@@ -5,6 +5,7 @@ import './styles/index.css'
 import Login from './pages/login/Login'
 import HrHome from './pages/hr-home/HrHome'
 import EmployeeHome from './pages/employee-home/EmployeeHome'
+import EmployeeQuestionnaire from './pages/employee-home/EmployeeQuestionnaire'
 import EmployeeReviewPreview from './pages/employee-home/EmployeeReviewPreview'
 import EmployeeResults from './pages/employee-results/EmployeeResults'
 import People from './pages/people/People'
@@ -34,6 +35,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/" element={<Login />} />
         <Route path="/hr-home" element={<RequireLoggedInUser><RoleHome /></RequireLoggedInUser>} />
         <Route path="/employee-home" element={<RequireLoggedInUser><EmployeeHome /></RequireLoggedInUser>} />
+        <Route path="/employee-home/evaluations/:id" element={<RequireLoggedInUser><EmployeeQuestionnaire /></RequireLoggedInUser>} />
         <Route path="/employee-review-preview" element={<RequireLoggedInUser><EmployeeReviewPreview /></RequireLoggedInUser>} />
         <Route path="/results" element={<RequireLoggedInUser><EmployeeResults /></RequireLoggedInUser>} />
         <Route path="/people" element={<People />} />

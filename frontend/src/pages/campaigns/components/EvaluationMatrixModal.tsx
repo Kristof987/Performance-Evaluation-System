@@ -19,11 +19,12 @@ type Props = {
   onAddSelf: (groupId: number) => void;
   onGenerate: (groupId: number, minimum: number) => void;
   onClear: (groupId: number) => void;
+  onSave: () => void;
   onDiscard: () => void;
   onReviewSelf: () => void;
 };
 
-export default function EvaluationMatrixModal({ group, rules, selfForms, selfFormsDirty, selection, dirty, rulesDirty, saving, message, onClose, onToggle, onAddAll, onAddSelf, onGenerate, onClear, onDiscard, onReviewSelf }: Props) {
+export default function EvaluationMatrixModal({ group, rules, selfForms, selfFormsDirty, selection, dirty, rulesDirty, saving, message, onClose, onToggle, onAddAll, onAddSelf, onGenerate, onClear, onSave, onDiscard, onReviewSelf }: Props) {
   const [minimum, setMinimum] = useState('1');
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -122,7 +123,9 @@ export default function EvaluationMatrixModal({ group, rules, selfForms, selfFor
         </div>
         <div className="campaign-matrix-modal-footer">
           <span>{dirty ? 'Unsaved changes · ' : ''}Changes are staged until Save matrix is clicked.{validationMessage || message ? ` ${validationMessage || message}` : ''}</span>
-          {saving && <span>Saving matrix...</span>}
+          <button className="btn btn-primary" type="button" disabled={saving || !dirty || rulesDirty} onClick={onSave}>
+            {saving ? 'Saving...' : 'Save matrix'}
+          </button>
         </div>
         {confirmClear && <div className="campaign-matrix-confirm" role="alertdialog" aria-label="Clear matrix selections" aria-modal="true">
           <div><h3>Clear matrix selections</h3><p>This removes editable selections in this group. Issued or completed evaluations will not be deleted.</p>

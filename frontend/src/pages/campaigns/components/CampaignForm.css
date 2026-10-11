@@ -4,6 +4,9 @@
   gap: 16px;
   overflow: auto;
 }
+.campaign-page .campaign-create-form > .form-field {
+  align-content: start;
+}
 .campaign-page .campaign-field-wide,
 .campaign-page .campaign-modal-actions {
   grid-column: 1/-1;

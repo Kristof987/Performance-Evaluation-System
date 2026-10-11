@@ -1,9 +1,13 @@
 import { API_BASE_URL } from '../../config';
+import type { FormQuestion } from '../forms/forms.api';
 
 type AssignedEvaluationResponse = {
   id: number;
+  evaluator_id: number;
   campaign_id: number;
   campaign_name: string;
+  campaign_start_date: string;
+  campaign_is_active: boolean;
   form_id: number;
   form_name: string;
   form_description: string | null;
@@ -39,8 +43,11 @@ type EmployeeDashboardResponse = {
 
 export type AssignedEvaluation = {
   id: number;
+  evaluatorId: number;
   campaignId: number;
   campaignName: string;
+  campaignStartDate: string;
+  campaignIsActive: boolean;
   formId: number;
   formName: string;
   formDescription: string;
@@ -53,6 +60,9 @@ export type AssignedEvaluation = {
   answeredCount: number;
   createdAt: string;
 };
+
+export type QuestionnaireAnswer = { question_id: string; value: string | number | string[] };
+export type AssignedQuestionnaire = { evaluation: AssignedEvaluation; questions: FormQuestion[]; answers: QuestionnaireAnswer[] };
 
 export type EmployeeDashboardHistoryItem = {
   id: number;
@@ -77,8 +87,11 @@ export type EmployeeDashboard = {
 function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): AssignedEvaluation {
   return {
     id: evaluation.id,
+    evaluatorId: evaluation.evaluator_id,
     campaignId: evaluation.campaign_id,
     campaignName: evaluation.campaign_name,
+    campaignStartDate: evaluation.campaign_start_date,
+    campaignIsActive: evaluation.campaign_is_active,
     formId: evaluation.form_id,
     formName: evaluation.form_name,
     formDescription: evaluation.form_description || '',
@@ -147,4 +160,20 @@ export async function fetchEmployeeDashboard(
       'Employee dashboard could not be loaded.',
     ),
   );
+}
+
+export async function fetchAssignedQuestionnaire(userId: number, evaluationId: number, signal: AbortSignal): Promise<AssignedQuestionnaire> {
+  const result = await requestApi<{ evaluation: AssignedEvaluationResponse; questions: FormQuestion[]; answers: QuestionnaireAnswer[] }>(
+    `/users/${userId}/assigned-evaluations/${evaluationId}`, { signal }, 'Questionnaire could not be loaded.',
+  );
+  return { ...result, evaluation: mapAssignedEvaluation(result.evaluation) };
+}
+
+export async function saveAssignedQuestionnaire(userId: number, evaluationId: number, answers: QuestionnaireAnswer[], submit: boolean): Promise<AssignedQuestionnaire> {
+  const result = await requestApi<{ evaluation: AssignedEvaluationResponse; questions: FormQuestion[]; answers: QuestionnaireAnswer[] }>(
+    `/users/${userId}/assigned-evaluations/${evaluationId}`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers, submit }) },
+    'Questionnaire could not be saved.',
+  );
+  return { ...result, evaluation: mapAssignedEvaluation(result.evaluation) };
 }

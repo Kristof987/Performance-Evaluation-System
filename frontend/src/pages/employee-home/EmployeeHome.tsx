@@ -2,210 +2,110 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import AppLayout from '../layout/AppLayout';
 import { formatUserName, getSidebarUser } from '../layout/sidebar-user';
-import {
-  fetchEmployeeDashboard,
-  type AssignedEvaluation,
-  type EmployeeDashboard,
-} from './employee-home.api';
+import { fetchEmployeeDashboard, type AssignedEvaluation } from './employee-home.api';
+import { dashboardWork, evaluationStatus, evaluationTitle } from './employee-home.utils';
+import { getCalendarToday } from '../campaigns/campaign.lifecycle';
+import '../hr-home/components/MetricsGrid.css';
 import './employee-home.css';
 
-const emptyDashboard: EmployeeDashboard = {
-  evaluations: [],
-  openCount: 0,
-  completedCount: 0,
-  nextReviewDate: null,
-  campaignDateLabel: 'Campaign ends',
-  campaignDate: null,
-  campaignDateEmptyText: 'Not announced yet',
-  latestResult: null,
-  history: [],
-};
-
-function formatShortDate(value: string | null, emptyText = 'Not announced yet') {
-  if (value === null) return emptyText;
-  return new Intl.DateTimeFormat('en-GB', {
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(`${value}T00:00:00`));
+function formatDate(value: string | null) {
+  if (!value) return 'No deadline';
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    .format(new Date(`${value}T00:00:00`));
 }
 
-function getEvaluationProgress(evaluation: AssignedEvaluation) {
-  if (evaluation.finishDate !== null) return 100;
-  if (evaluation.questionCount === 0) return 0;
-  return Math.round((evaluation.answeredCount / evaluation.questionCount) * 100);
+function getGreeting() {
+  const hour = new Date().getHours();
+  return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 }
 
-function getEvaluationStatus(evaluation: AssignedEvaluation) {
-  if (evaluation.finishDate !== null) return 'Submitted';
-  if (getEvaluationProgress(evaluation) > 0) return 'In progress';
-  return evaluation.statusName || 'Not started';
+function EvaluationRow({ evaluation, upcoming = false }: { evaluation: AssignedEvaluation; upcoming?: boolean }) {
+  const status = evaluationStatus(evaluation);
+  const title = evaluationTitle(evaluation);
+  return (
+    <div className="employee-compact-row" data-assignment-id={evaluation.id}>
+      <div>
+        <strong>{title}</strong>
+        <span>{evaluation.formName} · {evaluation.campaignName} · {upcoming ? `Starts ${formatDate(evaluation.campaignStartDate)}` : `Due ${formatDate(evaluation.dueDate)}`}</span>
+        <small>{upcoming ? 'Upcoming' : status}</small>
+      </div>
+      {!upcoming && (
+        <Link className="btn btn-secondary employee-compact-action" to={`/employee-home/evaluations/${evaluation.id}`}
+          aria-label={`${status === 'In progress' ? 'Continue' : 'Start'} ${title.toLowerCase()} · ${evaluation.formName} · ${evaluation.campaignName}`}>
+          {status === 'In progress' ? 'Continue' : 'Start'}
+        </Link>
+      )}
+    </div>
+  );
 }
 
-function getEvaluationMeta(evaluation: AssignedEvaluation) {
-  const questionLabel = evaluation.questionCount === 1 ? 'question' : 'questions';
-  return `${evaluation.campaignName} • about ${formatUserName(evaluation.evaluateeName)} • ${evaluation.questionCount} ${questionLabel}`;
-}
-
-function getFullDate() {
-  const currentDate = new Date();
-  const currentDay = currentDate.getDate().toString();
-  const currentMonth = currentDate.toLocaleDateString('en-US', {
-    month: 'long',
-  });
-  const currentYear = currentDate.getFullYear().toString();
-  const currentDayString = currentDate.toLocaleDateString('en-US', {
-    weekday: 'long',
-  });
-
-  return `${currentDayString}, ${currentDay} ${currentMonth} ${currentYear}`;
-}
-
-function getTimeBasedGreeting(date = new Date()) {
-  const hour = date.getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
-}
-
-type EmployeeHomeProps = {
-  forceEmptyState?: boolean;
-};
+type EmployeeHomeProps = { forceEmptyState?: boolean };
 
 export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomeProps) {
   const user = getSidebarUser();
-  const [dashboard, setDashboard] = useState<EmployeeDashboard>(emptyDashboard);
-  const [isLoadingWork, setIsLoadingWork] = useState(true);
-  const [workError, setWorkError] = useState('');
+  const userId = user?.id;
+  const [evaluations, setEvaluations] = useState<AssignedEvaluation[]>([]);
+  const [loading, setLoading] = useState(!forceEmptyState && user !== null);
+  const [error, setError] = useState('');
+  const [historyLimit, setHistoryLimit] = useState(5);
 
   useEffect(() => {
-    if (forceEmptyState) {
-      setDashboard(emptyDashboard);
-      setIsLoadingWork(false);
-      setWorkError('');
-      return;
-    }
-
-    if (user === null) {
-      setDashboard(emptyDashboard);
-      setIsLoadingWork(false);
-      return;
-    }
-
+    if (forceEmptyState || userId === undefined) return;
     const controller = new AbortController();
-    setIsLoadingWork(true);
-    setWorkError('');
-
-    fetchEmployeeDashboard(user.id, controller.signal)
-      .then((loadedDashboard) => {
-        setDashboard(loadedDashboard);
+    fetchEmployeeDashboard(userId, controller.signal)
+      .then((dashboard) => setEvaluations(dashboard.evaluations))
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Evaluations could not be loaded.');
       })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-        setWorkError(error instanceof Error ? error.message : 'Assigned evaluations could not be loaded.');
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setIsLoadingWork(false);
-      });
-
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [forceEmptyState, user?.id]);
+  }, [forceEmptyState, userId]);
 
-  const assignedEvaluations = dashboard.evaluations;
-  const openEvaluations = assignedEvaluations.filter((evaluation) => evaluation.finishDate === null);
-  const hasDashboardData = !forceEmptyState && workError === '' && assignedEvaluations.length > 0;
-  const dashboardUserName = user === null ? 'Employee' : formatUserName(user.username);
-  const greeting = getTimeBasedGreeting();
-  const latestSubmittedEvaluation = dashboard.latestResult;
+  const { actionable, completed, nextDeadline, upcoming, history } = dashboardWork(forceEmptyState ? [] : evaluations);
+  const firstName = user ? formatUserName(user.username).split(' ')[0] || 'Employee' : 'Employee';
+  const visibleHistory = history.slice(0, historyLimit);
 
   return (
     <AppLayout activePage="employee-home" pageClassName="employee-home-page">
-      <div className="main-content employee-home-main employee-empty-dashboard-main">
-        <div className="topbar employee-topbar">
-          <div className="greeting">
-            <div className="greeting-title">{greeting}, {dashboardUserName}</div>
-            <div className="greeting-date">{getFullDate()}</div>
-          </div>
+      <main className="main-content employee-home-main">
+        <header className="employee-home-header">
+          <h1>{getGreeting()}, {firstName}</h1>
+          <p>Here's what needs your attention.</p>
+          <time dateTime={getCalendarToday()}>{new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</time>
+        </header>
+
+        <section className="card kpi-section employee-kpi-section" aria-label="Evaluation summary for ongoing campaigns">
+          <div className="kpi-item"><span className="kpi-label">To complete</span><strong className="kpi-value">{loading ? '…' : actionable.length}</strong><span className="kpi-context">Ongoing campaigns</span></div>
+          <div className="kpi-item"><span className="kpi-label">Completed</span><strong className="kpi-value">{loading ? '…' : completed.length}</strong><span className="kpi-context">Ongoing campaigns</span></div>
+          <div className="kpi-item"><span className="kpi-label">Next deadline</span><strong className="kpi-value employee-deadline-value">{loading ? '…' : nextDeadline ? formatDate(nextDeadline.dueDate) : 'None'}</strong><span className="kpi-context">{nextDeadline?.campaignName ?? 'No upcoming deadlines'}</span></div>
+        </section>
+
+        <div className="employee-work-overview">
+          <section className="card employee-dashboard-panel employee-tasks-panel" aria-labelledby="employee-tasks-heading">
+            <div className="employee-panel-heading"><h2 id="employee-tasks-heading">Your tasks</h2></div>
+            {loading ? <p className="employee-plain-empty">Loading evaluations...</p>
+              : error ? <p role="alert" className="employee-plain-empty">{error}</p>
+              : actionable.length ? <div className="employee-compact-list">{actionable.map((item) => <EvaluationRow key={item.id} evaluation={item} />)}</div>
+              : <p className="employee-plain-empty">You're all caught up. No evaluations need your attention right now.</p>}
+            {!loading && !error && upcoming.length > 0 && <div className="employee-upcoming"><h3>Upcoming</h3><div className="employee-compact-list">{upcoming.map((item) => <EvaluationRow key={item.id} evaluation={item} upcoming />)}</div></div>}
+          </section>
+
+          <section className="card employee-dashboard-panel employee-results-panel" aria-labelledby="employee-results-heading">
+            <div className="employee-panel-heading"><h2 id="employee-results-heading">Latest results</h2></div>
+            <p className="employee-plain-empty">No results published yet.<br />Your results will appear here when they're released.</p>
+          </section>
         </div>
 
-        <section className="employee-summary-grid" aria-label="Review summary">
-          <div className="card employee-summary-card">
-            <span>Open evaluations</span>
-            <strong>{isLoadingWork ? '...' : dashboard.openCount}</strong>
-          </div>
-          <div className="card employee-summary-card">
-            <span>Completed forms in this campaign</span>
-            <strong>{isLoadingWork ? '...' : dashboard.completedCount}</strong>
-          </div>
-          <div className="card employee-summary-card">
-            <span>{dashboard.campaignDateLabel}</span>
-            <strong>{formatShortDate(dashboard.campaignDate, dashboard.campaignDateEmptyText)}</strong>
-          </div>
+        <section className="card employee-dashboard-panel employee-history-panel" aria-labelledby="employee-history-heading">
+          <div className="employee-panel-heading"><h2 id="employee-history-heading">History</h2></div>
+          {loading ? <p className="employee-plain-empty">Loading history...</p>
+            : error ? <p className="employee-plain-empty">History could not be loaded.</p>
+            : history.length ? <>
+              <div className="employee-history-list">{visibleHistory.map((item) => <div key={item.id}><strong>{evaluationTitle(item)}</strong><span>{item.formName} · {item.campaignName} · {item.finishDate ? `Completed ${formatDate(item.finishDate)}` : 'Completed'}</span></div>)}</div>
+              {history.length > historyLimit && <button type="button" className="employee-history-toggle" onClick={() => setHistoryLimit(historyLimit + 5)}>Show more evaluations</button>}
+            </> : <p className="employee-plain-empty">No completed evaluations yet.</p>}
         </section>
-
-        <section className="card employee-work-overview">
-          <div className="employee-work-column employee-work-column-large">
-            <div className="employee-panel-heading">
-              <h2>Your tasks</h2>
-            </div>
-            {isLoadingWork ? (
-              <p className="employee-plain-empty">Loading evaluations...</p>
-            ) : openEvaluations.length > 0 ? (
-              <div className="employee-compact-list">
-                {openEvaluations.map((evaluation) => (
-                  <div className="employee-compact-row" key={evaluation.id}>
-                    <div>
-                      <strong>{evaluation.formName}</strong>
-                      <span>{getEvaluationMeta(evaluation)} · due {formatShortDate(evaluation.dueDate)}</span>
-                    </div>
-                    <button className={getEvaluationProgress(evaluation) > 0 ? 'btn btn-primary employee-compact-action' : 'btn btn-secondary employee-compact-action'} type="button">
-                      {getEvaluationProgress(evaluation) > 0 ? 'Continue' : 'Start'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="employee-plain-empty">
-                {workError !== '' ? 'Evaluations could not be loaded.' : "You're all caught up. New evaluations will appear here."}
-              </p>
-            )}
-          </div>
-
-          <div className="employee-work-column">
-            <div className="employee-panel-heading">
-              <h2>Latest results</h2>
-            </div>
-            {latestSubmittedEvaluation !== null ? (
-              <div className="employee-result-card-inline">
-                <div>
-                  <strong>{latestSubmittedEvaluation.campaignName}</strong>
-                  <span>{latestSubmittedEvaluation.formName} · {getEvaluationStatus(latestSubmittedEvaluation)}</span>
-                </div>
-                <Link to="/results">View summary</Link>
-              </div>
-            ) : (
-              <p className="employee-plain-empty">No results published yet.</p>
-            )}
-          </div>
-        </section>
-
-        <section className="card employee-dashboard-panel employee-history-panel">
-          <div className="employee-panel-heading">
-            <h2>History</h2>
-          </div>
-          {hasDashboardData ? (
-            <div className="employee-history-list">
-              {dashboard.history.map((item) => (
-                <div key={item.id}>
-                  <strong>{item.title}</strong>
-                  <span>{item.status} · {item.subtitle}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="employee-history-empty">No review activity yet.</div>
-          )}
-        </section>
-      </div>
+      </main>
     </AppLayout>
   );
 }

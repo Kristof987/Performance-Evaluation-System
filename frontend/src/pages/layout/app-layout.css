@@ -11,7 +11,7 @@
   width: 100%;
 }
 .layout {
-  align-items: flex-start;
+  align-items: stretch;
   display: flex;
   min-height: 100vh;
   width: 100%;
@@ -51,7 +51,7 @@
   padding: 0;
   position: absolute;
   right: -13px;
-  top: 50%;
+  top: min(50%, 50vh);
   transform: translateY(-50%);
   transition:
     background-color 0.15s ease,

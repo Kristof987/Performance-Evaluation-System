@@ -177,8 +177,11 @@ class UserResponse(BaseModel):
 
 class AssignedEvaluationResponse(BaseModel):
     id: int
+    evaluator_id: int
     campaign_id: int
     campaign_name: str
+    campaign_start_date: date
+    campaign_is_active: bool
     form_id: int
     form_name: str
     form_description: str | None
@@ -190,6 +193,17 @@ class AssignedEvaluationResponse(BaseModel):
     question_count: int
     answered_count: int
     created_at: datetime
+
+
+class AssignedQuestionnaireResponse(BaseModel):
+    evaluation: AssignedEvaluationResponse
+    questions: list[dict[str, Any]]
+    answers: list[dict[str, Any]]
+
+
+class AssignedQuestionnaireUpdate(BaseModel):
+    answers: list[dict[str, Any]]
+    submit: bool = False
 
 
 class EmployeeDashboardHistoryItem(BaseModel):

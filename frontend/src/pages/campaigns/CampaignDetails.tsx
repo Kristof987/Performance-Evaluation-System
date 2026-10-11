@@ -519,6 +519,7 @@ export function CampaignDetails() {
            onAddSelf={applyMatrixSelfEvaluations}
            onGenerate={applyMatrixMinimumReviewers}
            onClear={applyMatrixDeleteAll}
+            onSave={handleUpdateMatrix}
             onDiscard={discardMatrix}
             onReviewSelf={() => {
               setActiveMatrixGroupId(null);

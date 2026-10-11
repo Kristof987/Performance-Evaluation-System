@@ -1,161 +1,128 @@
-import './Login.css';
-import { useState } from 'react';
+import { useRef, useState, type ChangeEvent, type SubmitEvent } from 'react';
 import { useNavigate } from 'react-router';
-import type { ChangeEvent, SubmitEvent } from 'react';
+import { Compass, Eye, EyeOff } from 'lucide-react';
 import { isHrOrManagerRole } from '../layout/sidebar-user';
-
 import { API_BASE_URL } from '../../config';
+import './Login.css';
 
 function Login() {
   const [username, setUsername] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const pending = useRef(false);
   const navigate = useNavigate();
 
   function setUsernameHandler(event: ChangeEvent<HTMLInputElement>) {
     setUsername(event.target.value);
+    setErrorMessage('');
   }
 
   async function submitHandler(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    console.log('Login button clicked', { username });
-
-    let response: Response;
+    if (pending.current) return;
+    pending.current = true;
+    setIsSubmitting(true);
+    setErrorMessage('');
 
     try {
-      response = await fetch(`${API_BASE_URL}/login`, {
+      const response = await fetch(`${API_BASE_URL}/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username }),
       });
-    } catch (error) {
-      console.log('Login request failed', error);
-      alert('Nem sikerult kapcsolodni a backendhez.');
-      return;
-    }
+      if (!response.ok) {
+        setErrorMessage('Sign in failed. Check your username and try again.');
+        return;
+      }
 
-    if (!response.ok) {
-      console.log('Login failed', { username, status: response.status });
-      alert('Csak letezo userrel lehet bejelentkezni.');
-      return;
+      const loggedInUser = await response.json();
+      sessionStorage.setItem('loggedInUser', JSON.stringify(loggedInUser));
+      navigate(isHrOrManagerRole(loggedInUser.role_name ?? null) ? '/hr-home' : '/employee-home', { replace: true });
+    } catch {
+      setErrorMessage('Could not connect to Compass. Please try again.');
+    } finally {
+      pending.current = false;
+      setIsSubmitting(false);
     }
-
-    const loggedInUser = await response.json();
-    console.log('Login successful', loggedInUser);
-    sessionStorage.setItem('loggedInUser', JSON.stringify(loggedInUser));
-    navigate(isHrOrManagerRole(loggedInUser.role_name ?? null) ? '/hr-home' : '/employee-home', { replace: true });
   }
 
   return (
     <main className="login-page">
-      <section className="login-panel" aria-label="Sign in form">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                stroke="currentColor"
-                strokeWidth="2"
+      <section className="login-panel" aria-label="Sign in">
+        <div className="login-content">
+          <h1>Welcome back</h1>
+          <p className="login-intro">Sign in to your Compass workspace.</p>
+
+          <form className="login-form" onSubmit={submitHandler} aria-busy={isSubmitting}>
+            <div className="form-field">
+              <label className="form-label" htmlFor="username">Username</label>
+              <input
+                className="form-control"
+                id="username"
+                name="username"
+                type="text"
+                value={username}
+                required
+                autoComplete="username"
+                placeholder="Enter your username"
+                disabled={isSubmitting}
+                aria-invalid={errorMessage ? true : undefined}
+                aria-describedby={errorMessage ? 'login-error' : undefined}
+                onChange={setUsernameHandler}
               />
-              <path
-                d="m15.5 8.5-2.2 5-5 2.2 2.2-5 5-2.2Z"
-                fill="currentColor"
-              />
-            </svg>
-          </div>
-          <div className="brand-name">Compass HR</div>
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="password">Password</label>
+              <div className="login-password-field">
+                <input
+                  className="form-control"
+                  id="password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  disabled={isSubmitting}
+                />
+                <button
+                  className="login-password-toggle"
+                  type="button"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  disabled={isSubmitting}
+                  onClick={() => setShowPassword((current) => !current)}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="login-options">
+              <label className="login-remember" title="Remember me is not available yet">
+                <input type="checkbox" disabled /> Remember me
+              </label>
+              <span className="login-unavailable">Password recovery unavailable</span>
+            </div>
+
+            {errorMessage && <p className="login-error" id="login-error" role="alert">{errorMessage}</p>}
+
+            <button className="btn btn-primary login-submit" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Signing in...' : 'Sign in'}
+            </button>
+          </form>
+
+          <p className="login-support">Need access? Contact your HR administrator.</p>
         </div>
-
-        <div className="eyebrow">Secure HR workspace</div>
-        <h1>Welcome back</h1>
-        <p className="intro">
-          Sign in to review campaigns, follow completion, and manage people
-          feedback from one calm dashboard.
-        </p>
-
-        <form className="form" onSubmit={submitHandler}>
-          <div className="form-field login-field">
-            <label className="form-label" htmlFor="username">
-              Email
-            </label>
-            <input
-              className="form-control"
-              id="username"
-              type="text"
-              value={username}
-              required
-              placeholder="Enter your email address"
-              autoComplete="name"
-              onChange={setUsernameHandler}
-            />
-          </div>{' '}
-          {/*TODO: adjunk hozzá template-et cég email végződés alapján*/}
-          <div className="form-field login-field">
-            <label className="form-label" htmlFor="password">
-              Password
-            </label>
-            <input
-              className="form-control"
-              id="password"
-              type="password"
-              placeholder="Enter your password"
-              autoComplete="current-password"
-            />
-          </div>
-          <div className="row">
-            <label className="check">
-              <input type="checkbox" /> Remember me
-            </label>
-            <a href="#">Forgot password?</a>
-          </div>
-          <button className="btn btn-primary login-submit" type="submit">
-            Sign in
-          </button>
-          <div className="divider">or</div>
-          <button className="btn btn-secondary login-sso" type="button">
-            Continue with SSO
-          </button>
-        </form>
-
-        <p className="support">
-          Need access? <a href="#">Contact your HR administrator</a>
-        </p>
       </section>
 
-      <section className="visual" aria-label="Company branding preview">
-        <div className="orb one"></div>
-        <div className="orb two"></div>
-        <div className="logo-card">
-          <div className="logo-stage">
-            <div className="fallback-logo">
-              <svg viewBox="0 0 38 38" fill="none" aria-hidden="true">
-                <rect width="38" height="38" rx="12" fill="#4553C4" />
-                <circle
-                  cx="19"
-                  cy="19"
-                  r="10"
-                  stroke="white"
-                  strokeWidth="2.4"
-                />
-                <path
-                  d="m22.5 15.5-2.2 5.1-5.1 2.2 2.2-5.1 5.1-2.2Z"
-                  fill="white"
-                />
-              </svg>
-              <strong>Company logo</strong>
-            </div>
+      <section className="login-visual" aria-label="About Compass">
+        <div className="login-visual-copy">
+          <div className="login-brand">
+            <span className="login-brand-mark" aria-hidden="true"><Compass size={25} /></span>
+            <span>Compass</span>
           </div>
-          <div className="caption">
-            <div>
-              <strong>Built for any brand</strong>
-              The logo sits on a neutral elevated surface, so dark, light,
-              colorful, or monochrome logos stay readable.
-            </div>
-            <div className="badge badge-success security-pill">SSO ready</div>
-          </div>
+          <h2>Better feedback.<br />Stronger teams.</h2>
+          <p>Bring performance reviews, team feedback, and growth conversations into one clear workspace.</p>
         </div>
       </section>
     </main>

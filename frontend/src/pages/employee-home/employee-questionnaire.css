@@ -1,0 +1,13 @@
+.employee-questionnaire { display: grid; gap: 20px; max-width: 900px; }
+.employee-questionnaire header h1 { margin: 0 0 8px; }
+.employee-questionnaire header p { color: var(--color-text-secondary); margin: 4px 0; }
+.employee-questionnaire-questions { display: grid; gap: 16px; }
+.employee-questionnaire-question { padding: 20px; }
+.employee-questionnaire-question h2 { font-size: 17px; margin: 0 0 10px; }
+.employee-questionnaire-question p { color: var(--color-text-secondary); margin: 0 0 14px; }
+.employee-questionnaire-question .form-control { max-width: 100%; }
+.employee-questionnaire-options { display: flex; flex-wrap: wrap; gap: 12px 22px; }
+.employee-questionnaire-options label { align-items: center; display: inline-flex; gap: 7px; }
+.employee-questionnaire-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; padding-bottom: 24px; }
+.employee-questionnaire-actions span { margin-right: auto; }
+@media (max-width: 640px) { .employee-questionnaire-actions button { width: 100%; } }
