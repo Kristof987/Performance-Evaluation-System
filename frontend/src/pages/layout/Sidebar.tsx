@@ -27,6 +27,7 @@ export type SidebarPage =
   | 'people'
   | 'campaigns'
   | 'forms'
+  | 'reports'
   | 'results'
   | 'settings';
 
@@ -199,10 +200,15 @@ export default function Sidebar({
               <Files size={17} />
               <span className="nav-item-label">Forms</span>
             </Link>
-            <div className="nav-item">
+            <Link
+              className={activePage === 'reports' ? 'nav-item active' : 'nav-item'}
+              aria-current={activePage === 'reports' ? 'page' : undefined}
+              to="/reports"
+              style={{ textDecoration: 'none' }}
+            >
               <ChartNoAxesCombined size={17} />
               <span className="nav-item-label">Reports</span>
-            </div>
+            </Link>
             <Link
               className={activePage === 'settings' ? 'nav-item active' : 'nav-item'}
               aria-current={activePage === 'settings' ? 'page' : undefined}

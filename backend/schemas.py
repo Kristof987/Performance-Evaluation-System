@@ -452,6 +452,116 @@ class CompletionStatusResponse(BaseModel):
     pagination: CompletionStatusPagination
     duplicate_assignment_count: int = 0
 
+
+class ReportCampaignOption(BaseModel):
+    id: int
+    name: str
+    start_date: date
+    end_date: date | None = None
+    is_active: bool
+
+
+class ReportKpiSummary(BaseModel):
+    total_evaluations: int
+    completed_evaluations: int
+    completion_rate: int
+    submitted_evaluations: int
+    employees_evaluated: int
+    overall_score: float | None = None
+    overall_score_label: str
+    overall_score_context: str
+    overall_score_scale: str | None = None
+
+
+class ReportDimensionScore(BaseModel):
+    id: str
+    name: str
+    average_score: float
+    response_count: int
+    evaluatee_count: int
+    scale_min: int
+    scale_max: int
+
+
+class ReportRatingDistributionBucket(BaseModel):
+    rating: int
+    count: int
+
+
+class ReportRatingDistributionSource(BaseModel):
+    id: str
+    label: str
+    source_type: str
+    scale_min: int
+    scale_max: int
+    response_count: int
+    buckets: list[ReportRatingDistributionBucket]
+
+
+class ReportGroupSummary(BaseModel):
+    group_id: int
+    group_name: str
+    employee_count: int
+    total_evaluations: int
+    completed_evaluations: int
+    completion_rate: int
+    average_score: float | None = None
+    average_score_context: str
+
+
+class ReportEmployeeOverview(BaseModel):
+    participating_employees: int
+    employees_with_completed_peer_feedback: int
+    employees_awaiting_peer_feedback: int
+    configured_self_evaluations: int
+    completed_self_evaluations: int
+
+
+class ReportDataNotes(BaseModel):
+    completed_definition: str
+    answer_storage: str
+    question_identity: str
+    historical_versions: str
+    dimension_policy: str
+    self_evaluation_policy: str
+    participant_deduplication: str
+    group_attribution: str
+    confidentiality: str
+
+
+class CampaignReportOverviewResponse(BaseModel):
+    campaign: ReportCampaignOption
+    kpis: ReportKpiSummary
+    dimensions: list[ReportDimensionScore]
+    rating_distribution_sources: list[ReportRatingDistributionSource]
+    groups: list[ReportGroupSummary]
+    employees: ReportEmployeeOverview
+    notes: ReportDataNotes
+
+
+class PerformanceDimensionCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class PerformanceDimensionUpdate(BaseModel):
+    name: str
+    description: str | None = None
+    is_active: bool = True
+
+
+class PerformanceDimensionResponse(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {
+        "from_attributes": True
+    }
+
 class CompanyGroupCreate(BaseModel):
     name: str
     description: str | None = None

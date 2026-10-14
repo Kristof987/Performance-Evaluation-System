@@ -9,6 +9,7 @@ import MetricsGrid from './components/MetricsGrid';
 import ParticipantsSection from './components/ParticipantsSection';
 import NextActions from './components/NextActions';
 import UpcomingDeadlines from './components/UpcomingDeadlines';
+import MyEvaluationsPanel from './components/MyEvaluationsPanel';
 import { useHrDashboard } from './hooks/useHrDashboard';
 
 function HrHome() {
@@ -71,6 +72,8 @@ function HrHome() {
         {!isLoading && metrics !== null && campaigns.length > 0 && (
           <>
             <MetricsGrid metrics={metrics} campaigns={campaigns} />
+
+            <MyEvaluationsPanel />
 
             <div className="workspace">
               <ParticipantsSection participants={participants} onViewCompletionStatus={completionStatusHandler} />

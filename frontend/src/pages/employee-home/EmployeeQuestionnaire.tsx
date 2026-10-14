@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import AppLayout from '../layout/AppLayout';
 import { formatUserName, getSidebarUser } from '../layout/sidebar-user';
 import type { FormQuestion } from '../forms/forms.api';
@@ -64,6 +64,7 @@ function QuestionControl({ question, value, readOnly, onChange }: { question: Fo
 
 export default function EmployeeQuestionnaire() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const userId = getSidebarUser()?.id;
   const evaluationId = Number(id);
@@ -74,6 +75,8 @@ export default function EmployeeQuestionnaire() {
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const fromHr = searchParams.get('from') === 'hr';
+  const backPath = fromHr ? '/hr-home' : '/employee-home';
 
   useEffect(() => {
     if (userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0) return;
@@ -110,7 +113,7 @@ export default function EmployeeQuestionnaire() {
       setAnswers(saved.answers);
       setDirty(false);
       setSaveState('saved');
-      if (submit) navigate('/employee-home');
+      if (submit) navigate(backPath);
     } catch (cause) {
       setSaveState('failed');
       setError(cause instanceof Error ? cause.message : 'Questionnaire could not be saved.');
@@ -126,10 +129,10 @@ export default function EmployeeQuestionnaire() {
   const progress = questionCount === 0 ? 0 : Math.round((answeredCount / questionCount) * 100);
   const saveLabel = saving ? 'Saving...' : dirty ? 'Unsaved changes' : saveState === 'saved' ? 'All changes saved' : saveState === 'failed' ? 'Save failed' : 'No unsaved changes';
 
-  return <AppLayout activePage="employee-home" pageClassName="employee-home-page">
+  return <AppLayout activePage={fromHr ? 'hr-home' : 'employee-home'} pageClassName="employee-home-page">
     <main className="main-content employee-home-main employee-questionnaire-page">
       <div className="employee-questionnaire-shell">
-        <Link className="campaign-details-link" to="/employee-home">← Back to your tasks</Link>
+        <Link className="campaign-details-link" to={backPath}>← Back to your tasks</Link>
         {!questionnaire ? <p className="card card-padded employee-questionnaire-state" role={error ? 'alert' : 'status'}>{error || (userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0 ? 'Questionnaire not found.' : 'Loading questionnaire...')}</p> : <>
           <header className="employee-questionnaire-header">
             <p className="employee-questionnaire-context">{questionnaire.evaluation.campaignName} · {questionnaire.evaluation.evaluatorId === questionnaire.evaluation.evaluateeId ? 'Self-evaluation' : 'Evaluation'}</p>

@@ -11,6 +11,9 @@ export type FormQuestion = {
   type: string;
   required: boolean;
   helpText: string;
+  dimension_id?: number;
+  dimension?: { id: number | string; name: string } | null;
+  scale_direction?: 'higher_is_better';
   options?: ChoiceOption[] | string[];
   [key: string]: unknown;
 };

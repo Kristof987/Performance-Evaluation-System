@@ -9,7 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     Table,
-    UniqueConstraint
+    UniqueConstraint,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -164,6 +164,16 @@ class FilledForm(Base):
         nullable=False,
     )
 
+    form_snapshot = Column(
+        JSONB,
+        nullable=True,
+    )
+
+    snapshot_status = Column(
+        String,
+        nullable=True,
+    )
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -195,6 +205,23 @@ class FormTemplate(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     questions = Column(JSONB, nullable=False)
+
+
+class PerformanceDimension(Base):
+    __tablename__ = "performance_dimensions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scope_key = Column(String, nullable=False, default="default")
+    name = Column(String, nullable=False)
+    normalized_name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("scope_key", "normalized_name", name="uq_performance_dimension_scope_name"),
+    )
 
 system_role_permissions = Table(
     "system_role_permissions",

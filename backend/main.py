@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session, aliased
 
 from database import engine, Base, SessionLocal
 import models
+import form_snapshot_service
+import reporting_service
 import schemas
 
 #Base.metadata.create_all(bind=engine)
@@ -779,7 +781,7 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
 
     evaluations = []
     for filled_form, campaign, form, status, evaluatee in rows:
-        questions = form.questions if isinstance(form.questions, list) else []
+        questions = form_snapshot_service.snapshot_questions(filled_form, form)
         answers = filled_form.answers if isinstance(filled_form.answers, list) else []
         answered_count = sum(1 for answer in answers if isinstance(answer, dict) and len(answer) > 0)
 
@@ -791,8 +793,8 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
             "campaign_start_date": campaign.start_date,
             "campaign_is_active": campaign.is_active,
             "form_id": form.id,
-            "form_name": form.name,
-            "form_description": form.description,
+            "form_name": form_snapshot_service.snapshot_form_name(filled_form, form),
+            "form_description": form_snapshot_service.snapshot_form_description(filled_form, form),
             "evaluatee_id": evaluatee.id,
             "evaluatee_name": evaluatee.username,
             "status_name": status.name,
@@ -813,7 +815,7 @@ def get_assigned_questionnaire(user_id: int, evaluation_id: int, db: Session = D
         raise HTTPException(status_code=404, detail="Assigned evaluation not found")
     filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).first()
     form = db.query(models.Form).filter(models.Form.id == filled_form.form_id).first()
-    return {"evaluation": evaluation, "questions": form.questions, "answers": filled_form.answers}
+    return {"evaluation": evaluation, "questions": form_snapshot_service.snapshot_questions(filled_form, form), "answers": filled_form.answers}
 
 
 @app.put("/users/{user_id}/assigned-evaluations/{evaluation_id}", response_model=schemas.AssignedQuestionnaireResponse)
@@ -1241,6 +1243,172 @@ def get_campaign_completion_status(
         "pagination": {"page": page, "page_size": page_size, "total_items": total_items, "total_pages": total_pages},
         "duplicate_assignment_count": len(duplicate_keys),
     }
+
+
+@app.get("/reports/campaigns", response_model=list[schemas.ReportCampaignOption])
+def get_report_campaigns(requester_user_id: int = Query(...), db: Session = Depends(get_db)):
+    return reporting_service.list_report_campaigns(requester_user_id, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/overview", response_model=schemas.CampaignReportOverviewResponse)
+def get_campaign_report_overview(
+    campaign_id: int,
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    return reporting_service.build_campaign_report_overview(campaign_id, requester_user_id, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/groups")
+def get_campaign_report_groups(
+    campaign_id: int,
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    return reporting_service.build_groups_overview(campaign_id, requester_user_id, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/groups/{group_id}")
+def get_campaign_report_group_detail(
+    campaign_id: int,
+    group_id: int,
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    return reporting_service.build_group_detail(campaign_id, group_id, requester_user_id, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/roles")
+def get_campaign_report_roles(
+    campaign_id: int,
+    perspective: str = Query(default="evaluatee"),
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    return reporting_service.build_roles_overview(campaign_id, requester_user_id, db, perspective)
+
+
+@app.get("/reports/campaigns/{campaign_id}/roles/{role_id}")
+def get_campaign_report_role_detail(
+    campaign_id: int,
+    role_id: int,
+    perspective: str = Query(default="evaluatee"),
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    return reporting_service.build_role_detail(campaign_id, role_id, requester_user_id, db, perspective)
+
+
+@app.get("/reports/campaigns/{campaign_id}/employees")
+def get_campaign_report_employees(
+    campaign_id: int,
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    return reporting_service.build_employee_reports_overview(campaign_id, requester_user_id, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/employees/{employee_id}")
+def get_campaign_report_employee_detail(
+    campaign_id: int,
+    employee_id: int,
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    return reporting_service.build_employee_report_detail(campaign_id, employee_id, requester_user_id, db)
+
+
+def require_dimension_access(requester_user_id: int, db: Session) -> models.User:
+    user_role = (
+        db.query(models.User, models.CompanyRole.name.label("role_name"))
+        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
+        .filter(models.User.id == requester_user_id)
+        .filter(models.User.is_active.is_(True))
+        .first()
+    )
+    if user_role is None:
+        raise HTTPException(status_code=403, detail="User is not authorized to manage performance dimensions")
+    user, role_name = user_role
+    role = role_name.strip().lower()
+    if role != "hr" and "manager" not in role:
+        raise HTTPException(status_code=403, detail="User is not authorized to manage performance dimensions")
+    return user
+
+
+def normalize_dimension_name(name: str) -> str:
+    return " ".join(name.strip().lower().split())
+
+
+def validate_dimension_payload(name: str, db: Session, dimension_id: int | None = None) -> tuple[str, str]:
+    trimmed = " ".join(name.strip().split())
+    if len(trimmed) < 2:
+        raise HTTPException(status_code=400, detail="Dimension name is required")
+    normalized = normalize_dimension_name(trimmed)
+    duplicate = (
+        db.query(models.PerformanceDimension)
+        .filter(models.PerformanceDimension.scope_key == "default")
+        .filter(models.PerformanceDimension.normalized_name == normalized)
+    )
+    if dimension_id is not None:
+        duplicate = duplicate.filter(models.PerformanceDimension.id != dimension_id)
+    if duplicate.first() is not None:
+        raise HTTPException(status_code=400, detail="A performance dimension with this name already exists")
+    return trimmed, normalized
+
+
+@app.get("/performance-dimensions", response_model=list[schemas.PerformanceDimensionResponse])
+def get_performance_dimensions(
+    requester_user_id: int = Query(...),
+    include_inactive: bool = Query(default=True),
+    db: Session = Depends(get_db),
+):
+    require_dimension_access(requester_user_id, db)
+    query = db.query(models.PerformanceDimension).filter(models.PerformanceDimension.scope_key == "default")
+    if not include_inactive:
+        query = query.filter(models.PerformanceDimension.is_active.is_(True))
+    return query.order_by(models.PerformanceDimension.is_active.desc(), models.PerformanceDimension.name.asc()).all()
+
+
+@app.post("/performance-dimensions", response_model=schemas.PerformanceDimensionResponse)
+def create_performance_dimension(
+    payload: schemas.PerformanceDimensionCreate,
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    require_dimension_access(requester_user_id, db)
+    name, normalized = validate_dimension_payload(payload.name, db)
+    dimension = models.PerformanceDimension(
+        scope_key="default",
+        name=name,
+        normalized_name=normalized,
+        description=payload.description.strip() if payload.description is not None and payload.description.strip() else None,
+        is_active=True,
+    )
+    db.add(dimension)
+    db.commit()
+    db.refresh(dimension)
+    return dimension
+
+
+@app.put("/performance-dimensions/{dimension_id}", response_model=schemas.PerformanceDimensionResponse)
+def update_performance_dimension(
+    dimension_id: int,
+    payload: schemas.PerformanceDimensionUpdate,
+    requester_user_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    require_dimension_access(requester_user_id, db)
+    dimension = db.query(models.PerformanceDimension).filter(models.PerformanceDimension.id == dimension_id).first()
+    if dimension is None:
+        raise HTTPException(status_code=404, detail="Performance dimension not found")
+    name, normalized = validate_dimension_payload(payload.name, db, dimension_id)
+    dimension.name = name
+    dimension.normalized_name = normalized
+    dimension.description = payload.description.strip() if payload.description is not None and payload.description.strip() else None
+    dimension.is_active = payload.is_active
+    db.commit()
+    db.refresh(dimension)
+    return dimension
 
 
 @app.get("/campaigns", response_model=list[schemas.CampaignResponse])
@@ -1922,6 +2090,9 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
     for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
         if (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
             continue
+        form = db.query(models.Form).filter(models.Form.id == form_id).first()
+        if form is None:
+            raise HTTPException(status_code=400, detail="Assignment form does not exist")
         db.add(models.FilledForm(
             campaign_id=campaign_id,
             company_group_id=group_id,
@@ -1931,6 +2102,8 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
             status_id=status.id,
             finish_date=None,
             answers=[],
+            form_snapshot=form_snapshot_service.create_form_snapshot(form, db),
+            snapshot_status="verified",
         ))
         created_count += 1
 
@@ -2008,13 +2181,44 @@ def validate_choice_question_options(question: dict, question_index: int):
         raise HTTPException(status_code=400, detail=f"Question {question_index + 1} has duplicate option labels")
 
 
-def validate_question_definitions(questions: list[dict]):
+def validate_question_definitions(questions: list[dict], db: Session | None = None):
     if not isinstance(questions, list):
         raise HTTPException(status_code=400, detail="Questions must be a list")
     for index, question in enumerate(questions):
         if not isinstance(question, dict):
             raise HTTPException(status_code=400, detail=f"Question {index + 1} is invalid")
         validate_choice_question_options(question, index)
+        dimension_id = question.get("dimension_id") or question.get("dimensionId")
+        if dimension_id is not None:
+            if question.get("type") not in {"Scale 1-5", "Scale 1-10"}:
+                raise HTTPException(status_code=400, detail=f"Question {index + 1} cannot use a performance dimension")
+            if not isinstance(dimension_id, int):
+                raise HTTPException(status_code=400, detail=f"Question {index + 1} has an invalid performance dimension")
+            if db is not None and db.query(models.PerformanceDimension.id).filter(models.PerformanceDimension.id == dimension_id).filter(models.PerformanceDimension.scope_key == "default").first() is None:
+                raise HTTPException(status_code=400, detail=f"Question {index + 1} references an unknown performance dimension")
+
+
+def resolve_legacy_question_dimensions(questions: list[dict], db: Session) -> list[dict]:
+    resolved = deepcopy(questions)
+    for question in resolved:
+        if not isinstance(question, dict) or question.get("type") not in {"Scale 1-5", "Scale 1-10"}:
+            continue
+        if isinstance(question.get("dimension_id"), int):
+            continue
+        raw = question.get("dimension")
+        raw_name = raw.get("name") if isinstance(raw, dict) else raw
+        if not isinstance(raw_name, str) or raw_name.strip() == "":
+            continue
+        name = " ".join(raw_name.strip().split())
+        normalized = normalize_dimension_name(name)
+        dimension = db.query(models.PerformanceDimension).filter(models.PerformanceDimension.scope_key == "default").filter(models.PerformanceDimension.normalized_name == normalized).first()
+        if dimension is None:
+            dimension = models.PerformanceDimension(scope_key="default", name=name, normalized_name=normalized, is_active=True)
+            db.add(dimension)
+            db.flush()
+        question["dimension_id"] = dimension.id
+        question["dimension"] = {"id": dimension.id, "name": dimension.name}
+    return resolved
 
 
 def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, item_id: int | None = None):
@@ -2028,12 +2232,13 @@ def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, 
     if existing_query.first() is not None:
         raise HTTPException(status_code=400, detail="Name already exists")
 
-    validate_question_definitions(payload.questions)
+    questions = resolve_legacy_question_dimensions(payload.questions, db)
+    validate_question_definitions(questions, db)
 
     return {
         "name": name,
         "description": payload.description.strip() if payload.description is not None else None,
-        "questions": payload.questions,
+        "questions": questions,
     }
 
 

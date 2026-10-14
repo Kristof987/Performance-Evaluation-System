@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import AppLayout from '../layout/AppLayout';
+import { getSidebarUser } from '../layout/sidebar-user';
 import '../hr-home/hr-home.css';
 import './forms.css';
 import {
@@ -17,6 +18,12 @@ import {
   type ReviewForm,
   type ReviewFormValues,
 } from './forms.api';
+import {
+  createPerformanceDimension,
+  fetchPerformanceDimensions,
+  updatePerformanceDimension,
+  type PerformanceDimension,
+} from './performanceDimensions.api';
 
 type EditorMode = 'forms' | 'templates';
 type FormCreateSource = 'empty' | 'template';
@@ -38,6 +45,14 @@ const emptyOption = (): ChoiceOption => ({
 
 function isChoiceQuestion(question: FormQuestion | null) {
   return question !== null && choiceQuestionTypes.has(question.type);
+}
+
+function isScaleQuestion(question: FormQuestion | null) {
+  return question !== null && (question.type === 'Scale 1-5' || question.type === 'Scale 1-10');
+}
+
+function selectedDimensionId(question: FormQuestion) {
+  return typeof question.dimension_id === 'number' ? question.dimension_id : null;
 }
 
 function normalizeChoiceOptions(question: FormQuestion): ChoiceOption[] {
@@ -82,6 +97,16 @@ function prepareQuestionForSave(question: FormQuestion): FormQuestion {
       label: option.label.trim(),
     }));
   }
+  if (prepared.type === 'Scale 1-5' || prepared.type === 'Scale 1-10') {
+    if (typeof prepared.dimension_id !== 'number') {
+      delete prepared.dimension_id;
+      prepared.dimension = null;
+    }
+    prepared.scale_direction = 'higher_is_better';
+  } else {
+    delete prepared.dimension;
+    delete prepared.scale_direction;
+  }
   return prepared;
 }
 
@@ -120,6 +145,7 @@ function toDraft(form: ReviewForm): ReviewFormValues {
 }
 
 export default function Forms() {
+  const requesterUserId = getSidebarUser()?.id ?? null;
   const [forms, setForms] = useState<ReviewForm[]>([]);
   const [templates, setTemplates] = useState<ReviewForm[]>([]);
   const [editorMode, setEditorMode] = useState<EditorMode>('forms');
@@ -144,6 +170,9 @@ export default function Forms() {
   const [previewResponses, setPreviewResponses] = useState<Record<string, PreviewResponse>>({});
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [formsMessage, setFormsMessage] = useState('');
+  const [dimensions, setDimensions] = useState<PerformanceDimension[]>([]);
+  const [dimensionsError, setDimensionsError] = useState('');
+  const [isDimensionsOpen, setIsDimensionsOpen] = useState(false);
   const selectedQuestionIndex = draft.questions.findIndex((question) => question.id === selectedQuestionId);
   const selectedQuestion = selectedQuestionIndex >= 0 ? draft.questions[selectedQuestionIndex] : null;
   const selectedChoiceOptions = selectedQuestion ? normalizeChoiceOptions(selectedQuestion) : [];
@@ -159,6 +188,15 @@ export default function Forms() {
     if (query === '') return activeItems;
     return activeItems.filter((item) => item.name.toLowerCase().includes(query));
   }, [activeItems, activeSearch]);
+
+  useEffect(() => {
+    if (requesterUserId === null) return undefined;
+    const controller = new AbortController();
+    fetchPerformanceDimensions(requesterUserId, controller.signal)
+      .then((items) => { if (!controller.signal.aborted) { setDimensions(items); setDimensionsError(''); } })
+      .catch((error) => { if (!controller.signal.aborted) setDimensionsError(error instanceof Error ? error.message : 'Performance dimensions could not be loaded.'); });
+    return () => controller.abort();
+  }, [requesterUserId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -372,6 +410,19 @@ export default function Forms() {
 
   function updateChoiceOptions(questionId: string, options: ChoiceOption[]) {
     updateDraftQuestion(questionId, { options });
+  }
+
+  function updateDimension(questionId: string, dimensionId: number | null) {
+    const dimension = dimensions.find((item) => item.id === dimensionId) ?? null;
+    updateDraftQuestion(questionId, {
+      dimension_id: dimension?.id,
+      dimension: dimension === null ? null : { id: dimension.id, name: dimension.name },
+      scale_direction: 'higher_is_better',
+    });
+  }
+
+  function replaceDimension(saved: PerformanceDimension) {
+    setDimensions((current) => [saved, ...current.filter((item) => item.id !== saved.id)].sort((a, b) => Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name)));
   }
 
   function addChoiceOption(question: FormQuestion) {
@@ -957,6 +1008,22 @@ export default function Forms() {
                     )}
                   </div>
                 )}
+                {isScaleQuestion(selectedQuestion) && (
+                  <div className="form-field forms-editor-field">
+                    <label className="form-label" htmlFor="forms-question-dimension">Performance dimension</label>
+                    <select
+                      id="forms-question-dimension"
+                      className="form-control"
+                      value={selectedDimensionId(selectedQuestion) ?? ''}
+                      onChange={(event) => updateDimension(selectedQuestion.id, event.target.value === '' ? null : Number(event.target.value))}
+                    >
+                      <option value="">No dimension</option>
+                      {dimensions.filter((dimension) => dimension.is_active || dimension.id === selectedDimensionId(selectedQuestion)).map((dimension) => <option key={dimension.id} value={dimension.id}>{dimension.name}{dimension.is_active ? '' : ' (archived)'}</option>)}
+                    </select>
+                    <div className="forms-dimension-row"><p className="forms-editor-hint">Reports aggregate only explicitly configured scale questions with the same scale and direction.</p><button className="forms-editor-delete-link" type="button" onClick={() => setIsDimensionsOpen(true)}>Manage dimensions</button></div>
+                    {dimensionsError && <p className="forms-option-error" role="alert">{dimensionsError}</p>}
+                  </div>
+                )}
                 <label className="forms-editor-switch">
                   <span>Required question</span>
                   <input
@@ -985,6 +1052,7 @@ export default function Forms() {
           </aside>
         </section>
       </div>
+      {isDimensionsOpen && requesterUserId !== null && <PerformanceDimensionsModal requesterUserId={requesterUserId} dimensions={dimensions} onSaved={replaceDimension} onClose={() => setIsDimensionsOpen(false)} />}
     </AppLayout>
   );
 }
@@ -1083,6 +1151,55 @@ type QuestionnairePreviewProps = {
   onChange: Dispatch<SetStateAction<Record<string, PreviewResponse>>>;
   onClose: () => void;
 };
+
+function PerformanceDimensionsModal({ requesterUserId, dimensions, onSaved, onClose }: { requesterUserId: number; dimensions: PerformanceDimension[]; onSaved: (dimension: PerformanceDimension) => void; onClose: () => void }) {
+  const [query, setQuery] = useState('');
+  const [editing, setEditing] = useState<PerformanceDimension | null>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const filtered = dimensions.filter((dimension) => dimension.name.toLowerCase().includes(query.trim().toLowerCase()));
+
+  function startCreate() {
+    setEditing(null);
+    setName('');
+    setDescription('');
+    setMessage('');
+  }
+
+  function startEdit(dimension: PerformanceDimension) {
+    setEditing(dimension);
+    setName(dimension.name);
+    setDescription(dimension.description ?? '');
+    setMessage('');
+  }
+
+  async function save(isActive = editing?.is_active ?? true) {
+    if (name.trim().length < 2 || isSaving) {
+      setMessage('Enter a meaningful dimension name.');
+      return;
+    }
+    setIsSaving(true);
+    setMessage('');
+    try {
+      const saved = editing === null
+        ? await createPerformanceDimension(requesterUserId, { name, description })
+        : await updatePerformanceDimension(requesterUserId, editing, { name, description, isActive });
+      onSaved(saved);
+      setEditing(saved);
+      setName(saved.name);
+      setDescription(saved.description ?? '');
+      setMessage('Dimension saved.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Performance dimension could not be saved.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return <div className="forms-dimension-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="dimensions-modal-title"><div className="forms-dimension-modal card"><div className="forms-editor-card-head"><div><h3 id="dimensions-modal-title">Performance dimensions</h3><span>Manage the competencies used to organize evaluation results.</span></div><button className="forms-editor-delete-link" type="button" onClick={onClose}>Close</button></div><div className="forms-dimension-modal-grid"><div className="forms-dimension-list"><input className="form-control" value={query} placeholder="Search dimensions" onChange={(event) => setQuery(event.target.value)} /><button className="btn btn-secondary" type="button" onClick={startCreate}>Add dimension</button>{filtered.map((dimension) => <button className={editing?.id === dimension.id ? 'forms-dimension-item active' : 'forms-dimension-item'} type="button" key={dimension.id} onClick={() => startEdit(dimension)}><strong>{dimension.name}</strong><span>{dimension.is_active ? 'Active' : 'Archived'}</span></button>)}</div><div className="forms-dimension-editor"><div className="form-field forms-editor-field"><label className="form-label" htmlFor="dimension-name">Name</label><input id="dimension-name" className="form-control" value={name} onChange={(event) => setName(event.target.value)} /></div><div className="form-field forms-editor-field"><label className="form-label" htmlFor="dimension-description">Description</label><textarea id="dimension-description" className="form-control" value={description} onChange={(event) => setDescription(event.target.value)} /></div>{message && <p className={message.includes('saved') ? 'campaign-success-message' : 'forms-option-error'}>{message}</p>}<div className="forms-editor-actions"><button className="btn btn-primary" type="button" disabled={isSaving} onClick={() => save()}>{isSaving ? 'Saving...' : 'Save dimension'}</button>{editing && <button className="btn btn-secondary" type="button" disabled={isSaving} onClick={() => save(!editing.is_active)}>{editing.is_active ? 'Archive' : 'Reactivate'}</button>}</div></div></div></div></div>;
+}
 
 function QuestionnairePreview({ draft, responses, onChange, onClose }: QuestionnairePreviewProps) {
   const questionCountLabel = `${draft.questions.length} ${draft.questions.length === 1 ? 'question' : 'questions'}`;
