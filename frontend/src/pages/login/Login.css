@@ -47,9 +47,39 @@
 }
 
 .login-intro {
-  margin: 0 0 32px;
+  margin: 0 0 24px;
   color: var(--color-text-secondary);
   line-height: 1.55;
+}
+
+.login-auth0 {
+  display: grid;
+  gap: 12px;
+}
+
+.login-auth0 h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.login-auth0 p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.login-auth0 .login-error { color: var(--color-danger); }
+
+.login-auth0-action { min-height: 46px; }
+
+.login-divider {
+  margin: 32px 0 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .login-form {

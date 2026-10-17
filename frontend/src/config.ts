@@ -1,5 +1,9 @@
-const { VITE_API_URL } = import.meta.env;
+const { VITE_API_URL, VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID, VITE_AUTH0_AUDIENCE } = import.meta.env;
 
 const LOCAL_API_URL = 'http://localhost:8000';
 
 export const API_BASE_URL = VITE_API_URL || LOCAL_API_URL;
+export const AUTH0_DOMAIN = VITE_AUTH0_DOMAIN?.trim();
+export const AUTH0_CLIENT_ID = VITE_AUTH0_CLIENT_ID?.trim();
+export const AUTH0_AUDIENCE = VITE_AUTH0_AUDIENCE?.trim();
+export const AUTH0_CONFIGURED = Boolean(AUTH0_DOMAIN && AUTH0_CLIENT_ID && AUTH0_AUDIENCE);

@@ -1,6 +1,8 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
+import { Auth0Provider, useAuth0 } from '@auth0/auth0-react'
+import { useEffect } from 'react'
 import './styles/index.css'
 import Login from './pages/login/Login'
 import HrHome from './pages/hr-home/HrHome'
@@ -20,6 +22,18 @@ import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/E
 import SettingsPage from './pages/settings/SettingsPage'
 import './styles/shared.css'
 import { getDashboardPath, getSidebarUser, isHrOrManagerRole } from './pages/layout/sidebar-user'
+import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
+
+function Auth0SessionBoundary() {
+  const { isAuthenticated, isLoading } = useAuth0()
+
+  useEffect(() => {
+    if (isAuthenticated) sessionStorage.removeItem('loggedInUser')
+  }, [isAuthenticated])
+
+  if (isLoading) return <main className="login-page"><p className="login-content">Checking Auth0 session...</p></main>
+  return <AppRoutes auth0Authenticated={isAuthenticated} />
+}
 
 function RequireLoggedInUser({ children }: { children: React.ReactNode }) {
   const loggedInUser = sessionStorage.getItem('loggedInUser')
@@ -41,10 +55,17 @@ function RequireHrManager({ children }: { children: React.ReactNode }) {
   return isHrOrManagerRole(user.role_name) ? children : <Navigate to={getDashboardPath()} replace />
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
+function AppRoutes({ auth0Authenticated = false }: { auth0Authenticated?: boolean }) {
+  return (
     <BrowserRouter>
       <Routes>
+        {auth0Authenticated ? (
+          <>
+            <Route path="/" element={<Login />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </>
+        ) : (
+          <>
         <Route path="/" element={<Login />} />
         <Route path="/hr-home" element={<RequireLoggedInUser><RoleHome /></RequireLoggedInUser>} />
         <Route path="/my-evaluations" element={<RequireHrManager><MyEvaluationsPage /></RequireHrManager>} />
@@ -69,7 +90,24 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/reports/campaigns/:campaignId/employees/:employeeId" element={<RequireLoggedInUser><EmployeeReportDetailPage /></RequireLoggedInUser>} />
         <Route path="/settings" element={<RequireLoggedInUser><Navigate to="/settings/profile" replace /></RequireLoggedInUser>} />
         <Route path="/settings/:section" element={<RequireLoggedInUser><SettingsPage /></RequireLoggedInUser>} />
+          </>
+        )}
       </Routes>
     </BrowserRouter>
+  )
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    {AUTH0_CONFIGURED ? (
+      <Auth0Provider
+        domain={AUTH0_DOMAIN!}
+        clientId={AUTH0_CLIENT_ID!}
+        authorizationParams={{ redirect_uri: window.location.origin, audience: AUTH0_AUDIENCE }}
+        cacheLocation="memory"
+      >
+        <Auth0SessionBoundary />
+      </Auth0Provider>
+    ) : <AppRoutes />}
   </StrictMode>,
 )

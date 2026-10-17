@@ -1,11 +1,26 @@
-import { useRef, useState, type SubmitEvent } from 'react';
+import { useRef, useState, type ReactNode, type SubmitEvent } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 import { useNavigate } from 'react-router';
 import { Compass } from 'lucide-react';
 import { isHrOrManagerRole } from '../layout/sidebar-user';
-import { API_BASE_URL } from '../../config';
+import { API_BASE_URL, AUTH0_CONFIGURED } from '../../config';
+import Auth0SignIn from './Auth0SignIn';
 import './Login.css';
 
+function LoginWithAuth0() {
+  const { isAuthenticated } = useAuth0();
+  return <LoginContent showDevelopmentLogin={import.meta.env.DEV && !isAuthenticated} auth0Content={<Auth0SignIn />} />;
+}
+
 function Login() {
+  return AUTH0_CONFIGURED
+    ? <LoginWithAuth0 />
+    : <LoginContent showDevelopmentLogin={import.meta.env.DEV} auth0Content={
+        <p className="login-error" role="alert">Auth0 sign-in is unavailable. Set the VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID and VITE_AUTH0_AUDIENCE environment variables.</p>
+      } />;
+}
+
+function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentLogin: boolean; auth0Content: ReactNode }) {
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -14,7 +29,7 @@ function Login() {
 
   async function submitHandler(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending.current || !name.trim()) return;
+    if (!showDevelopmentLogin || pending.current || !name.trim()) return;
     pending.current = true;
     setIsSubmitting(true);
     setErrorMessage('');
@@ -50,6 +65,10 @@ function Login() {
           <h1>Welcome back</h1>
           <p className="login-intro">Sign in to your Compass workspace.</p>
 
+          {auth0Content}
+
+          {showDevelopmentLogin && <>
+          <div className="login-divider">Development identity selection</div>
           <form className="login-form" onSubmit={submitHandler} aria-busy={isSubmitting}>
             <div className="form-field">
               <label className="form-label" htmlFor="name">Your name</label>
@@ -77,11 +96,12 @@ function Login() {
             {errorMessage && <p className="login-error" id="login-error" role="alert">{errorMessage}</p>}
 
             <button className="btn btn-primary login-submit" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Signing in...' : 'Sign in'}
+              {isSubmitting ? 'Selecting identity...' : 'Select development identity'}
             </button>
           </form>
 
           <p className="login-support">This identity switcher is for local development, not production authentication.</p>
+          </>}
         </div>
       </section>
 
