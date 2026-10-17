@@ -77,8 +77,11 @@ def get_current_employee(user: models.User = Depends(get_current_user)) -> model
 
 
 @app.get("/auth/me", response_model=schemas.AuthMeResponse)
-def get_auth_me(user: models.User = Depends(get_current_user)) -> models.User:
-    return user
+def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    system_role_name = db.query(models.SystemRole.name).filter(models.SystemRole.id == user.system_role_id).scalar()
+    return {"id": user.id, "username": user.username, "email": user.email,
+            "system_role_id": user.system_role_id, "system_role_name": system_role_name,
+            "is_active": user.is_active, "employee": user.employee}
 
 
 @app.post("/users", response_model=schemas.UserResponse)

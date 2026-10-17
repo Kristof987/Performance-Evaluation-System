@@ -1,15 +1,28 @@
-import { useRef, useState, type ReactNode, type SubmitEvent } from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
-import { useNavigate } from 'react-router';
+import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { Compass } from 'lucide-react';
 import { isHrOrManagerRole } from '../layout/sidebar-user';
 import { API_BASE_URL, AUTH0_CONFIGURED } from '../../config';
 import Auth0SignIn from './Auth0SignIn';
+import { useAppAuth } from '../../auth/AppAuth';
 import './Login.css';
 
 function LoginWithAuth0() {
-  const { isAuthenticated } = useAuth0();
-  return <LoginContent showDevelopmentLogin={import.meta.env.DEV && !isAuthenticated} auth0Content={<Auth0SignIn />} />;
+  const { state } = useAppAuth();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (state.status !== 'authenticated' || state.mode !== 'auth0') return;
+    const saved = sessionStorage.getItem('auth0ReturnTo');
+    sessionStorage.removeItem('auth0ReturnTo');
+    const dashboard = isHrOrManagerRole(state.user.system_role_name) ? '/hr-home' : '/employee-home';
+    const target = saved?.startsWith('/') && !saved.startsWith('//') && !saved.startsWith('/\\') && saved !== '/'
+      ? saved : dashboard;
+    navigate(target, { replace: true });
+  }, [state, navigate]);
+  if (state.status === 'authenticated' && state.mode === 'auth0') return <main role="status">Opening your dashboard...</main>;
+  return <LoginContent showDevelopmentLogin={import.meta.env.DEV && (
+    state.status === 'unauthenticated' || state.mode === 'development'
+  )} auth0Content={<Auth0SignIn />} />;
 }
 
 function Login() {
@@ -26,6 +39,8 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
   const [errorMessage, setErrorMessage] = useState('');
   const pending = useRef(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const { selectDevelopmentUser } = useAppAuth();
 
   async function submitHandler(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -48,8 +63,10 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
       }
 
       const loggedInUser = await response.json();
-      sessionStorage.setItem('loggedInUser', JSON.stringify(loggedInUser));
-      navigate(isHrOrManagerRole(loggedInUser.role_name ?? null) ? '/hr-home' : '/employee-home', { replace: true });
+      if (!selectDevelopmentUser(loggedInUser)) return;
+      const from = (location.state as { from?: unknown } | null)?.from;
+      const landing = isHrOrManagerRole(loggedInUser.role_name ?? null) ? '/hr-home' : '/employee-home';
+      navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : landing, { replace: true });
     } catch {
       setErrorMessage('Could not connect to Compass. Please try again.');
     } finally {

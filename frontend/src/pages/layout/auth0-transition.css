@@ -1,0 +1,17 @@
+.auth0-transition-content {
+  width: 100%;
+  max-width: 900px;
+  padding: clamp(28px, 5vw, 64px);
+}
+
+.auth0-transition-content h1 { margin: 0 0 16px; }
+
+.auth0-transition-card {
+  margin-top: 32px;
+  padding: 28px;
+  line-height: 1.6;
+}
+
+.auth0-transition-card h2 { margin-top: 0; }
+
+.auth0-transition-card .btn { display: inline-flex; margin-top: 16px; }

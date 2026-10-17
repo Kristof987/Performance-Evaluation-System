@@ -191,6 +191,7 @@ class AuthMeResponse(BaseModel):
     username: str
     email: EmailStr
     system_role_id: int
+    system_role_name: str
     is_active: bool
     employee: AuthEmployeeResponse | None
 

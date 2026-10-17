@@ -20,6 +20,7 @@ import {
   getUserInitials,
   isHrOrManagerRole,
 } from './sidebar-user';
+import { useAppAuth } from '../../auth/AppAuth';
 
 export type SidebarPage =
   | 'hr-home'
@@ -63,21 +64,25 @@ export default function Sidebar({
   const hasDragged = useRef(false);
   const suppressNextClick = useRef(false);
 
-  const sidebarUser = getSidebarUser();
+  const { state, signOut } = useAppAuth();
+  const auth0User = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
+  const sidebarUser = auth0User ? null : getSidebarUser();
   const navigate = useNavigate();
-  const sidebarUserName =
-    sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser);
-  const dashboardPath = getDashboardPath();
+  const sidebarUserName = auth0User?.employee.full_name ?? (
+    sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser));
+  const dashboardPath = auth0User
+    ? isHrOrManagerRole(auth0User.system_role_name) ? '/hr-home' : '/employee-home'
+    : getDashboardPath();
   const isDashboardActive =
     activePage === 'hr-home' || activePage === 'employee-home';
-  const isHrOrManager = isHrOrManagerRole(sidebarUser?.role_name ?? null);
+  const isHrOrManager = isHrOrManagerRole(auth0User?.system_role_name ?? sidebarUser?.role_name ?? null);
 
   const currentWidth =
     dragWidth ?? (isSidebarCollapsed ? MIN_WIDTH : expandedWidth);
 
   function handleLogout() {
-    sessionStorage.removeItem('loggedInUser');
-    navigate('/', { replace: true });
+    signOut();
+    if (!auth0User) navigate('/', { replace: true });
   }
 
   function handleTogglePointerDown(event: PointerEvent<HTMLButtonElement>) {
@@ -273,7 +278,7 @@ export default function Sidebar({
         </div>
         <div className="user-info">
           <div className="user-name">{sidebarUserName}</div>
-          <div className="user-role">{sidebarUser?.role_name ?? 'Employee'}</div>
+          <div className="user-role">{auth0User?.system_role_name ?? sidebarUser?.role_name ?? 'Employee'}</div>
         </div>
         <button
           className="user-menu-toggle"

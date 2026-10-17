@@ -1,4 +1,4 @@
-type SidebarUser = {
+export type SidebarUser = {
   id: number;
   employee_id: number | null;
   username: string;

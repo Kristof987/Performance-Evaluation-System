@@ -1,8 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
-import { Auth0Provider, useAuth0 } from '@auth0/auth0-react'
-import { useEffect } from 'react'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router'
+import { Auth0Provider } from '@auth0/auth0-react'
 import './styles/index.css'
 import Login from './pages/login/Login'
 import HrHome from './pages/hr-home/HrHome'
@@ -21,77 +20,67 @@ import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/report
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import './styles/shared.css'
-import { getDashboardPath, getSidebarUser, isHrOrManagerRole } from './pages/layout/sidebar-user'
+import { getDashboardPath, isHrOrManagerRole } from './pages/layout/sidebar-user'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
-
-function Auth0SessionBoundary() {
-  const { isAuthenticated, isLoading } = useAuth0()
-
-  useEffect(() => {
-    if (isAuthenticated) sessionStorage.removeItem('loggedInUser')
-  }, [isAuthenticated])
-
-  if (isLoading) return <main className="login-page"><p className="login-content">Checking Auth0 session...</p></main>
-  return <AppRoutes auth0Authenticated={isAuthenticated} />
-}
-
-function RequireLoggedInUser({ children }: { children: React.ReactNode }) {
-  const loggedInUser = sessionStorage.getItem('loggedInUser')
-
-  if (!loggedInUser) {
-    return <Navigate to="/" replace />
-  }
-
-  return children
-}
+import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './auth/AppAuth'
+import { Auth0Dashboard, Auth0Unavailable } from './pages/layout/Auth0Transition'
 
 function RoleHome() {
   return getDashboardPath() === '/hr-home' ? <HrHome /> : <EmployeeHome />
 }
 
-function RequireHrManager({ children }: { children: React.ReactNode }) {
-  const user = getSidebarUser()
-  if (!user) return <Navigate to="/" replace />
-  return isHrOrManagerRole(user.role_name) ? children : <Navigate to={getDashboardPath()} replace />
+function ProtectedPage({ children, hrOnly = false, dashboard = false }: {
+  children: React.ReactNode;
+  hrOnly?: boolean;
+  dashboard?: boolean;
+}) {
+  const { state } = useAppAuth()
+  const location = useLocation()
+  if (state.status === 'loading') return <main role="status">Checking your PerfEval account...</main>
+  if (state.status !== 'authenticated') {
+    return <Navigate to="/" state={{ from: location.pathname + location.search + location.hash }} replace />
+  }
+  if (state.mode === 'auth0') {
+    const isHr = isHrOrManagerRole(state.user.system_role_name)
+    if (hrOnly && !isHr) return <Navigate to="/employee-home" replace />
+    if (dashboard && location.pathname === '/hr-home' && !isHr) return <Navigate to="/employee-home" replace />
+    if (dashboard && location.pathname === '/employee-home' && isHr) return <Navigate to="/hr-home" replace />
+    return dashboard ? <Auth0Dashboard /> : <Auth0Unavailable />
+  }
+  if (location.pathname === '/my-evaluations' && !isHrOrManagerRole(state.user.role_name)) {
+    return <Navigate to={getDashboardPath()} replace />
+  }
+  return children
 }
 
-function AppRoutes({ auth0Authenticated = false }: { auth0Authenticated?: boolean }) {
+function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
-        {auth0Authenticated ? (
-          <>
-            <Route path="/" element={<Login />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </>
-        ) : (
-          <>
         <Route path="/" element={<Login />} />
-        <Route path="/hr-home" element={<RequireLoggedInUser><RoleHome /></RequireLoggedInUser>} />
-        <Route path="/my-evaluations" element={<RequireHrManager><MyEvaluationsPage /></RequireHrManager>} />
-        <Route path="/employee-home" element={<RequireLoggedInUser><EmployeeHome /></RequireLoggedInUser>} />
-        <Route path="/employee-home/evaluations/:id" element={<RequireLoggedInUser><EmployeeQuestionnaire /></RequireLoggedInUser>} />
-        <Route path="/evaluations/:id" element={<RequireLoggedInUser><EmployeeQuestionnaire /></RequireLoggedInUser>} />
-        <Route path="/employee-review-preview" element={<RequireLoggedInUser><EmployeeReviewPreview /></RequireLoggedInUser>} />
-        <Route path="/results" element={<RequireLoggedInUser><EmployeeResults /></RequireLoggedInUser>} />
-        <Route path="/people" element={<People />} />
-        <Route path="/forms" element={<Forms />} />
-        <Route path="/campaigns" element={<Campaigns />} />
-        <Route path="/campaigns/:id" element={<CampaignDetails />} />
-        <Route path="/campaigns/:id/completion" element={<RequireLoggedInUser><CompletionStatus /></RequireLoggedInUser>} />
-        <Route path="/reports" element={<RequireLoggedInUser><ReportsIndexPage /></RequireLoggedInUser>} />
-        <Route path="/reports/campaigns/:campaignId" element={<RequireLoggedInUser><CampaignOverviewPage /></RequireLoggedInUser>} />
-        <Route path="/reports/campaigns/:campaignId/questions" element={<RequireLoggedInUser><QuestionAnalyticsPage /></RequireLoggedInUser>} />
-        <Route path="/reports/campaigns/:campaignId/groups" element={<RequireLoggedInUser><GroupsRolesPage /></RequireLoggedInUser>} />
-        <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={<RequireLoggedInUser><GroupDetailPage /></RequireLoggedInUser>} />
-        <Route path="/reports/campaigns/:campaignId/roles" element={<RequireLoggedInUser><GroupsRolesPage /></RequireLoggedInUser>} />
-        <Route path="/reports/campaigns/:campaignId/roles/:roleId" element={<RequireLoggedInUser><RoleDetailPage /></RequireLoggedInUser>} />
-        <Route path="/reports/campaigns/:campaignId/employees" element={<RequireLoggedInUser><EmployeeReportsPage /></RequireLoggedInUser>} />
-        <Route path="/reports/campaigns/:campaignId/employees/:employeeId" element={<RequireLoggedInUser><EmployeeReportDetailPage /></RequireLoggedInUser>} />
-        <Route path="/settings" element={<RequireLoggedInUser><Navigate to="/settings/profile" replace /></RequireLoggedInUser>} />
-        <Route path="/settings/:section" element={<RequireLoggedInUser><SettingsPage /></RequireLoggedInUser>} />
-          </>
-        )}
+        <Route path="/hr-home" element={<ProtectedPage dashboard><RoleHome /></ProtectedPage>} />
+        <Route path="/my-evaluations" element={<ProtectedPage hrOnly><MyEvaluationsPage /></ProtectedPage>} />
+        <Route path="/employee-home" element={<ProtectedPage dashboard><EmployeeHome /></ProtectedPage>} />
+        <Route path="/employee-home/evaluations/:id" element={<ProtectedPage><EmployeeQuestionnaire /></ProtectedPage>} />
+        <Route path="/evaluations/:id" element={<ProtectedPage><EmployeeQuestionnaire /></ProtectedPage>} />
+        <Route path="/employee-review-preview" element={<ProtectedPage><EmployeeReviewPreview /></ProtectedPage>} />
+        <Route path="/results" element={<ProtectedPage><EmployeeResults /></ProtectedPage>} />
+        <Route path="/people" element={<ProtectedPage hrOnly><People /></ProtectedPage>} />
+        <Route path="/forms" element={<ProtectedPage hrOnly><Forms /></ProtectedPage>} />
+        <Route path="/campaigns" element={<ProtectedPage hrOnly><Campaigns /></ProtectedPage>} />
+        <Route path="/campaigns/:id" element={<ProtectedPage hrOnly><CampaignDetails /></ProtectedPage>} />
+        <Route path="/campaigns/:id/completion" element={<ProtectedPage hrOnly><CompletionStatus /></ProtectedPage>} />
+        <Route path="/reports" element={<ProtectedPage hrOnly><ReportsIndexPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId" element={<ProtectedPage hrOnly><CampaignOverviewPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/questions" element={<ProtectedPage hrOnly><QuestionAnalyticsPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/groups" element={<ProtectedPage hrOnly><GroupsRolesPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={<ProtectedPage hrOnly><GroupDetailPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/roles" element={<ProtectedPage hrOnly><GroupsRolesPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/roles/:roleId" element={<ProtectedPage hrOnly><RoleDetailPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/employees" element={<ProtectedPage hrOnly><EmployeeReportsPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/employees/:employeeId" element={<ProtectedPage hrOnly><EmployeeReportDetailPage /></ProtectedPage>} />
+        <Route path="/settings" element={<ProtectedPage><Navigate to="/settings/profile" replace /></ProtectedPage>} />
+        <Route path="/settings/:section" element={<ProtectedPage><SettingsPage /></ProtectedPage>} />
       </Routes>
     </BrowserRouter>
   )
@@ -106,8 +95,8 @@ createRoot(document.getElementById('root')!).render(
         authorizationParams={{ redirect_uri: window.location.origin, audience: AUTH0_AUDIENCE }}
         cacheLocation="memory"
       >
-        <Auth0SessionBoundary />
+        <Auth0AppAuthProvider><AppRoutes /></Auth0AppAuthProvider>
       </Auth0Provider>
-    ) : <AppRoutes />}
+    ) : <DevelopmentAppAuthProvider><AppRoutes /></DevelopmentAppAuthProvider>}
   </StrictMode>,
 )
