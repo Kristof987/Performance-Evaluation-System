@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { fetchGroupReportDetail, fetchGroupsReport, fetchRoleReportDetail, fetchRolesReport } from './api/reports.api';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import SectionScoresChart from './components/SectionScoresChart';
-import QuestionAnalytics from './components/QuestionAnalytics';
 import ReportsLayout from './ReportsLayout';
 import type { GroupReportDetail, GroupsReport, RolePerspective, RoleReportDetail, RolesReport } from './types/reports.types';
 
@@ -45,45 +44,44 @@ export function GroupsRolesPage() {
 function GroupsRolesContent({ selectedCampaignId, validCampaignId, requesterUserId, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; requesterUserId: number | null; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
   const location = useLocation();
   const view = location.pathname.includes('/roles') ? 'roles' : 'groups';
+  const [groupData, setGroupData] = useState<GroupsReport | null>(null);
+  const [groupError, setGroupError] = useState('');
+  const [reloadGroups, setReloadGroups] = useState(0);
+  useEffect(() => {
+    if (!validCampaignId || requesterUserId === null || view !== 'groups') return undefined;
+    const controller = new AbortController();
+    setGroupData(null);
+    setGroupError('');
+    fetchGroupsReport(selectedCampaignId, requesterUserId, controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setGroupData(result); })
+      .catch((cause) => { if (!controller.signal.aborted) setGroupError(cause instanceof Error ? cause.message : 'Group reports could not be loaded.'); });
+    return () => controller.abort();
+  }, [selectedCampaignId, requesterUserId, reloadGroups, validCampaignId, view]);
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
   if (campaignsError) return <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={retryCampaigns}>Retry</button></div>;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
-  return <div className="reports-overview"><GroupsRolesTabs campaignId={selectedCampaignId} view={view} />{view === 'groups' ? <GroupsOverview campaignId={selectedCampaignId} requesterUserId={requesterUserId} /> : <RolesOverview campaignId={selectedCampaignId} requesterUserId={requesterUserId} />}</div>;
+  return <div className="reports-overview"><GroupsRolesTabs campaignId={selectedCampaignId} view={view} />{view === 'groups' ? groupData?.campaign.id === selectedCampaignId ? <GroupsOverview data={groupData} campaignId={selectedCampaignId} /> : <LoadingOrError error={groupError} retry={() => setReloadGroups((value) => value + 1)} /> : <RolesOverview campaignId={selectedCampaignId} requesterUserId={requesterUserId} />}</div>;
 }
 
-function GroupsOverview({ campaignId, requesterUserId }: { campaignId: number; requesterUserId: number | null }) {
-  const [data, setData] = useState<GroupsReport | null>(null);
-  const [error, setError] = useState('');
+function GroupsOverview({ campaignId, data }: { campaignId: number; data: GroupsReport }) {
   const [query, setQuery] = useState('');
-  const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    if (requesterUserId === null) return undefined;
-    const controller = new AbortController();
-    setData(null);
-    setError('');
-    fetchGroupsReport(campaignId, requesterUserId, controller.signal)
-      .then((result) => { if (!controller.signal.aborted) setData(result); })
-      .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Group reports could not be loaded.'); });
-    return () => controller.abort();
-  }, [campaignId, requesterUserId, reload]);
-
-  const groups = useMemo(() => (data?.groups ?? []).filter((group) => group.group_name.toLowerCase().includes(query.toLowerCase())).sort((a, b) => a.group_name.localeCompare(b.group_name)), [data, query]);
-  if (data === null || data.campaign.id !== campaignId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
+  const groups = useMemo(() => data.groups.filter((group) => group.group_name.toLowerCase().includes(query.toLowerCase())).sort((a, b) => a.group_name.localeCompare(b.group_name)), [data, query]);
 
   const hasCompleted = data.groups.some((group) => group.completed_evaluations > 0);
   const hasScores = data.groups.some((group) => group.average_score !== null);
+  const hasSuppressed = data.groups.some((group) => group.score_availability === 'suppressed');
 
   return <>
-    <ReportKpis items={[{ label: 'Groups in campaign', value: data.kpis.groups_in_campaign }, { label: 'Participating employees', value: data.kpis.participating_employees, context: 'Deduplicated across groups' }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Groups with reportable results', value: data.kpis.groups_with_reportable_results, context: 'Sufficient comparable data' }]} />
+    <ReportKpis items={[{ label: 'Groups in campaign', value: data.kpis.groups_in_campaign }, { label: 'Participating employees', value: data.kpis.participating_employees, context: 'Deduplicated across groups' }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Groups with reportable results', value: data.kpis.groups_with_reportable_results, context: 'Depends on privacy and eligible rating data' }]} />
     <section className="reports-card reports-table reports-wide-card">
       <div className="reports-section-heading reports-section-heading-row"><div><h2>Group comparison</h2><p>Assignment-attributed evaluations. Evaluations show completed / total.</p></div><input className="form-control reports-search" placeholder="Search groups" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
       {data.groups.length === 0 ? <ReportsEmptyState title="No groups assigned to this campaign." message="Assign company groups to this campaign before group analytics can be shown." />
         : groups.length === 0 ? <ReportsEmptyState title="No groups found." message="No campaign groups match the current search." />
         : <>
           {!hasCompleted && <ReportsEmptyState title="No completed evaluations yet." message="Group scores will appear when sufficient submitted results are available." />}
-          {hasCompleted && !hasScores && <ReportsEmptyState title="Scores are not available yet." message="Results are hidden until there is enough comparable rating data to report safely." />}
+          {hasCompleted && hasSuppressed && <ReportsEmptyState title="Some results are hidden to protect confidentiality." message="Submitted scores may be withheld by reporting privacy rules." />}
+          {hasCompleted && !hasScores && !hasSuppressed && <ReportsEmptyState title="No eligible rating data." message="Submitted evaluations do not yet contain reportable Section ratings." />}
           <div className="reports-table-row reports-table-head reports-groups-row"><span>Group</span><span>Employees</span><span title="Completed evaluations / assigned evaluations">Evaluations</span><span>Completion rate</span><span>Average score</span><span>Actions</span></div>
            {groups.map((group) => <div className="reports-table-row reports-groups-row" key={group.group_id}><strong>{group.group_name}</strong><span className="reports-number-cell">{group.employee_count}</span><span className="reports-number-cell">{group.completed_evaluations} / {group.total_evaluations}</span><span className="reports-number-cell">{formatPercent(group.completion_rate)}</span><span className="reports-number-cell" title={group.average_score_context}>{group.average_score === null && group.score_availability === 'suppressed' ? 'Suppressed' : formatScore(group.average_score)}</span><span className="reports-action-cell"><Link className="btn btn-secondary btn-small" to={`/reports/campaigns/${campaignId}/groups/${group.group_id}`}>Details</Link></span></div>)}
         </>}
@@ -152,7 +150,7 @@ function GroupDetailContent({ campaignId, groupId, requesterUserId }: { campaign
   }, [campaignId, groupId, requesterUserId, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.group.id !== groupId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-   return <div className="reports-overview"><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/groups`}>← Back to Groups & Roles</Link><header className="reports-detail-heading"><h2>{data.group.name}</h2><p>{data.campaign.name} · Group analysis</p>{data.group.description && <p>{data.group.description}</p>}</header><ReportKpis items={[{ label: 'Employees', value: data.kpis.employees }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Completion rate', value: formatPercent(data.kpis.completion_rate) }, { label: 'Reportable sections', value: data.kpis.reportable_sections, context: `Overall peer score: ${data.kpis.overall_peer_score === null ? 'Unavailable' : `${formatScore(data.kpis.overall_peer_score)} / 5`}` }]} /><div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><QuestionAnalytics campaignId={campaignId} requesterUserId={requesterUserId} scope={{ group_id: groupId }} /><SimpleTable title="Roles in this group" emptyTitle="No role coverage yet." emptyMessage="No employees with company roles are available for this group." columns={['Company role', 'Employees', 'Completed received', 'Reportable average']} rows={data.roles.map((role) => [role.role_name, role.employee_count, role.completed_evaluations_received, reportableScore(role.average_score, role.score_availability)])} /><SimpleTable title="Group employee coverage" emptyTitle="No employee coverage available." emptyMessage="This group has no campaign participants to summarize." columns={['Employee', 'Role', 'Reviews received', 'Self-evaluation', 'Feedback availability']} rows={data.employees.map((employee) => [employee.employee_name, employee.role_name, employee.reviews_received, employee.completed_self_evaluation ? 'Completed' : 'Not completed', employee.feedback_availability])} /></div>;
+   return <div className="reports-overview"><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/groups`}>← Back to Groups & Roles</Link><header className="reports-detail-heading"><h2>{data.group.name}</h2><p>{data.campaign.name} · Group analysis</p>{data.group.description && <p>{data.group.description}</p>}</header><ReportKpis items={[{ label: 'Employees', value: data.kpis.employees }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Completion rate', value: formatPercent(data.kpis.completion_rate) }, { label: 'Reportable sections', value: data.kpis.reportable_sections, context: `Overall peer score: ${data.kpis.overall_peer_score === null ? 'Unavailable' : `${formatScore(data.kpis.overall_peer_score)} / 5`}` }]} /><div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?group_id=${groupId}`}>Explore group questions →</Link><SimpleTable title="Roles in this group" emptyTitle="No role coverage yet." emptyMessage="No employees with company roles are available for this group." columns={['Company role', 'Employees', 'Completed received', 'Reportable average']} rows={data.roles.map((role) => [role.role_name, role.employee_count, role.completed_evaluations_received, reportableScore(role.average_score, role.score_availability)])} /><SimpleTable title="Group employee coverage" emptyTitle="No employee coverage available." emptyMessage="This group has no campaign participants to summarize." columns={['Employee', 'Role', 'Reviews received', 'Self-evaluation', 'Feedback availability']} rows={data.employees.map((employee) => [employee.employee_name, employee.role_name, employee.reviews_received, employee.completed_self_evaluation ? 'Completed' : 'Not completed', employee.feedback_availability])} /></div>;
 }
 
 export function RoleDetailPage() {
@@ -182,7 +180,7 @@ function RoleDetailContent({ campaignId, roleId, requesterUserId, perspective }:
   }, [campaignId, perspective, requesterUserId, roleId, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.role.id !== roleId || data.perspective !== perspective) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-   return <div className="reports-overview"><button className="campaign-details-link link-button" type="button" onClick={() => navigate(`/reports/campaigns/${campaignId}/roles?perspective=${perspective}`)}>← Back to Roles</button><header className="reports-detail-heading"><h2>{data.role.name}</h2><p>{data.campaign.name} · {perspective === 'evaluator' ? 'Evaluator role' : 'Evaluated role'}</p></header><ReportKpis items={[{ label: perspective === 'evaluator' ? 'Assigned evaluators' : 'Employees to evaluate', value: data.kpis.employees }, { label: perspective === 'evaluator' ? 'Completed reviews submitted' : 'Completed reviews received', value: data.kpis.completed_evaluations }, { label: 'Reportable sections', value: data.kpis.reportable_sections }, { label: perspective === 'evaluator' ? 'Average rating given' : 'Overall section score', value: formatScore(data.kpis.overall_score) }]} /><div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><QuestionAnalytics campaignId={campaignId} requesterUserId={requesterUserId} scope={{ role_id: roleId, perspective }} /><SimpleTable title="Group breakdown" emptyTitle="No group breakdown available." emptyMessage="This role has no campaign group coverage for the selected perspective." columns={['Group', 'Employees', 'Completed evaluations', 'Reportable average']} rows={data.groups.map((group) => [group.group_name, group.employee_count, group.completed_evaluations, reportableScore(group.average_score, group.score_availability)])} /><section className="reports-card"><div className="reports-section-heading"><h2>Evaluation coverage</h2><p>{data.coverage.completed_evaluations} of {data.coverage.assigned_evaluations} role-scoped evaluations completed.</p></div></section></div>;
+   return <div className="reports-overview"><button className="campaign-details-link link-button" type="button" onClick={() => navigate(`/reports/campaigns/${campaignId}/roles?perspective=${perspective}`)}>← Back to Roles</button><header className="reports-detail-heading"><h2>{data.role.name}</h2><p>{data.campaign.name} · {perspective === 'evaluator' ? 'Evaluator role' : 'Evaluated role'}</p></header><ReportKpis items={[{ label: perspective === 'evaluator' ? 'Assigned evaluators' : 'Employees to evaluate', value: data.kpis.employees }, { label: perspective === 'evaluator' ? 'Completed reviews submitted' : 'Completed reviews received', value: data.kpis.completed_evaluations }, { label: 'Reportable sections', value: data.kpis.reportable_sections }, { label: perspective === 'evaluator' ? 'Average rating given' : 'Overall section score', value: formatScore(data.kpis.overall_score) }]} /><div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?role_id=${roleId}&perspective=${perspective}`}>Explore role questions →</Link><SimpleTable title="Group breakdown" emptyTitle="No group breakdown available." emptyMessage="This role has no campaign group coverage for the selected perspective." columns={['Group', 'Employees', 'Completed evaluations', 'Reportable average']} rows={data.groups.map((group) => [group.group_name, group.employee_count, group.completed_evaluations, reportableScore(group.average_score, group.score_availability)])} /><section className="reports-card"><div className="reports-section-heading"><h2>Evaluation coverage</h2><p>{data.coverage.completed_evaluations} of {data.coverage.assigned_evaluations} role-scoped evaluations completed.</p></div></section></div>;
 }
 
 function SimpleTable({ title, emptyTitle, emptyMessage, columns, rows }: { title: string; emptyTitle: string; emptyMessage: string; columns: string[]; rows: Array<Array<string | number>> }) {

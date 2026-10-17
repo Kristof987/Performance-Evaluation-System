@@ -1,6 +1,6 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import ReportsEmptyState from './components/ReportsEmptyState';
-import QuestionAnalytics from './components/QuestionAnalytics';
 import type { EmployeeReportDetail } from './types/reports.types';
 
 function formatScore(value: number | null) {
@@ -37,7 +37,7 @@ function selfPeerMessage(data: EmployeeReportDetail) {
   return 'No reportable sections are available for comparison.';
 }
 
-export default function EmployeeReportDetailView({ data, requesterUserId, onBack }: { data: EmployeeReportDetail; requesterUserId: number | null; onBack: () => void }) {
+export default function EmployeeReportDetailView({ data, onBack }: { data: EmployeeReportDetail; onBack: () => void }) {
   const [historyKey, setHistoryKey] = useState<string | null>(null);
   const historyOptions = data.history.map((series) => ({ series, key: series.section_id === null ? 'overall' : `section-${series.section_id}` }));
   const selectedHistory = historyOptions.find((option) => option.key === historyKey) ?? historyOptions.find((option) => option.key === 'overall') ?? historyOptions[0];
@@ -72,7 +72,7 @@ export default function EmployeeReportDetailView({ data, requesterUserId, onBack
         <strong className="reports-bar-value">{availabilityLabel(section.peer_availability, section.peer_score)}</strong>
       </div>)}</div>}
     </section>
-    <QuestionAnalytics campaignId={data.campaign.id} requesterUserId={requesterUserId} scope={{ employee_id: data.employee.id }} />
+    <Link className="campaign-details-link" to={`/reports/campaigns/${data.campaign.id}/questions?employee_id=${data.employee.id}`}>Explore employee questions →</Link>
     <section className="reports-card">
       <div className="reports-section-heading"><h2>Self-evaluation vs peer feedback</h2><p>Comparisons require submitted self-evaluation and reportable peer feedback in the same section.</p></div>
       {message ? <ReportsEmptyState title={message} message="Comparison is unavailable for the current evaluation data." /> : <div className="reports-simple-table"><table><thead><tr><th>Section</th><th>Peer feedback</th><th>Self-evaluation</th><th>Difference</th><th>Interpretation</th></tr></thead><tbody>{data.self_peer_comparison.map((item) => <tr key={item.section_id}><td>{item.section_name}</td><td>{formatScore(item.peer_average)}</td><td>{formatScore(item.self_average)}</td><td>{item.difference.toFixed(2)}</td><td>{item.interpretation}</td></tr>)}</tbody></table></div>}

@@ -14,6 +14,7 @@ import Forms from './pages/forms/Forms'
 import { CampaignDetails, Campaigns } from './pages/campaigns/Campaigns'
 import CompletionStatus from './pages/completion-status/CompletionStatus'
 import CampaignOverviewPage, { ReportsIndexPage } from './pages/reports/CampaignOverviewPage'
+import QuestionAnalyticsPage from './pages/reports/QuestionAnalyticsPage'
 import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/reports/GroupsRolesPage'
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
 import SettingsPage from './pages/settings/SettingsPage'
@@ -59,6 +60,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/campaigns/:id/completion" element={<RequireLoggedInUser><CompletionStatus /></RequireLoggedInUser>} />
         <Route path="/reports" element={<RequireLoggedInUser><ReportsIndexPage /></RequireLoggedInUser>} />
         <Route path="/reports/campaigns/:campaignId" element={<RequireLoggedInUser><CampaignOverviewPage /></RequireLoggedInUser>} />
+        <Route path="/reports/campaigns/:campaignId/questions" element={<RequireLoggedInUser><QuestionAnalyticsPage /></RequireLoggedInUser>} />
         <Route path="/reports/campaigns/:campaignId/groups" element={<RequireLoggedInUser><GroupsRolesPage /></RequireLoggedInUser>} />
         <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={<RequireLoggedInUser><GroupDetailPage /></RequireLoggedInUser>} />
         <Route path="/reports/campaigns/:campaignId/roles" element={<RequireLoggedInUser><GroupsRolesPage /></RequireLoggedInUser>} />

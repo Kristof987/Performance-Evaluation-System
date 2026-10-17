@@ -27,8 +27,8 @@ export function fetchCampaignReportOverview(campaignId: number, requesterUserId:
   );
 }
 
-export function fetchReportQuestions(campaignId: number, requesterUserId: number, scope: { group_id?: number; role_id?: number; employee_id?: number; perspective?: RolePerspective }, signal: AbortSignal) {
-  const params = new URLSearchParams({ requester_user_id: String(requesterUserId) });
+export function fetchReportQuestions(campaignId: number, requesterUserId: number, scope: { group_id?: number; role_id?: number; employee_id?: number; perspective?: RolePerspective }, evaluationType: 'peer' | 'self', signal: AbortSignal) {
+  const params = new URLSearchParams({ requester_user_id: String(requesterUserId), evaluation_type: evaluationType });
   for (const [key, value] of Object.entries(scope)) {
     if (value !== undefined) params.set(key, String(value));
   }

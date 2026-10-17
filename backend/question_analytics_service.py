@@ -198,7 +198,7 @@ def _released(metadata: dict, items: list[Observation], availability: str) -> di
 
 def build_question_report(campaign_id: int, requester_user_id: int, db: Session, *, group_id: int | None = None,
                           role_id: int | None = None, employee_id: int | None = None,
-                          perspective: str = "evaluatee") -> dict:
+                          perspective: str = "evaluatee", evaluation_type: str = "peer") -> dict:
     reporting_service.require_reports_access(campaign_id, requester_user_id, db)
     if group_id is not None and group_id not in {group.id for group in reporting_service.assigned_campaign_groups(campaign_id, db)}:
         raise HTTPException(status_code=404, detail="Group report not found")
@@ -214,22 +214,27 @@ def build_question_report(campaign_id: int, requester_user_id: int, db: Session,
     questions = []
     minimum = reporting_service.MIN_AGGREGATE_EVALUATEES
     for key, metadata in definitions.items():
+        population = [item for item in by_question[key]
+                      if (item.evaluator_id == item.evaluatee_id) == (evaluation_type == "self")]
+        if not population:
+            continue
         if not any((group_id is None or issued_group == group_id)
                    and (role_id is None or (evaluator_role if perspective == "evaluator" else issued_role) == role_id)
                    and (employee_id is None or issued_employee == employee_id)
                    for issued_group, issued_role, evaluator_role, issued_employee in issued_scopes[key]):
             continue
-        population = [item for item in by_question[key] if item.evaluator_id != item.evaluatee_id]
         if employee_id is not None:
-            employee = [item for item in by_question[key] if item.evaluatee_id == employee_id]
-            peer = [item for item in employee if item.evaluator_id != employee_id]
-            self_items = [item for item in employee if item.evaluator_id == employee_id]
-            peer_status = "no_data" if not peer else "available" if len({item.evaluator_id for item in peer}) >= reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS else "suppressed"
-            questions.append({**{field: value for field, value in metadata.items() if field != "options"}, "peer": _released(metadata, peer, peer_status),
-                              "self": _released(metadata, self_items, "available" if self_items else "no_data")})
+            employee_items = [item for item in population if item.evaluatee_id == employee_id]
+            if not employee_items:
+                continue
+            available = (evaluation_type == "self" or
+                         len({item.evaluator_id for item in employee_items}) >= reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS)
+            questions.append(_released(metadata, employee_items, "available" if available else "suppressed"))
             continue
         cohort = [item for item in population if (group_id is None or item.group_id == group_id)
                   and (role_id is None or (item.evaluator_role_id if perspective == "evaluator" else item.role_id) == role_id)]
+        if not cohort:
+            continue
         contributors = {item.evaluatee_id for item in cohort}
         reviewers = {item.evaluator_id for item in cohort}
         cohort_assignments = {item.assignment_id for item in cohort}
@@ -259,6 +264,6 @@ def build_question_report(campaign_id: int, requester_user_id: int, db: Session,
             availability = "suppressed"
         questions.append(_released(metadata, cohort, availability))
     questions.sort(key=lambda item: (item["section_id"] is None, item["section_name"].casefold(), item["text"].casefold(), item["key"]))
-    return {"questions": questions, "notes": {"weighting": "Each valid submitted answer is one observation; self responses are separate from peer distributions.",
+    return {"evaluation_type": evaluation_type, "questions": questions, "notes": {"weighting": "Each valid submitted answer is one observation; self responses are separate from peer distributions.",
             "rating_bins": "Exact issued integer ratings are shown; normalized averages use 1 + 4 * (answer - minimum) / (maximum - minimum).",
             "privacy": "Peer counts and distributions are withheld when contributor or complementary cohort thresholds are not met."}}

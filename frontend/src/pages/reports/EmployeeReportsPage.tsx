@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { fetchEmployeeReportDetail, fetchEmployeeReportsOverview } from './api/reports.api';
 import EmployeeReportDetailView from './EmployeeReportDetailView';
+import EmployeeOverview from './components/EmployeeOverview';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsLayout from './ReportsLayout';
 import type { EmployeeReportDetail, EmployeeReportRow, EmployeeReportsOverview } from './types/reports.types';
@@ -14,10 +15,6 @@ function formatScore(value: number | null) {
 function LoadingOrError({ error, retry }: { error: string; retry: () => void }) {
   if (error) return <div className="reports-state reports-error" role="alert"><span>{error}</span><button className="btn btn-secondary" type="button" onClick={retry}>Retry</button></div>;
   return <div className="reports-state">Loading employee analytics...</div>;
-}
-
-function ReportKpis({ items }: { items: Array<{ label: string; value: string | number; context?: string }> }) {
-  return <section className="reports-kpi-panel reports-kpi-panel-compact">{items.map((item, index) => <div className={index === 0 ? 'reports-kpi-segment reports-kpi-primary' : 'reports-kpi-segment'} key={item.label}><span>{item.label}</span><strong>{item.value}</strong>{item.context && <small>{item.context}</small>}</div>)}</section>;
 }
 
 export function EmployeeReportsPage() {
@@ -68,12 +65,12 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, requester
   if (data === null || data.campaign.id !== selectedCampaignId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
 
   return <div className="reports-overview">
-    <ReportKpis items={[{ label: 'Participating employees', value: data.kpis.participating_employees }, { label: 'Employees with peer feedback', value: data.kpis.employees_with_peer_feedback }, { label: 'Awaiting peer feedback', value: data.kpis.awaiting_peer_feedback }, { label: 'Self-evaluations completed', value: `${data.kpis.completed_self_evaluations}/${data.kpis.assigned_self_evaluations}`, context: 'assigned' }]} />
+    <EmployeeOverview employees={{ participating_employees: data.kpis.participating_employees, employees_with_completed_peer_feedback: data.kpis.employees_with_peer_feedback, employees_awaiting_peer_feedback: data.kpis.awaiting_peer_feedback, configured_self_evaluations: data.kpis.assigned_self_evaluations, completed_self_evaluations: data.kpis.completed_self_evaluations }} />
     <section className="reports-card reports-table reports-wide-card">
       <div className="reports-section-heading"><h2>Employees</h2><p>Coverage and reportable summaries for employees in this campaign.</p><div className="reports-filter-row"><input className="form-control reports-search" placeholder="Search employees" aria-label="Search employees" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="form-control" value={role} onChange={(event) => setRole(event.target.value)} aria-label="Filter by company role"><option value="all">All roles</option>{roleOptions.map((item) => <option value={item} key={item}>{item}</option>)}</select><select className="form-control" value={group} onChange={(event) => setGroup(event.target.value)} aria-label="Filter by group"><option value="all">All groups</option>{groupOptions.map((item) => <option value={item} key={item}>{item}</option>)}</select><select className="form-control" value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort employees"><option value="name">Sort by name</option><option value="feedback">Sort by feedback completion</option></select></div></div>
       {data.employees.length === 0 ? <ReportsEmptyState title="No employees in this campaign." message="Employee analytics will appear after people are assigned to campaign groups or evaluations." />
         : employees.length === 0 ? <ReportsEmptyState title="No employees match the filters." message="Adjust search, role or group filters to view employees." />
-          : <><div className="reports-table-row reports-table-head reports-employees-row"><span>Employee</span><span>Company role</span><span>Groups</span><span>Peer reviews completed</span><span>Self-evaluation</span><span>Summary</span><span>Actions</span></div>{employees.map((employee) => <EmployeeRow employee={employee} campaignId={selectedCampaignId} key={employee.employee_id} />)}</>}
+          : <><div className="reports-table-row reports-table-head reports-employees-row"><span>Employee</span><span>Company role</span><span>Groups</span><span>Peer reviews completed</span><span>Self-evaluation</span><span>Peer score</span><span>Actions</span></div>{employees.map((employee) => <EmployeeRow employee={employee} campaignId={selectedCampaignId} key={employee.employee_id} />)}</>}
     </section>
   </div>;
 }
@@ -81,7 +78,7 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, requester
 function EmployeeRow({ employee, campaignId }: { employee: EmployeeReportRow; campaignId: number }) {
   const { availability, overall_peer_score, reportable_sections } = employee.performance_summary;
   const summary = availability === 'suppressed' ? 'Insufficient feedback' : availability === 'available' && overall_peer_score !== null ? formatScore(overall_peer_score) : 'Not yet available';
-  return <div className="reports-table-row reports-employees-row"><div className="reports-person-cell"><strong>{employee.employee_name}</strong><small>{employee.email}</small></div><span>{employee.company_role}</span><span className="reports-groups-cell" title={employee.groups.join(', ')}>{employee.groups.length > 0 ? employee.groups.join(', ') : '—'}</span><span className="reports-number-cell" aria-label={`${employee.peer_completed} of ${employee.peer_assigned} incoming peer reviews completed`}>{employee.peer_completed} / {employee.peer_assigned}</span><span>{employee.self_evaluation.status}</span><span className="reports-number-cell" title={availability === 'suppressed' ? 'Individual score is withheld to protect confidentiality.' : undefined}>{summary}{availability === 'available' && <small>{reportable_sections} {reportable_sections === 1 ? 'section' : 'sections'}</small>}</span><span className="reports-action-cell"><Link className="btn btn-secondary btn-small" to={`/reports/campaigns/${campaignId}/employees/${employee.employee_id}`}>View details</Link></span></div>;
+  return <div className="reports-table-row reports-employees-row"><div className="reports-person-cell"><strong>{employee.employee_name}</strong><small>{employee.email}</small></div><span>{employee.company_role}</span><span className="reports-groups-cell" title={employee.groups.join(', ')}>{employee.groups.length > 0 ? employee.groups.join(', ') : '—'}</span><span className="reports-number-cell" aria-label={`${employee.peer_completed} of ${employee.peer_assigned} incoming peer reviews completed`}>{employee.peer_completed} / {employee.peer_assigned}</span><span>{employee.self_evaluation.status}</span><span className="reports-number-cell reports-peer-score" title={availability === 'suppressed' ? 'Individual score is withheld to protect confidentiality.' : undefined}><strong>{summary}</strong>{availability === 'available' && <small>{reportable_sections} {reportable_sections === 1 ? 'section' : 'sections'}</small>}</span><span className="reports-action-cell"><Link className="btn btn-secondary btn-small" to={`/reports/campaigns/${campaignId}/employees/${employee.employee_id}`}>View details</Link></span></div>;
 }
 
 export function EmployeeReportDetailPage() {
@@ -109,5 +106,5 @@ function EmployeeReportDetailContent({ campaignId, employeeId, requesterUserId }
   }, [campaignId, employeeId, requesterUserId, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.employee.id !== employeeId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-  return <EmployeeReportDetailView data={data} requesterUserId={requesterUserId} onBack={() => navigate(`/reports/campaigns/${campaignId}/employees`)} />;
+  return <EmployeeReportDetailView data={data} onBack={() => navigate(`/reports/campaigns/${campaignId}/employees`)} />;
 }

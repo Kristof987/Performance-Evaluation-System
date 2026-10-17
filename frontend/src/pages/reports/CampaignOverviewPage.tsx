@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { fetchCampaignReportOverview } from './api/reports.api';
-import EmployeeOverview from './components/EmployeeOverview';
-import GroupOverviewTable from './components/GroupOverviewTable';
 import SectionScoresChart from './components/SectionScoresChart';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsKpiPanel from './components/ReportsKpiPanel';
-import QuestionAnalytics from './components/QuestionAnalytics';
 import ReportsLayout from './ReportsLayout';
 import type { CampaignReportOverview } from './types/reports.types';
 
@@ -74,5 +71,5 @@ function OverviewContent({
   const noAssignments = data.kpis.total_evaluations === 0;
   const noCompleted = data.kpis.total_evaluations > 0 && data.kpis.completed_evaluations === 0;
 
-  return <div className="reports-overview"><ReportsKpiPanel kpis={data.kpis} />{noAssignments && <ReportsEmptyState title="No evaluations have been assigned to this campaign yet." message="Analytics will appear after evaluation assignments are generated." />}{noCompleted && <ReportsEmptyState title="No completed evaluations yet." message="Reports use submitted evaluations only; drafts and not-started assignments are excluded from results." />}<div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><QuestionAnalytics campaignId={selectedCampaignId} requesterUserId={requesterUserId} /><GroupOverviewTable groups={data.groups} /><EmployeeOverview employees={data.employees} /></div>;
+  return <div className="reports-overview"><ReportsKpiPanel kpis={data.kpis} />{noAssignments && <ReportsEmptyState title="No evaluations have been assigned to this campaign yet." message="Analytics will appear after evaluation assignments are generated." />}{noCompleted && <ReportsEmptyState title="No completed evaluations yet." message="Reports use submitted evaluations only; drafts and not-started assignments are excluded from results." />}<div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div></div>;
 }

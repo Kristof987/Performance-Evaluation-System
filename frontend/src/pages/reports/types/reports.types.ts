@@ -26,11 +26,9 @@ export type ReportQuestion = QuestionResult & {
   required_modes: Array<'required' | 'optional'>;
   scale_min: number | null;
   scale_max: number | null;
-  peer: QuestionResult | null;
-  self: QuestionResult | null;
 };
 
-export type ReportQuestions = { questions: ReportQuestion[]; notes: Record<string, string> };
+export type ReportQuestions = { evaluation_type: 'peer' | 'self'; questions: ReportQuestion[]; notes: Record<string, string> };
 
 export type ReportKpiSummary = {
   total_evaluations: number;

@@ -2,6 +2,7 @@ from copy import deepcopy
 from datetime import date
 import os
 from uuid import uuid4
+from typing import Literal
 
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -1454,6 +1455,7 @@ def get_campaign_report_questions(
     role_id: int | None = Query(default=None),
     employee_id: int | None = Query(default=None),
     perspective: str = Query(default="evaluatee"),
+    evaluation_type: Literal["peer", "self"] = Query(default="peer"),
     db: Session = Depends(get_db),
 ):
     if sum(value is not None for value in (group_id, role_id, employee_id)) > 1:
@@ -1461,7 +1463,8 @@ def get_campaign_report_questions(
     if perspective not in {"evaluatee", "evaluator"} or (perspective == "evaluator" and role_id is None):
         raise HTTPException(status_code=400, detail="Invalid question analytics perspective")
     return question_analytics_service.build_question_report(
-        campaign_id, requester_user_id, db, group_id=group_id, role_id=role_id, employee_id=employee_id, perspective=perspective,
+        campaign_id, requester_user_id, db, group_id=group_id, role_id=role_id, employee_id=employee_id,
+        perspective=perspective, evaluation_type=evaluation_type,
     )
 
 

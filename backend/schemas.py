@@ -560,28 +560,9 @@ class ReportQuestionResult(BaseModel):
     distribution: list[ReportQuestionBucket] | None = None
 
 
-class ReportQuestionItem(BaseModel):
-    key: str
-    text: str
-    type: str
-    category: Literal["rating", "choice", "text"]
-    section_id: int | None
-    section_name: str
-    required: bool
-    required_modes: list[Literal["required", "optional"]]
-    scale_min: int | None = None
-    scale_max: int | None = None
-    availability: Literal["available", "no_data", "suppressed"] | None = None
-    response_count: int | None = None
-    average_normalized: float | None = None
-    distribution_kind: Literal["original", "options"] | None = None
-    distribution: list[ReportQuestionBucket] | None = None
-    peer: ReportQuestionResult | None = None
-    self: ReportQuestionResult | None = None
-
-
 class ReportQuestionsResponse(BaseModel):
-    questions: list[ReportQuestionItem]
+    evaluation_type: Literal["peer", "self"]
+    questions: list[ReportQuestionResult]
     notes: dict[str, str]
 
 
@@ -766,4 +747,3 @@ class FormTemplateResponse(BaseModel):
 class FormValidationResponse(BaseModel):
     valid_for_issuance: bool
     errors: list[str] = Field(default_factory=list)
-
