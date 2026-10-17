@@ -11,24 +11,30 @@ export type FormQuestion = {
   type: string;
   required: boolean;
   helpText: string;
-  dimension_id?: number;
-  dimension?: { id: number | string; name: string } | null;
   scale_direction?: 'higher_is_better';
+  scale_min?: number;
+  scale_max?: number;
+  min_label?: string;
+  max_label?: string;
   options?: ChoiceOption[] | string[];
   [key: string]: unknown;
 };
+
+export type FormBlock =
+  | { type: 'section'; section_id: number; questions: FormQuestion[] }
+  | { type: 'question'; question: FormQuestion };
 
 export type ReviewForm = {
   id: number;
   name: string;
   description: string;
-  questions: FormQuestion[];
+  questions: FormBlock[];
 };
 
 export type ReviewFormValues = {
   name: string;
   description: string;
-  questions: FormQuestion[];
+  questions: FormBlock[];
   source_template_id?: number;
 };
 
@@ -64,13 +70,24 @@ function mapQuestion(question: unknown, index: number): FormQuestion {
   };
 }
 
+function mapBlock(block: unknown, index: number): FormBlock {
+  if (block && typeof block === 'object' && 'type' in block && block.type === 'section' && 'section_id' in block && typeof block.section_id === 'number') {
+    const nested = 'questions' in block && Array.isArray(block.questions) ? block.questions : [];
+    return { type: 'section', section_id: block.section_id, questions: nested.map(mapQuestion) };
+  }
+  if (block && typeof block === 'object' && 'type' in block && block.type === 'question' && 'question' in block) {
+    return { type: 'question', question: mapQuestion(block.question, index) };
+  }
+  return { type: 'question', question: mapQuestion(block, index) };
+}
+
 function mapForm(form: FormResponse): ReviewForm {
   const questions = Array.isArray(form.questions) ? form.questions : [];
   return {
     id: form.id,
     name: form.name,
     description: form.description || '',
-    questions: questions.map(mapQuestion),
+    questions: questions.map(mapBlock),
   };
 }
 

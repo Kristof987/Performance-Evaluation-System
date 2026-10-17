@@ -83,6 +83,7 @@ function mapCampaignEvaluationRules(
         evaluateeRoleName: rule.evaluatee_role_name,
         formId: rule.form_id,
         ruleId: rule.rule_id,
+        locked: rule.locked ?? false,
       })),
     })),
   };
@@ -92,6 +93,7 @@ function mapCampaignEvaluationMatrix(
   response: CampaignEvaluationMatrixResponse,
 ): CampaignEvaluationMatrix {
   return {
+    issuanceErrors: response.issuance_errors ?? [],
     groups: response.groups.map((group) => ({
       groupId: group.group_id,
       groupName: group.group_name,
@@ -100,12 +102,14 @@ function mapCampaignEvaluationMatrix(
         name: employee.name,
         roleId: employee.role_id,
         roleName: employee.role_name,
+        active: employee.active ?? true,
       })),
       assignments: group.assignments.map((assignment) => ({
         evaluatorId: assignment.evaluator_id,
         evaluateeId: assignment.evaluatee_id,
         formId: assignment.form_id,
         filledFormId: assignment.filled_form_id,
+        issued: assignment.issued,
         isCompleted: assignment.is_completed,
         statusName: assignment.status_name,
         hasAnswers: assignment.has_answers,

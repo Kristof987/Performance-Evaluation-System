@@ -71,7 +71,7 @@ function getMatrixAssignmentMap(matrix: CampaignEvaluationMatrix) {
   for (const group of matrix.groups) {
     for (const assignment of group.assignments) {
       map[getMatrixKey(group.groupId, assignment.evaluatorId, assignment.evaluateeId)] = true;
-      if (assignment.evaluatorId === assignment.evaluateeId) selfIds.add(assignment.evaluatorId);
+      if (assignment.issued && assignment.evaluatorId === assignment.evaluateeId) selfIds.add(assignment.evaluatorId);
     }
   }
   for (const employeeId of selfIds) {
@@ -255,10 +255,10 @@ export function useCampaignDetails(id: string | undefined) {
     const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
     const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
     if (matrixReadiness !== 'ready' || !group) return;
-    if (evaluatorId === evaluateeId && hasSelfChanges) return;
+    if (evaluatorId === evaluateeId && hasSelfChanges && !selectedMatrixAssignments[matrixKey(groupId, evaluatorId, evaluateeId)]) return;
     setSelectedMatrixAssignments((current) => {
       const next = toggleMatrixPair(group, evaluationRules, current, evaluatorId, evaluateeId, selectedSelfForms);
-      return next === current || evaluatorId !== evaluateeId ? next : synchronizeSelfPair(evaluationMatrix.groups, next, evaluatorId, Boolean(next[matrixKey(groupId, evaluatorId, evaluateeId)]));
+      return next === current || evaluatorId !== evaluateeId ? next : synchronizeSelfPair(evaluationMatrix.groups, next, groupId, evaluatorId, Boolean(next[matrixKey(groupId, evaluatorId, evaluateeId)]));
     });
     setMatrixMessage('');
     setSuccessMessage('');
@@ -271,7 +271,7 @@ export function useCampaignDetails(id: string | undefined) {
     if (hasSelfChanges) return;
     let next = selectMatrixPairs(group, evaluationRules, selectedMatrixAssignments, false, selectedSelfForms);
     for (const person of group.employees) {
-      if (next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, person.id, true);
+      if (next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, groupId, person.id, true);
     }
     setSelectedMatrixAssignments(next);
     setMatrixMessage(matrixDirty(next, selectedMatrixAssignments) ? '' : 'All eligible pairs are already selected.');
@@ -285,11 +285,11 @@ export function useCampaignDetails(id: string | undefined) {
     if (hasSelfChanges) return;
     let next = selectMatrixPairs(group, evaluationRules, selectedMatrixAssignments, true, selectedSelfForms);
     const missing = group.employees.filter((person) => selectedSelfForms[person.id] == null &&
-      !group.assignments.some((item) => item.evaluatorId === person.id && item.evaluateeId === person.id)).length;
+      !group.assignments.some((item) => item.issued && item.evaluatorId === person.id && item.evaluateeId === person.id)).length;
     const protectedCount = group.employees.filter((person) => group.assignments.some((item) =>
-      item.evaluatorId === person.id && item.evaluateeId === person.id)).length;
+      item.issued && item.evaluatorId === person.id && item.evaluateeId === person.id)).length;
     for (const person of group.employees) {
-      if (next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, person.id, true);
+      if (next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, groupId, person.id, true);
     }
     setSelectedMatrixAssignments(next);
     const skipped = [missing && `${missing} without a self-evaluation form`, protectedCount && `${protectedCount} already issued`].filter(Boolean).join(', ');
@@ -318,7 +318,7 @@ export function useCampaignDetails(id: string | undefined) {
     setSelectedMatrixAssignments((current) => {
       let next = clearMatrixPairs(group, evaluationRules, current, selectedSelfForms);
       for (const person of group.employees) {
-        if (!next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, person.id, false);
+        if (!next[matrixKey(groupId, person.id, person.id)]) next = synchronizeSelfPair(evaluationMatrix.groups, next, groupId, person.id, false);
       }
       return next;
     });
@@ -365,6 +365,22 @@ export function useCampaignDetails(id: string | undefined) {
       setSelfEvaluations(saved);
       setSelectedSelfForms(selfFormMap(saved));
       setSelfMessage('Self-evaluation forms saved.');
+      try {
+        const controller = new AbortController();
+        const [loadedMatrix, loadedCampaign, loadedRules] = await Promise.all([
+          fetchCampaignEvaluationMatrix(id, controller.signal),
+          fetchCampaign(id, controller.signal),
+          fetchCampaignEvaluationRules(id, controller.signal),
+        ]);
+        if (routeVersion.current !== version) return;
+        setEvaluationMatrix(loadedMatrix);
+        setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
+        setCampaign(loadedCampaign);
+        setEvaluationRules(loadedRules);
+        setSelectedRuleFormIds(getRuleFormMap(loadedRules));
+      } catch {
+        if (routeVersion.current === version) setSelfMessage('Self-evaluation forms saved, but assignment status could not be refreshed.');
+      }
     } catch (error) {
       if (routeVersion.current === version) setSelfMessage(error instanceof Error ? error.message : 'Self-evaluations could not be saved.');
     } finally {
@@ -504,8 +520,28 @@ export function useCampaignDetails(id: string | undefined) {
       );
       const saved = await updateCampaignEvaluationMatrix(id, assignmentsToSave);
       if (routeVersion.current !== version) return;
-      setEvaluationMatrix({ groups: saved.groups });
+      setEvaluationMatrix({ groups: saved.groups, issuanceErrors: saved.issuanceErrors });
       setSelectedMatrixAssignments(getMatrixAssignmentMap(saved));
+      const controller = new AbortController();
+      try {
+        const [loadedMatrix, loadedSelf, loadedCampaign, loadedRules] = await Promise.all([
+          fetchCampaignEvaluationMatrix(id, controller.signal),
+          fetchCampaignSelfEvaluations(id, controller.signal),
+          fetchCampaign(id, controller.signal),
+          fetchCampaignEvaluationRules(id, controller.signal),
+        ]);
+        if (routeVersion.current !== version) return;
+        setEvaluationMatrix(loadedMatrix);
+        setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
+        setSelfEvaluations(loadedSelf);
+        setSelectedSelfForms(selfFormMap(loadedSelf));
+        setCampaign(loadedCampaign);
+        setEvaluationRules(loadedRules);
+        setSelectedRuleFormIds(getRuleFormMap(loadedRules));
+      } catch {
+        if (routeVersion.current === version) setMatrixMessage('Matrix saved, but the latest assignment details could not be refreshed.');
+      }
+      if (routeVersion.current !== version) return;
       setSuccessMessage(
         `Evaluation matrix updated. Created: ${saved.createdCount}, removed: ${saved.removedCount}${
           saved.keptCompletedCount > 0
@@ -541,10 +577,28 @@ export function useCampaignDetails(id: string | undefined) {
     try {
       const saved = await updateCampaign(campaign.id, form);
       if (routeVersion.current !== version) return;
+      if (saved.issuedFormsCount > campaign.issuedFormsCount || saved.status !== campaign.status) {
+        setEvaluationMatrix({ groups: [] });
+        setSelectedMatrixAssignments({});
+      }
       setCampaign(saved);
       setForm(getCampaignForm(saved));
       setIsEditOpen(false);
       setSuccessMessage('Campaign updated successfully.');
+      try {
+        const controller = new AbortController();
+        const [loadedMatrix, loadedSelf] = await Promise.all([
+          fetchCampaignEvaluationMatrix(campaign.id, controller.signal),
+          fetchCampaignSelfEvaluations(campaign.id, controller.signal),
+        ]);
+        if (routeVersion.current !== version) return;
+        setEvaluationMatrix(loadedMatrix);
+        setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
+        setSelfEvaluations(loadedSelf);
+        setSelectedSelfForms(selfFormMap(loadedSelf));
+      } catch {
+        if (routeVersion.current === version) setMatrixMessage('Campaign updated, but assignments could not be refreshed. Reload to see their current status.');
+      }
     } catch (error) {
       if (routeVersion.current === version)
         setSaveMessage(

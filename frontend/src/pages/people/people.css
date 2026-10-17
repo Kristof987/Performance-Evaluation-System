@@ -437,6 +437,21 @@
   display: block;
 }
 
+.people-person-name {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.person .people-you-badge {
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  font-size: 10px;
+  margin: 0;
+  padding: 2px 6px;
+}
+
 .person span {
   display: block;
   color: var(--color-text-muted);

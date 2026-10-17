@@ -3,10 +3,10 @@ import { useParams } from 'react-router';
 import { fetchCampaignReportOverview } from './api/reports.api';
 import EmployeeOverview from './components/EmployeeOverview';
 import GroupOverviewTable from './components/GroupOverviewTable';
-import PerformanceDimensionsChart from './components/PerformanceDimensionsChart';
-import RatingDistributionChart from './components/RatingDistributionChart';
+import SectionScoresChart from './components/SectionScoresChart';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsKpiPanel from './components/ReportsKpiPanel';
+import QuestionAnalytics from './components/QuestionAnalytics';
 import ReportsLayout from './ReportsLayout';
 import type { CampaignReportOverview } from './types/reports.types';
 
@@ -47,7 +47,6 @@ function OverviewContent({
   const [data, setData] = useState<CampaignReportOverview | null>(null);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const [selectedDistributionId, setSelectedDistributionId] = useState('');
 
   useEffect(() => {
     if (!validCampaignId || requesterUserId === null) return undefined;
@@ -58,7 +57,6 @@ function OverviewContent({
       .then((result) => {
         if (controller.signal.aborted) return;
         setData(result);
-        setSelectedDistributionId(result.rating_distribution_sources[0]?.id ?? '');
       })
       .catch((cause) => {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Campaign report could not be loaded.');
@@ -76,5 +74,5 @@ function OverviewContent({
   const noAssignments = data.kpis.total_evaluations === 0;
   const noCompleted = data.kpis.total_evaluations > 0 && data.kpis.completed_evaluations === 0;
 
-  return <div className="reports-overview"><ReportsKpiPanel kpis={data.kpis} />{noAssignments && <ReportsEmptyState title="No evaluations have been assigned to this campaign yet." message="Analytics will appear after evaluation assignments are generated." />}{noCompleted && <ReportsEmptyState title="No completed evaluations yet." message="Reports use submitted evaluations only; drafts and not-started assignments are excluded from results." />}<div className="reports-chart-grid"><PerformanceDimensionsChart dimensions={data.dimensions} /><RatingDistributionChart sources={data.rating_distribution_sources} selectedId={selectedDistributionId} onSelect={setSelectedDistributionId} /></div><GroupOverviewTable groups={data.groups} /><EmployeeOverview employees={data.employees} /></div>;
+  return <div className="reports-overview"><ReportsKpiPanel kpis={data.kpis} />{noAssignments && <ReportsEmptyState title="No evaluations have been assigned to this campaign yet." message="Analytics will appear after evaluation assignments are generated." />}{noCompleted && <ReportsEmptyState title="No completed evaluations yet." message="Reports use submitted evaluations only; drafts and not-started assignments are excluded from results." />}<div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><QuestionAnalytics campaignId={selectedCampaignId} requesterUserId={requesterUserId} /><GroupOverviewTable groups={data.groups} /><EmployeeOverview employees={data.employees} /></div>;
 }

@@ -4,6 +4,7 @@ import { API_BASE_URL } from '../../config';
 
 export type Employee = {
   id: number;
+  userId: number | null;
   name: string;
   role: string;
   groups: string[];
@@ -50,7 +51,9 @@ type PeopleGroupResponse = {
 
 type PeopleEmployeeResponse = {
   id: number;
+  user_id?: number | null;
   username: string;
+  full_name: string | null;
   email: string;
   role_name: string;
   groups: PeopleGroupResponse[];
@@ -74,7 +77,8 @@ function mapGroup(group: PeopleGroupResponse): Group {
 function mapEmployee(employee: PeopleEmployeeResponse): Employee {
   return {
     id: employee.id,
-    name: formatUserName(employee.username),
+    userId: employee.user_id ?? null,
+    name: employee.full_name || formatUserName(employee.username),
     role: employee.role_name,
     groups: employee.groups.map((group) => group.name),
     groupIds: employee.groups.map((group) => group.id),
@@ -205,7 +209,7 @@ export async function addGroupMember(
   const response = await fetch(`${API_BASE_URL}/people/groups/${groupId}/members`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_id: employeeId }),
+    body: JSON.stringify({ employee_id: employeeId }),
   });
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);

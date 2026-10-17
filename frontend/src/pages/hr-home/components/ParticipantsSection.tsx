@@ -97,7 +97,7 @@ function ParticipantsSection({ participants, onViewCompletionStatus }: Participa
 
         <div className="participants-table-body">
           {visibleParticipants.map((participant) => (
-            <ParticipantRow key={participant.user_id} participant={participant} />
+            <ParticipantRow key={participant.employee_id} participant={participant} />
           ))}
 
           {Array.from({ length: emptyRowsCount }, (_, index) => (

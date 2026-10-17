@@ -5,8 +5,6 @@ import type { Campaign, DashboardMetrics } from '../hrHome.types';
 import {
   formatCompactDate,
   formatStartsIn,
-  getLocalDateOnly,
-  parseDateOnly,
 } from '../utils/hrHome.utils';
 
 type KpiItemProps = {
@@ -32,16 +30,10 @@ type MetricsGridProps = {
 };
 
 function getNextCampaign(campaigns: Campaign[]): Campaign | null {
-  const today = getLocalDateOnly();
-
   return [...campaigns]
-    .filter((campaign) => parseDateOnly(campaign.start_date) > today)
+    .filter((campaign) => campaign.lifecycle_status === 'Scheduled')
     .sort((first, second) => {
-      const dateDifference =
-        parseDateOnly(first.start_date).getTime() -
-        parseDateOnly(second.start_date).getTime();
-
-      if (dateDifference !== 0) return dateDifference;
+      if (first.start_date !== second.start_date) return first.start_date.localeCompare(second.start_date);
       return first.name.localeCompare(second.name, 'hu') || first.id - second.id;
     })[0] ?? null;
 }
@@ -74,7 +66,7 @@ function MetricsGrid({ metrics, campaigns }: MetricsGridProps) {
           />
         </div>
         <div className="kpi-context">
-          {metrics.submitted_count} of {metrics.assignment_count} submitted
+          {metrics.submitted_count} of {metrics.assignment_count} issued submitted
         </div>
       </div>
       <KpiItem
@@ -83,7 +75,7 @@ function MetricsGrid({ metrics, campaigns }: MetricsGridProps) {
         context={
           <>
             {metrics.not_started_count} not started ·{' '}
-            {metrics.in_progress_count} in progress
+            {metrics.in_progress_count} in progress · {metrics.planned_count} planned
           </>
         }
       />
@@ -105,7 +97,7 @@ function MetricsGrid({ metrics, campaigns }: MetricsGridProps) {
             'No upcoming campaigns'
           ) : (
             <>
-              {nextCampaign.name} · {formatStartsIn(nextCampaign.start_date)}
+              {nextCampaign.name} · {formatStartsIn(nextCampaign.start_date, nextCampaign.current_date)}
             </>
           )
         }

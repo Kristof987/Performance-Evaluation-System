@@ -67,58 +67,9 @@
   font-size: 14px;
 }
 
-.login-password-field {
-  position: relative;
-}
-
-.login-password-field .form-control {
-  padding-right: 52px;
-}
-
-.login-password-toggle {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  transform: translateY(-50%);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
+.login-optional {
   color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.login-password-toggle:hover {
-  background: var(--color-surface-muted);
-}
-
-.login-options {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  font-size: 12px;
-}
-
-.login-remember {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-text-secondary);
-}
-
-.login-remember input {
-  margin: 0;
-  accent-color: var(--color-primary);
-}
-
-.login-unavailable {
-  color: var(--color-text-secondary);
+  font-weight: 400;
 }
 
 .login-error {
@@ -139,9 +90,7 @@
   font-size: 14px;
 }
 
-.login-password-toggle:focus-visible,
-.login-submit:focus-visible,
-.login-remember input:focus-visible {
+.login-submit:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 3px;
 }

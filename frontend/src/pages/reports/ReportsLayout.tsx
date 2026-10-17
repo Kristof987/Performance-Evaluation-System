@@ -5,7 +5,6 @@ import { getSidebarUser } from '../layout/sidebar-user';
 import { fetchReportCampaigns } from './api/reports.api';
 import ReportsCampaignSelector from './ReportsCampaignSelector';
 import type { ReportCampaignOption } from './types/reports.types';
-import { getCampaignLifecycleStatus } from '../campaigns/campaign.lifecycle';
 import './reports.css';
 
 function formatDate(value: string | null) {
@@ -22,7 +21,7 @@ export default function ReportsLayout({ selectedCampaignId, children }: { select
   const [campaignsError, setCampaignsError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
-  const selectedStatus = selectedCampaign ? getCampaignLifecycleStatus(selectedCampaign) : null;
+  const selectedStatus = selectedCampaign?.lifecycle_status ?? null;
 
   useEffect(() => {
     if (requesterUserId === null) {

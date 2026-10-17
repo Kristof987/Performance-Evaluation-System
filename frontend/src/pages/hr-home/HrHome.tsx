@@ -1,5 +1,5 @@
 import AppLayout from '../layout/AppLayout';
-import { getSidebarUser, formatUserName } from '../layout/sidebar-user';
+import { getSidebarUser, getUserDisplayName } from '../layout/sidebar-user';
 import './hr-home.css';
 import { useNavigate } from 'react-router';
 
@@ -16,6 +16,7 @@ function HrHome() {
   const navigate = useNavigate();
   const {
     campaigns,
+    currentDate,
     selectedCampaign,
     metrics,
     participants,
@@ -27,7 +28,7 @@ function HrHome() {
 
   const sidebarUser = getSidebarUser();
   const sidebarUserName =
-    sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
+    sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser);
 
   const campaignsButtonHandler = () => {
     navigate('/campaigns');
@@ -53,7 +54,7 @@ function HrHome() {
   return (
     <AppLayout activePage="hr-home" pageClassName="hr-home-page">
       <div className="main-content">
-        <DashboardTopbar userName={sidebarUserName} />
+        <DashboardTopbar userName={sidebarUserName} currentDate={currentDate} />
 
         <div className="section-header">
           <div className="overview-title">Campaign overview</div>
@@ -88,6 +89,7 @@ function HrHome() {
 
         <UpcomingDeadlines
           deadlines={upcomingDeadlines}
+          currentDate={currentDate}
           onOpenCampaign={campaignDetailsHandler}
         />
       </div>

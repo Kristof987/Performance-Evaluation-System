@@ -3,7 +3,7 @@ import type {
   CampaignResponse,
   CampaignFormValues,
 } from './campaign.types';
-import { calendarDay, getCalendarToday, getCampaignLifecycleStatus } from './campaign.lifecycle';
+import { getCampaignLifecycleStatus } from './campaign.lifecycle';
 export const emptyCampaignForm: CampaignFormValues = {
   name: '',
   description: '',
@@ -56,7 +56,7 @@ export function getCampaignForm(campaign: Campaign): CampaignFormValues {
 }
 
 export function isCampaignStarted(campaign: Campaign) {
-  return calendarDay(campaign.startDate) <= calendarDay(campaign.currentDate ?? getCalendarToday());
+  return campaign.startDate <= campaign.currentDate;
 }
 
 export function getEndDateMin(form: CampaignFormValues, campaign: Campaign) {

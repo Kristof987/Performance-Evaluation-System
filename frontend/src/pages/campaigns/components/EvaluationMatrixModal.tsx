@@ -78,6 +78,7 @@ export default function EvaluationMatrixModal({ group, rules, selfForms, selfFor
           <div>
             <h2 id="campaign-matrix-title">Evaluation Matrix — {group.groupName}</h2>
             <p>{countLabel(group.employees.length, 'employee')} · {countLabel(matrixSelectedCount(selection, group.groupId), 'evaluation pair')} selected</p>
+            <p>Saved assignments before the campaign starts are planned. Issued assignments cannot be changed.</p>
           </div>
           <button className="campaign-modal-close" type="button" aria-label="Close evaluation matrix" onClick={() => { if (dirty) setConfirmClose(true); else onClose(); }}>×</button>
         </div>
@@ -98,12 +99,14 @@ export default function EvaluationMatrixModal({ group, rules, selfForms, selfFor
                 {group.employees.map((evaluatee) => {
                   const cell = matrixCell(group, rules, evaluator.id, evaluatee.id, selfForms);
                   const key = matrixKey(group.groupId, evaluator.id, evaluatee.id);
-                  const reason = rulesDirty ? 'Save form rules before editing the evaluation matrix.' : evaluator.id === evaluatee.id && selfFormsDirty ? 'Save self-evaluation forms before selecting diagonal assignments.' : cell.reason;
+                  const assignment = group.assignments.find((item) => item.evaluatorId === evaluator.id && item.evaluateeId === evaluatee.id);
+                  const reason = rulesDirty ? 'Save form rules before editing the evaluation matrix.' : evaluator.id === evaluatee.id && selfFormsDirty && !selection[key] ? 'Save self-evaluation forms before selecting diagonal assignments.' : cell.reason;
                   return <td className={evaluator.id === evaluatee.id ? 'campaign-matrix-self' : undefined} key={evaluatee.id}>
                     <span className="campaign-matrix-cell-control" tabIndex={reason ? 0 : undefined} title={reason || undefined} aria-label={reason ? `${evaluator.name} evaluates ${evaluatee.name}. ${reason}` : undefined}>
-                      <input type="checkbox" checked={Boolean(selection[key])} disabled={Boolean(reason)} aria-label={`${evaluator.name} evaluates ${evaluatee.name}`} onChange={() => onToggle(group.groupId, evaluator.id, evaluatee.id)} />
+                      <input type="checkbox" checked={Boolean(selection[key])} disabled={saving || Boolean(reason)} aria-label={`${evaluator.name} evaluates ${evaluatee.name}${assignment && selection[key] ? `, ${assignment.issued ? 'issued' : 'planned'}` : ''}`} onChange={() => onToggle(group.groupId, evaluator.id, evaluatee.id)} />
                       {reason && <span className="campaign-matrix-cell-reason" role="tooltip">{reason}</span>}
                     </span>
+                     {assignment && selection[key] && <small className={`campaign-matrix-assignment-status ${assignment.issued ? 'issued' : 'planned'}`}>{assignment.issued ? 'Issued' : 'Planned'}</small>}
                   </td>;
                 })}
               </tr>
@@ -112,14 +115,14 @@ export default function EvaluationMatrixModal({ group, rules, selfForms, selfFor
         </div>
         <div className="campaign-matrix-tools">
           <div className="campaign-matrix-tool-group"><span>Selection tools</span>
-            <button className="btn btn-secondary" type="button" disabled={rulesDirty || selfFormsDirty} onClick={() => onAddAll(group.groupId)}>Add all eligible</button>
-            <button className="btn btn-secondary" type="button" disabled={rulesDirty || selfFormsDirty} onClick={() => onAddSelf(group.groupId)}>Add self-evaluations</button>
+             <button className="btn btn-secondary" type="button" disabled={saving || rulesDirty || selfFormsDirty} onClick={() => onAddAll(group.groupId)}>Add all eligible</button>
+             <button className="btn btn-secondary" type="button" disabled={saving || rulesDirty || selfFormsDirty} onClick={() => onAddSelf(group.groupId)}>Add self-evaluations</button>
           </div>
           <div className="campaign-matrix-tool-group"><label htmlFor="minimum-reviewers-input">Minimum incoming peer reviews</label>
             <input id="minimum-reviewers-input" className="form-control" type="number" min="0" max="100" step="1" value={minimum} disabled={rulesDirty} onChange={(event) => setMinimum(event.target.value)} />
-            <button className="btn btn-secondary" type="button" disabled={rulesDirty} onClick={generate}>Generate</button>
+             <button className="btn btn-secondary" type="button" disabled={saving || rulesDirty} onClick={generate}>Generate</button>
           </div>
-          <button className="btn btn-secondary campaign-matrix-danger-btn" type="button" disabled={rulesDirty || clearable === 0} onClick={() => setConfirmClear(true)}>Clear editable selections</button>
+           <button className="btn btn-secondary campaign-matrix-danger-btn" type="button" disabled={saving || rulesDirty || clearable === 0} onClick={() => setConfirmClear(true)}>Clear editable selections</button>
         </div>
         <div className="campaign-matrix-modal-footer">
           <span>{dirty ? 'Unsaved changes · ' : ''}Changes are staged until Save matrix is clicked.{validationMessage || message ? ` ${validationMessage || message}` : ''}</span>

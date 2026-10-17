@@ -1,6 +1,8 @@
 type SidebarUser = {
   id: number;
+  employee_id: number | null;
   username: string;
+  full_name: string | null;
   profile_image_url: string | null;
   role_name: string | null;
 };
@@ -25,7 +27,9 @@ export function getSidebarUser(): SidebarUser | null {
       return null;
     return {
       id: user.id,
+      employee_id: 'employee_id' in user && typeof user.employee_id === 'number' ? user.employee_id : null,
       username: user.username,
+      full_name: 'full_name' in user && typeof user.full_name === 'string' ? user.full_name : null,
       profile_image_url:
         'profile_image_url' in user &&
         typeof user.profile_image_url === 'string'
@@ -49,6 +53,10 @@ export function isHrOrManagerRole(roleName: string | null) {
 export function getDashboardPath() {
   const user = getSidebarUser();
   return isHrOrManagerRole(user?.role_name ?? null) ? '/hr-home' : '/employee-home';
+}
+
+export function getUserDisplayName(user: SidebarUser) {
+  return user.full_name?.trim() || formatUserName(user.username);
 }
 
 export function formatUserName(username: string) {

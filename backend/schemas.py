@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -154,17 +154,19 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    username: str
+    name: str
 
 
 class UserResponse(BaseModel):
     id: int
     username: str
+    employee_id: int | None = None
+    full_name: str | None = None
     email: EmailStr
-    company_role_id: int
+    company_role_id: int | None = None
     role_name: str | None = None
     system_role_id: int
-    profile_image_url: str | None
+    profile_image_url: str | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -182,6 +184,8 @@ class AssignedEvaluationResponse(BaseModel):
     campaign_name: str
     campaign_start_date: date
     campaign_is_active: bool
+    campaign_lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
+    current_date: date
     form_id: int
     form_name: str
     form_description: str | None
@@ -215,6 +219,7 @@ class EmployeeDashboardHistoryItem(BaseModel):
 
 
 class EmployeeDashboardResponse(BaseModel):
+    current_date: date
     evaluations: list[AssignedEvaluationResponse]
     open_count: int
     completed_count: int
@@ -235,9 +240,11 @@ class PeopleGroupResponse(BaseModel):
 
 class PeopleEmployeeResponse(BaseModel):
     id: int
+    user_id: int | None
     username: str
-    email: EmailStr
-    company_role_id: int
+    full_name: str | None = None
+    email: str
+    company_role_id: int | None = None
     role_name: str
     groups: list[PeopleGroupResponse]
     is_active: bool
@@ -251,8 +258,9 @@ class PeopleResponse(BaseModel):
 class AccountSettingsProfile(BaseModel):
     id: int
     username: str
+    full_name: str | None = None
     email: EmailStr
-    company_role: str
+    company_role: str | None
     system_role: str | None = None
     groups: list[PeopleGroupResponse]
     is_active: bool
@@ -294,7 +302,7 @@ class PeopleGroupUpdate(BaseModel):
 
 
 class PeopleGroupMemberCreate(BaseModel):
-    user_id: int
+    employee_id: int
 
 class CampaignCreate(BaseModel):
     name: str
@@ -326,7 +334,8 @@ class CampaignResponse(BaseModel):
     created_by: int
     issued_forms_count: int = 0
     submitted_forms_count: int = 0
-    current_date: date = Field(default_factory=date.today)
+    current_date: date
+    lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
 
     model_config = {
         "from_attributes": True
@@ -343,11 +352,13 @@ class DashboardCampaignSummary(BaseModel):
     is_active: bool
     start_date: date
     end_date: date | None = None
-    current_date: date = Field(default_factory=date.today)
+    current_date: date
+    lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
 
 
 class DashboardMetricSummary(BaseModel):
     assignment_count: int
+    planned_count: int = 0
     submitted_count: int
     completion_rate: int
     awaiting_submission_count: int
@@ -370,9 +381,9 @@ class DashboardFormSummary(BaseModel):
 
 
 class DashboardParticipantSummary(BaseModel):
-    user_id: int
+    employee_id: int
     name: str
-    email: EmailStr
+    email: EmailStr | None
     profile_image_url: str | None = None
     role_name: str
     groups: list[str]
@@ -395,6 +406,7 @@ class DashboardUpcomingDeadline(BaseModel):
 
 
 class DashboardResponse(BaseModel):
+    current_date: date
     campaigns: list[DashboardCampaignSummary]
     selected_campaign_id: int | None
     metrics: DashboardMetricSummary | None
@@ -423,10 +435,10 @@ class CompletionStatusRow(BaseModel):
     id: int
     evaluator_id: int
     evaluator_name: str
-    evaluator_email: EmailStr
+    evaluator_email: EmailStr | None
     evaluatee_id: int
     evaluatee_name: str
-    evaluatee_email: EmailStr
+    evaluatee_email: EmailStr | None
     questionnaire_id: int
     questionnaire_name: str
     status_name: str
@@ -471,31 +483,16 @@ class ReportKpiSummary(BaseModel):
     overall_score_label: str
     overall_score_context: str
     overall_score_scale: str | None = None
+    overall_availability: Literal["available", "no_data", "suppressed"]
 
 
-class ReportDimensionScore(BaseModel):
-    id: str
+class ReportSectionScore(BaseModel):
+    id: int
     name: str
-    average_score: float
-    response_count: int
+    average_score: float | None = None
+    availability: Literal["available", "no_data", "suppressed"]
     evaluatee_count: int
-    scale_min: int
-    scale_max: int
-
-
-class ReportRatingDistributionBucket(BaseModel):
-    rating: int
-    count: int
-
-
-class ReportRatingDistributionSource(BaseModel):
-    id: str
-    label: str
-    source_type: str
-    scale_min: int
-    scale_max: int
-    response_count: int
-    buckets: list[ReportRatingDistributionBucket]
+    evaluator_count: int
 
 
 class ReportGroupSummary(BaseModel):
@@ -506,6 +503,7 @@ class ReportGroupSummary(BaseModel):
     completed_evaluations: int
     completion_rate: int
     average_score: float | None = None
+    score_availability: Literal["available", "no_data", "suppressed"]
     average_score_context: str
 
 
@@ -522,7 +520,7 @@ class ReportDataNotes(BaseModel):
     answer_storage: str
     question_identity: str
     historical_versions: str
-    dimension_policy: str
+    section_policy: str
     self_evaluation_policy: str
     participant_deduplication: str
     group_attribution: str
@@ -532,35 +530,77 @@ class ReportDataNotes(BaseModel):
 class CampaignReportOverviewResponse(BaseModel):
     campaign: ReportCampaignOption
     kpis: ReportKpiSummary
-    dimensions: list[ReportDimensionScore]
-    rating_distribution_sources: list[ReportRatingDistributionSource]
+    sections: list[ReportSectionScore]
     groups: list[ReportGroupSummary]
     employees: ReportEmployeeOverview
     notes: ReportDataNotes
 
 
-class PerformanceDimensionCreate(BaseModel):
+class ReportQuestionBucket(BaseModel):
+    label: str
+    count: int
+    percentage: float
+
+
+class ReportQuestionResult(BaseModel):
+    key: str
+    text: str
+    type: str
+    category: Literal["rating", "choice", "text"]
+    section_id: int | None
+    section_name: str
+    required: bool
+    required_modes: list[Literal["required", "optional"]]
+    scale_min: int | None = None
+    scale_max: int | None = None
+    availability: Literal["available", "no_data", "suppressed"]
+    response_count: int | None
+    average_normalized: float | None = None
+    distribution_kind: Literal["original", "options"] | None = None
+    distribution: list[ReportQuestionBucket] | None = None
+
+
+class ReportQuestionItem(BaseModel):
+    key: str
+    text: str
+    type: str
+    category: Literal["rating", "choice", "text"]
+    section_id: int | None
+    section_name: str
+    required: bool
+    required_modes: list[Literal["required", "optional"]]
+    scale_min: int | None = None
+    scale_max: int | None = None
+    availability: Literal["available", "no_data", "suppressed"] | None = None
+    response_count: int | None = None
+    average_normalized: float | None = None
+    distribution_kind: Literal["original", "options"] | None = None
+    distribution: list[ReportQuestionBucket] | None = None
+    peer: ReportQuestionResult | None = None
+    self: ReportQuestionResult | None = None
+
+
+class ReportQuestionsResponse(BaseModel):
+    questions: list[ReportQuestionItem]
+    notes: dict[str, str]
+
+
+class SectionCreate(BaseModel):
     name: str
-    description: str | None = None
 
 
-class PerformanceDimensionUpdate(BaseModel):
+class SectionUpdate(BaseModel):
     name: str
-    description: str | None = None
-    is_active: bool = True
 
 
-class PerformanceDimensionResponse(BaseModel):
+class SectionResponse(BaseModel):
     id: int
     name: str
-    description: str | None = None
-    is_active: bool
+    is_archived: bool
     created_at: datetime
     updated_at: datetime
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
 
 class CompanyGroupCreate(BaseModel):
     name: str
@@ -617,6 +657,7 @@ class CampaignRolePairRule(BaseModel):
     evaluatee_role_name: str
     form_id: int | None = None
     rule_id: int | None = None
+    locked: bool = False
 
 
 class CampaignGroupRuleMatrix(BaseModel):
@@ -646,6 +687,7 @@ class CampaignEvaluationMatrixEmployee(BaseModel):
     name: str
     role_id: int
     role_name: str
+    active: bool = True
 
 
 class CampaignEvaluationMatrixAssignment(BaseModel):
@@ -653,6 +695,7 @@ class CampaignEvaluationMatrixAssignment(BaseModel):
     evaluatee_id: int
     form_id: int
     filled_form_id: int
+    issued: bool = False
     is_completed: bool = False
     status_name: str
     has_answers: bool = False
@@ -667,6 +710,7 @@ class CampaignGroupEvaluationMatrix(BaseModel):
 
 class CampaignEvaluationMatrixResponse(BaseModel):
     groups: list[CampaignGroupEvaluationMatrix]
+    issuance_errors: list[str] = Field(default_factory=list)
 
 
 class CampaignEvaluationMatrixUpdateItem(BaseModel):
@@ -717,4 +761,9 @@ class FormTemplateResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+
+class FormValidationResponse(BaseModel):
+    valid_for_issuance: bool
+    errors: list[str] = Field(default_factory=list)
 

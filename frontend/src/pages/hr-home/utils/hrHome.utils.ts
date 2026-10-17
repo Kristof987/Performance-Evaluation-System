@@ -10,26 +10,13 @@ export function getTimeOfDay(): TimeOfDay {
   return 'evening';
 }
 
-export function getFullDate(): string {
-  const currentDate = new Date();
-  const currentDay = currentDate.getDate().toString();
-  const currentMonth = currentDate.toLocaleDateString('en-US', {
-    month: 'long',
-  });
-  const currentYear = currentDate.getFullYear().toString();
-  const currentDayString = currentDate.toLocaleDateString('en-US', {
-    weekday: 'long',
-  }); //In case of another language, it may not start with capital letter!
-
-  return (
-    currentDayString +
-    ', ' +
-    currentDay +
-    ' ' +
-    currentMonth +
-    ' ' +
-    currentYear
-  );
+export function getFullDate(today: string | null): string {
+  if (!today) return '';
+  const [year, month, day] = today.split('-').map(Number);
+  const calendarDate = new Date(Date.UTC(year, month - 1, day, 12));
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(calendarDate);
+  const monthName = new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' }).format(calendarDate);
+  return `${weekday}, ${day} ${monthName} ${year}`;
 }
 
 export function formatShortDate(value: string | null): string {
@@ -71,8 +58,13 @@ export function formatCompactDate(value: string): string {
   }).format(parseDateOnly(value));
 }
 
-export function formatRelativeDate(value: string): string {
-  const days = getDaysBetweenDates(getLocalDateOnly(), parseDateOnly(value));
+function calendarDay(value: string): number {
+  const [year, month, day] = value.split('-').map(Number);
+  return Date.UTC(year, month - 1, day) / 86400000;
+}
+
+export function formatRelativeDate(value: string, today: string): string {
+  const days = calendarDay(value) - calendarDay(today);
 
   if (days === 0) return 'Today';
   if (days === 1) return 'Tomorrow';
@@ -81,8 +73,8 @@ export function formatRelativeDate(value: string): string {
   return `${Math.abs(days)} days ago`;
 }
 
-export function formatStartsIn(value: string): string {
-  const days = getDaysBetweenDates(getLocalDateOnly(), parseDateOnly(value));
+export function formatStartsIn(value: string, today: string): string {
+  const days = calendarDay(value) - calendarDay(today);
 
   if (days === 1) return 'Starts tomorrow';
   if (days > 1) return `Starts in ${days} days`;

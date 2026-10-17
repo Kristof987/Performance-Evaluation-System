@@ -8,6 +8,8 @@ type AssignedEvaluationResponse = {
   campaign_name: string;
   campaign_start_date: string;
   campaign_is_active: boolean;
+  campaign_lifecycle_status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
+  current_date: string;
   form_id: number;
   form_name: string;
   form_description: string | null;
@@ -30,6 +32,7 @@ type EmployeeDashboardHistoryItemResponse = {
 };
 
 type EmployeeDashboardResponse = {
+  current_date: string;
   evaluations: AssignedEvaluationResponse[];
   open_count: number;
   completed_count: number;
@@ -48,6 +51,8 @@ export type AssignedEvaluation = {
   campaignName: string;
   campaignStartDate: string;
   campaignIsActive: boolean;
+  campaignLifecycleStatus: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
+  currentDate: string;
   formId: number;
   formName: string;
   formDescription: string;
@@ -62,7 +67,17 @@ export type AssignedEvaluation = {
 };
 
 export type QuestionnaireAnswer = { question_id: string; value: string | number | string[] };
-export type AssignedQuestionnaire = { evaluation: AssignedEvaluation; questions: FormQuestion[]; answers: QuestionnaireAnswer[] };
+export type IssuedBlock =
+  | { type: 'section'; section_id: number; section?: { id: number; name: string }; questions: FormQuestion[] }
+  | { type: 'question'; question: FormQuestion };
+export type AssignedQuestionnaire = { evaluation: AssignedEvaluation; blocks: IssuedBlock[]; answers: QuestionnaireAnswer[] };
+export const issuedQuestions = (blocks: IssuedBlock[]) => blocks.flatMap((block) => block.type === 'section' ? block.questions : [block.question]);
+
+function mapIssuedBlocks(questions: Array<IssuedBlock | FormQuestion>): IssuedBlock[] {
+  return questions.map((item) => item.type === 'section' || item.type === 'question'
+    ? item as IssuedBlock
+    : { type: 'question' as const, question: item as FormQuestion });
+}
 
 export type EmployeeDashboardHistoryItem = {
   id: number;
@@ -73,6 +88,7 @@ export type EmployeeDashboardHistoryItem = {
 };
 
 export type EmployeeDashboard = {
+  currentDate: string;
   evaluations: AssignedEvaluation[];
   openCount: number;
   completedCount: number;
@@ -92,6 +108,8 @@ function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): Assigned
     campaignName: evaluation.campaign_name,
     campaignStartDate: evaluation.campaign_start_date,
     campaignIsActive: evaluation.campaign_is_active,
+    campaignLifecycleStatus: evaluation.campaign_lifecycle_status,
+    currentDate: evaluation.current_date,
     formId: evaluation.form_id,
     formName: evaluation.form_name,
     formDescription: evaluation.form_description || '',
@@ -108,6 +126,7 @@ function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): Assigned
 
 function mapEmployeeDashboard(dashboard: EmployeeDashboardResponse): EmployeeDashboard {
   return {
+    currentDate: dashboard.current_date,
     evaluations: dashboard.evaluations.map(mapAssignedEvaluation),
     openCount: dashboard.open_count,
     completedCount: dashboard.completed_count,
@@ -163,17 +182,17 @@ export async function fetchEmployeeDashboard(
 }
 
 export async function fetchAssignedQuestionnaire(userId: number, evaluationId: number, signal: AbortSignal): Promise<AssignedQuestionnaire> {
-  const result = await requestApi<{ evaluation: AssignedEvaluationResponse; questions: FormQuestion[]; answers: QuestionnaireAnswer[] }>(
+  const result = await requestApi<{ evaluation: AssignedEvaluationResponse; questions: Array<IssuedBlock | FormQuestion>; answers: QuestionnaireAnswer[] }>(
     `/users/${userId}/assigned-evaluations/${evaluationId}`, { signal }, 'Questionnaire could not be loaded.',
   );
-  return { ...result, evaluation: mapAssignedEvaluation(result.evaluation) };
+  return { evaluation: mapAssignedEvaluation(result.evaluation), blocks: mapIssuedBlocks(result.questions), answers: result.answers };
 }
 
 export async function saveAssignedQuestionnaire(userId: number, evaluationId: number, answers: QuestionnaireAnswer[], submit: boolean): Promise<AssignedQuestionnaire> {
-  const result = await requestApi<{ evaluation: AssignedEvaluationResponse; questions: FormQuestion[]; answers: QuestionnaireAnswer[] }>(
+  const result = await requestApi<{ evaluation: AssignedEvaluationResponse; questions: Array<IssuedBlock | FormQuestion>; answers: QuestionnaireAnswer[] }>(
     `/users/${userId}/assigned-evaluations/${evaluationId}`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers, submit }) },
     'Questionnaire could not be saved.',
   );
-  return { ...result, evaluation: mapAssignedEvaluation(result.evaluation) };
+  return { evaluation: mapAssignedEvaluation(result.evaluation), blocks: mapIssuedBlocks(result.questions), answers: result.answers };
 }

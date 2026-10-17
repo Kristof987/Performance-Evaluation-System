@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import ReportsEmptyState from './components/ReportsEmptyState';
+import QuestionAnalytics from './components/QuestionAnalytics';
 import type { EmployeeReportDetail } from './types/reports.types';
 
-function formatScore(value: number | null, scaleMax?: number | null) {
+function formatScore(value: number | null) {
   if (value === null) return '—';
-  return scaleMax ? `${value.toFixed(2)} / ${scaleMax}` : value.toFixed(2);
+  return `${value.toFixed(2)} / 5`;
 }
 
 function formatDate(value: string | null) {
@@ -11,30 +13,39 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`));
 }
 
-const dimensionEmptyState: Record<EmployeeReportDetail['dimension_availability'], { title: string; message: string }> = {
-  no_assignments: { title: 'No peer evaluations assigned.', message: 'Performance dimensions will appear after peer evaluations are assigned and completed.' },
-  not_submitted: { title: 'No peer feedback submitted yet.', message: 'Performance dimensions will appear after evaluations are completed.' },
-  no_dimensions: { title: 'No performance dimensions available.', message: 'Submitted questionnaires do not contain comparable rated competencies.' },
-  no_compatible_responses: { title: 'No comparable scores available.', message: 'Submitted evaluations do not contain valid compatible numerical responses.' },
+const sectionEmptyState: Record<EmployeeReportDetail['section_availability'], { title: string; message: string }> = {
+  no_assignments: { title: 'No peer evaluations assigned.', message: 'Performance sections will appear after peer evaluations are assigned and completed.' },
+  not_submitted: { title: 'No peer feedback submitted yet.', message: 'Performance sections will appear after evaluations are completed.' },
+  no_sections: { title: 'No performance sections available.', message: 'Submitted questionnaires do not contain rated sections.' },
+  no_ratings: { title: 'No section scores available.', message: 'Submitted evaluations do not contain valid numerical ratings.' },
   suppressed: { title: 'Not enough feedback to display results.', message: 'Individual scores will appear when reporting confidentiality requirements are met.' },
-  available: { title: 'No performance dimensions available.', message: 'No reportable dimension results are available.' },
+  available: { title: 'No performance sections available.', message: 'No reportable section results are available.' },
 };
+
+function availabilityLabel(availability: 'available' | 'suppressed' | 'no_data', score: number | null) {
+  if (availability === 'suppressed') return 'Hidden for confidentiality';
+  if (availability === 'no_data' || score === null) return 'Not yet available';
+  return formatScore(score);
+}
 
 function selfPeerMessage(data: EmployeeReportDetail) {
   const status = data.coverage.self_evaluation.status;
   if (status === 'Not assigned') return 'No self-evaluation was assigned for this campaign.';
   if (status === 'Not started' || status === 'In progress') return 'Self-evaluation has not been submitted yet.';
   if (data.self_peer_comparison.length > 0) return null;
-  if (['no_assignments', 'not_submitted', 'suppressed'].includes(data.dimension_availability)) return 'Peer feedback is not yet available for comparison.';
-  return 'No compatible dimensions are available for comparison.';
+  if (['no_assignments', 'not_submitted', 'suppressed'].includes(data.section_availability)) return 'Peer feedback is not yet available for comparison.';
+  return 'No reportable sections are available for comparison.';
 }
 
-export default function EmployeeReportDetailView({ data, selectedHistory, onBack }: { data: EmployeeReportDetail; selectedHistory: EmployeeReportDetail['history'][number] | null; onBack: () => void }) {
+export default function EmployeeReportDetailView({ data, requesterUserId, onBack }: { data: EmployeeReportDetail; requesterUserId: number | null; onBack: () => void }) {
+  const [historyKey, setHistoryKey] = useState<string | null>(null);
+  const historyOptions = data.history.map((series) => ({ series, key: series.section_id === null ? 'overall' : `section-${series.section_id}` }));
+  const selectedHistory = historyOptions.find((option) => option.key === historyKey) ?? historyOptions.find((option) => option.key === 'overall') ?? historyOptions[0];
   const assigned = data.coverage.peer_assigned;
   const completed = data.coverage.peer_completed;
   const percentage = assigned > 0 ? Math.round((completed / assigned) * 100) : null;
   const message = selfPeerMessage(data);
-  const emptyState = dimensionEmptyState[data.dimension_availability];
+  const emptyState = sectionEmptyState[data.section_availability];
 
   return <div className="reports-overview">
     <button className="campaign-details-link link-button" type="button" onClick={onBack}>← Back to Employees</button>
@@ -48,20 +59,23 @@ export default function EmployeeReportDetailView({ data, selectedHistory, onBack
         ['Completed peer reviews', data.kpis.peer_reviews_received],
         ['Feedback completion', `${completed}/${assigned}`],
         ['Self-evaluation', data.kpis.self_evaluation_status],
-        ['Dimensions analyzed', data.kpis.reportable_dimensions],
+        ['Sections analyzed', data.kpis.reportable_sections],
+        ['Overall peer score', availabilityLabel(data.section_availability === 'suppressed' ? 'suppressed' : data.kpis.overall_peer_score === null ? 'no_data' : 'available', data.kpis.overall_peer_score)],
+        ['Overall self score', formatScore(data.kpis.overall_self_score)],
       ].map(([label, value], index) => <div className={index === 0 ? 'reports-kpi-segment reports-kpi-primary' : 'reports-kpi-segment'} key={label as string}><span>{label}</span><strong>{value}</strong>{index === 1 && <small>{data.kpis.peer_completion_rate === null ? 'No reviews assigned' : `${data.kpis.peer_completion_rate}% complete`}</small>}</div>)}
     </section>
     <section className="reports-card">
-      <div className="reports-section-heading"><h2>Performance by dimension</h2><p>Explore aggregated feedback across evaluated competencies.</p></div>
-      {data.dimension_availability !== 'available' ? <ReportsEmptyState title={emptyState.title} message={emptyState.message} /> : <div className="reports-dimension-chart">{data.dimensions.map((dimension) => <div className="reports-bar-row" key={dimension.id}>
-        <div className="reports-bar-label"><strong>{dimension.name}</strong><span>{dimension.suppressed ? 'Hidden for confidentiality' : `${dimension.response_count} responses · ${dimension.evaluator_count} evaluators · ${dimension.scale_min}-${dimension.scale_max} scale`}</span></div>
-        <div className="reports-bar-track"><span style={{ width: `${dimension.average_score === null ? 0 : Math.min(100, (dimension.average_score / dimension.scale_max) * 100)}%` }} /></div>
-        <strong className="reports-bar-value">{formatScore(dimension.average_score)}</strong>
+      <div className="reports-section-heading"><h2>Performance by section</h2><p>Aggregated peer feedback by rated section on a 1-5 scale.</p></div>
+      {data.sections.length === 0 ? <ReportsEmptyState title={emptyState.title} message={emptyState.message} /> : <div className="reports-dimension-chart">{data.sections.map((section) => <div className="reports-bar-row" key={section.id}>
+        <div className="reports-bar-label"><strong>{section.name}</strong><span>Peer: {section.peer_availability === 'available' && section.peer_score !== null ? `${section.peer_evaluator_count} evaluators` : availabilityLabel(section.peer_availability, section.peer_score)}</span><span>Self: {availabilityLabel(section.self_availability, section.self_score)}</span></div>
+        {section.peer_availability === 'available' && section.peer_score !== null ? <div className="reports-bar-track"><span style={{ width: `${Math.min(100, (section.peer_score / 5) * 100)}%` }} /></div> : <div />}
+        <strong className="reports-bar-value">{availabilityLabel(section.peer_availability, section.peer_score)}</strong>
       </div>)}</div>}
     </section>
+    <QuestionAnalytics campaignId={data.campaign.id} requesterUserId={requesterUserId} scope={{ employee_id: data.employee.id }} />
     <section className="reports-card">
-      <div className="reports-section-heading"><h2>Self-evaluation vs peer feedback</h2><p>Comparisons require submitted self-evaluation and reportable peer feedback on compatible dimensions.</p></div>
-      {message ? <ReportsEmptyState title={message} message="Comparison is unavailable for the current evaluation data." /> : <div className="reports-simple-table"><table><thead><tr><th>Dimension</th><th>Peer feedback</th><th>Self-evaluation</th><th>Difference</th></tr></thead><tbody>{data.self_peer_comparison.map((item) => <tr key={item.dimension_id}><td>{item.dimension_name}</td><td>{formatScore(item.peer_average, item.scale_max)}</td><td>{formatScore(item.self_average, item.scale_max)}</td><td>{formatScore(item.difference)}</td></tr>)}</tbody></table></div>}
+      <div className="reports-section-heading"><h2>Self-evaluation vs peer feedback</h2><p>Comparisons require submitted self-evaluation and reportable peer feedback in the same section.</p></div>
+      {message ? <ReportsEmptyState title={message} message="Comparison is unavailable for the current evaluation data." /> : <div className="reports-simple-table"><table><thead><tr><th>Section</th><th>Peer feedback</th><th>Self-evaluation</th><th>Difference</th><th>Interpretation</th></tr></thead><tbody>{data.self_peer_comparison.map((item) => <tr key={item.section_id}><td>{item.section_name}</td><td>{formatScore(item.peer_average)}</td><td>{formatScore(item.self_average)}</td><td>{item.difference.toFixed(2)}</td><td>{item.interpretation}</td></tr>)}</tbody></table></div>}
     </section>
     <section className="reports-card reports-coverage">
       <div className="reports-section-heading"><h2>Evaluation coverage</h2></div>
@@ -70,11 +84,12 @@ export default function EmployeeReportDetailView({ data, selectedHistory, onBack
         <div className="reports-coverage-track" role="progressbar" aria-label="Peer review completion" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage ?? 0}><span style={{ width: `${percentage ?? 0}%` }} /></div>
         <div className="reports-coverage-meta"><span>{data.coverage.peer_outstanding} {data.coverage.peer_outstanding === 1 ? 'review' : 'reviews'} outstanding</span><span>Deadline: {formatDate(data.coverage.campaign_end_date)}</span></div>
       </>}
+      <p className="reports-coverage-self">Distinct peer evaluators: {data.coverage.distinct_peer_evaluators ?? 'Hidden for confidentiality'}</p>
       <p className="reports-coverage-self">Self-evaluation: {data.coverage.self_evaluation.status}</p>
     </section>
     <section className="reports-card">
-      <div className="reports-section-heading"><h2>Performance over time</h2><p>Historical results use compatible issued questionnaire snapshots.</p></div>
-      {selectedHistory ? <div className="reports-history-points">{selectedHistory.points.map((point) => <div className="reports-history-point" key={point.campaign_id}><span>{point.campaign_name}</span><strong>{formatScore(point.average_score, selectedHistory.scale_max)}</strong><small>{formatDate(point.campaign_start_date)}</small></div>)}</div> : <ReportsEmptyState title="More campaign results are needed." message="Compatible, reportable results from multiple campaigns are required to show a trend." />}
+      <div className="reports-section-heading"><h2>Performance over time</h2><p>Historical reportable section and overall peer scores.</p>{historyOptions.length > 0 && <select className="form-control reports-source-select" aria-label="Select history series" value={selectedHistory?.key ?? ''} onChange={(event) => setHistoryKey(event.target.value)}>{historyOptions.map(({ series, key }) => <option key={key} value={key}>{series.section_id === null ? 'Overall' : series.section_name}</option>)}</select>}</div>
+      {selectedHistory && selectedHistory.series.points.length > 0 ? <div className="reports-history-points">{selectedHistory.series.points.map((point) => <div className="reports-history-point" key={point.campaign_id}><span>{point.campaign_name}</span><strong>{formatScore(point.average_score)}</strong><small>{formatDate(point.campaign_start_date)} · {point.evaluator_count} evaluators · {point.reportable_sections} {point.reportable_sections === 1 ? 'section' : 'sections'}</small></div>)}</div> : <ReportsEmptyState title="No historical results available." message="Reportable results for this series will appear when available." />}
     </section>
   </div>;
 }

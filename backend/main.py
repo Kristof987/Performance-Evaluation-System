@@ -7,13 +7,17 @@ from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import asc, desc, func, or_
+from sqlalchemy import and_, asc, desc, func, or_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, aliased
 
 from database import engine, Base, SessionLocal
+from business_calendar import business_today as campaign_today, campaign_status
 import models
 import form_snapshot_service
 import reporting_service
+import question_analytics_service
 import schemas
 
 #Base.metadata.create_all(bind=engine)
@@ -58,35 +62,62 @@ def get_db():
 
 @app.post("/users", response_model=schemas.UserResponse)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    if user.company_role_id is not None and db.query(models.CompanyRole.id).filter(models.CompanyRole.id == user.company_role_id).first() is None:
+        raise HTTPException(status_code=400, detail="Company role not found")
     new_user = models.User(
         username=user.username,
         email=user.email,
         password_hash=user.password,  # ezt mindjárt javítjuk hashelésre
-        company_role_id=user.company_role_id,
         system_role_id=user.system_role_id,
     )
 
     db.add(new_user)
+    db.flush()
+    if user.company_role_id is not None:
+        db.add(models.Employee(user_id=new_user.id, full_name=user.username,
+                               company_role_id=user.company_role_id, is_active=True))
     db.commit()
     db.refresh(new_user)
 
-    return new_user
+    return {**new_user.__dict__, "employee_id": new_user.employee.id if new_user.employee else None,
+            "full_name": new_user.employee.full_name if new_user.employee else None,
+            "company_role_id": new_user.employee.company_role_id if new_user.employee else None,
+            "profile_image_url": new_user.employee.profile_image_url if new_user.employee else None}
+
+
+def require_development_login():
+    # Both settings must be explicitly enabled on the backend; neither is a credential.
+    if os.getenv("COMPASS_ENV", "production").lower() != "development" or os.getenv("COMPASS_DEV_LOGIN_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=404, detail="Development login is unavailable")
 
 
 @app.post("/login", response_model=schemas.UserResponse)
 def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
-    result = (
-        db.query(models.User, models.CompanyRole.name.label("role_name"))
-        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
-        .filter(models.User.username == user_login.username.strip())
+    require_development_login()
+    name = " ".join(user_login.name.split()).lower()
+    if not name:
+        raise HTTPException(status_code=400, detail="Enter your full name, username or email")
+    matches = (
+        db.query(models.User, models.Employee, models.CompanyRole.name.label("role_name"), models.SystemRole.name.label("system_role_name"))
+        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
+        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
+        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
+        .filter(or_(
+            func.lower(func.trim(models.Employee.full_name)) == name,
+            func.lower(func.trim(models.User.username)) == name,
+            func.lower(func.trim(models.User.email)) == name,
+        ))
         .filter(models.User.is_active.is_(True))
-        .first()
+        .limit(2)
+        .all()
     )
 
-    if result is None:
-        raise HTTPException(status_code=401, detail="Nem letezo vagy inaktiv user")
+    if not matches:
+        raise HTTPException(status_code=404, detail="No active user matches that name, username or email")
+    if len(matches) > 1:
+        raise HTTPException(status_code=409, detail="Multiple users match. Enter your unique username or email")
 
-    user, role_name = result
+    user, employee, role_name, system_role_name = matches[0]
 
     user.last_login = func.now()
     db.commit()
@@ -94,15 +125,20 @@ def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
 
     return {
         **user.__dict__,
-        "role_name": role_name,
+        "employee_id": employee.id if employee else None,
+        "full_name": employee.full_name if employee else None,
+        "company_role_id": employee.company_role_id if employee else None,
+        "profile_image_url": employee.profile_image_url if employee else None,
+        "role_name": (system_role_name if system_role_name.strip().lower() == "hr" or "manager" in system_role_name.strip().lower()
+                      else role_name or system_role_name),
     }
 
 
 @app.get("/people", response_model=schemas.PeopleResponse)
 def get_people(db: Session = Depends(get_db)):
-    users = (
-        db.query(models.User)
-        .order_by(models.User.is_active.desc(), models.User.username.asc())
+    employees = (
+        db.query(models.Employee)
+        .order_by(models.Employee.is_active.desc(), models.Employee.full_name.asc())
         .all()
     )
     roles_by_id = {
@@ -112,19 +148,19 @@ def get_people(db: Session = Depends(get_db)):
     groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
     groups_by_id = {group.id: group for group in groups}
     group_member_counts = {group.id: 0 for group in groups}
-    group_ids_by_user_id = {user.id: [] for user in users}
+    group_ids_by_employee_id = {employee.id: [] for employee in employees}
 
     memberships = db.query(
-        models.user_company_groups.c.user_id,
-        models.user_company_groups.c.company_group_id,
+        models.employee_company_groups.c.employee_id,
+        models.employee_company_groups.c.company_group_id,
     ).all()
     for membership in memberships:
         group = groups_by_id.get(membership.company_group_id)
         if group is None:
             continue
         group_member_counts[group.id] = group_member_counts.get(group.id, 0) + 1
-        if membership.user_id in group_ids_by_user_id:
-            group_ids_by_user_id[membership.user_id].append(group.id)
+        if membership.employee_id in group_ids_by_employee_id:
+            group_ids_by_employee_id[membership.employee_id].append(group.id)
 
     def serialize_group(group: models.CompanyGroup):
         return {
@@ -137,19 +173,21 @@ def get_people(db: Session = Depends(get_db)):
     return {
         "employees": [
             {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "company_role_id": user.company_role_id,
-                "role_name": roles_by_id.get(user.company_role_id, "Unknown role"),
+                "id": employee.id,
+                "user_id": employee.user_id,
+                "username": employee.user.username if employee.user else employee.full_name,
+                "full_name": employee.full_name,
+                "email": employee.user.email if employee.user else "",
+                "company_role_id": employee.company_role_id,
+                "role_name": roles_by_id.get(employee.company_role_id, "Unknown role"),
                 "groups": [
                     serialize_group(groups_by_id[group_id])
-                    for group_id in group_ids_by_user_id.get(user.id, [])
+                    for group_id in group_ids_by_employee_id.get(employee.id, [])
                     if group_id in groups_by_id
                 ],
-                "is_active": user.is_active,
+                "is_active": employee.is_active,
             }
-            for user in users
+            for employee in employees
         ],
         "groups": [serialize_group(group) for group in groups],
     }
@@ -160,10 +198,12 @@ def get_account_settings_profile(user_id: int, db: Session = Depends(get_db)):
     result = (
         db.query(
             models.User,
+            models.Employee,
             models.CompanyRole.name.label("company_role"),
             models.SystemRole.name.label("system_role"),
         )
-        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
+        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
+        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
         .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
         .filter(models.User.id == user_id)
         .filter(models.User.is_active.is_(True))
@@ -172,17 +212,18 @@ def get_account_settings_profile(user_id: int, db: Session = Depends(get_db)):
     if result is None:
         raise HTTPException(status_code=404, detail="Account profile not found")
 
-    user, company_role, system_role = result
+    user, employee, company_role, system_role = result
     memberships = (
         db.query(models.CompanyGroup)
-        .join(models.user_company_groups, models.user_company_groups.c.company_group_id == models.CompanyGroup.id)
-        .filter(models.user_company_groups.c.user_id == user.id)
+        .join(models.employee_company_groups, models.employee_company_groups.c.company_group_id == models.CompanyGroup.id)
+        .filter(models.employee_company_groups.c.employee_id == employee.id)
         .order_by(models.CompanyGroup.name.asc())
         .all()
-    )
+    ) if employee else []
     return {
         "id": user.id,
         "username": user.username,
+        "full_name": employee.full_name if employee else None,
         "email": user.email,
         "company_role": company_role,
         "system_role": system_role,
@@ -221,23 +262,31 @@ def get_or_create_system_role(role_name: str, db: Session):
     return system_role
 
 
+def employee_username(name: str, email: str, used: set[str]) -> str:
+    # The login uses user IDs; username remains unique even when display names repeat.
+    for candidate in (name, email):
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+    suffix = 2
+    while True:
+        candidate = f"{email}-{suffix}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        suffix += 1
+
+
 @app.post("/people/employees", response_model=schemas.PeopleEmployeeResponse)
 def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session = Depends(get_db)):
-    name = employee.name.strip()
+    name = " ".join(employee.name.split())
     role_name = employee.role.strip()
     if name == "" or role_name == "":
         raise HTTPException(status_code=400, detail="Name and role are required")
 
-    existing_user = (
-        db.query(models.User)
-        .filter((models.User.username == name) | (models.User.email == employee.email))
-        .first()
-    )
+    existing_user = db.query(models.User.id).filter(models.User.email == employee.email).first()
     if existing_user is not None:
-        raise HTTPException(status_code=400, detail="Employee name or email already exists")
-
-    company_role = get_or_create_company_role(role_name, db)
-    system_role = get_or_create_system_role("Employee", db)
+        raise HTTPException(status_code=409, detail="Employee email already exists")
 
     group_ids = sorted(set(employee.group_ids))
     groups = []
@@ -251,33 +300,45 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
         if len(groups) != len(group_ids):
             raise HTTPException(status_code=400, detail="Invalid group selection")
 
-    new_user = models.User(
-        username=name,
-        email=employee.email,
-        password_hash="",
-        company_role_id=company_role.id,
-        system_role_id=system_role.id,
-        is_active=True,
-    )
-    db.add(new_user)
-    db.flush()
-
-    for group in groups:
-        db.execute(
-            models.user_company_groups.insert().values(
-                user_id=new_user.id,
-                company_group_id=group.id,
-            )
+    used = {username for (username,) in db.query(models.User.username).all()}
+    try:
+        company_role = get_or_create_company_role(role_name, db)
+        system_role = get_or_create_system_role("Employee", db)
+        new_user = models.User(
+            username=employee_username(name, employee.email, used),
+            email=employee.email,
+            password_hash="",
+            system_role_id=system_role.id,
+            is_active=True,
         )
-
-    db.commit()
+        db.add(new_user)
+        db.flush()
+        new_employee = models.Employee(user_id=new_user.id, full_name=name, company_role_id=company_role.id, is_active=True)
+        db.add(new_employee)
+        db.flush()
+        for group in groups:
+            db.execute(
+                models.employee_company_groups.insert().values(
+                    employee_id=new_employee.id,
+                    company_group_id=group.id,
+                )
+            )
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Employee email or username already exists") from error
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(new_user)
 
     return {
-        "id": new_user.id,
+        "id": new_employee.id,
+        "user_id": new_user.id,
         "username": new_user.username,
+        "full_name": new_employee.full_name,
         "email": new_user.email,
-        "company_role_id": new_user.company_role_id,
+        "company_role_id": new_employee.company_role_id,
         "role_name": company_role.name,
         "groups": [
             {
@@ -288,29 +349,32 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
             }
             for group in groups
         ],
-        "is_active": new_user.is_active,
+        "is_active": new_employee.is_active,
     }
 
 
 @app.put("/people/employees/{employee_id}", response_model=schemas.PeopleEmployeeResponse)
 def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpdate, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.id == employee_id).first()
-    if user is None:
+    person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
+    user = person.user
+    if user is None:
+        raise HTTPException(status_code=409, detail="An account must be linked before updating an employee email")
 
-    name = employee.name.strip()
+    name = " ".join(employee.name.split())
     role_name = employee.role.strip()
     if name == "" or role_name == "":
         raise HTTPException(status_code=400, detail="Name and role are required")
 
     duplicate_user = (
         db.query(models.User)
-        .filter(models.User.id != employee_id)
-        .filter((models.User.username == name) | (models.User.email == employee.email))
+        .filter(models.User.id != user.id)
+        .filter(models.User.email == employee.email)
         .first()
     )
     if duplicate_user is not None:
-        raise HTTPException(status_code=400, detail="Employee name or email already exists")
+        raise HTTPException(status_code=409, detail="Employee email already exists")
 
     company_role = get_or_create_company_role(role_name, db)
     group_ids = sorted(set(employee.group_ids))
@@ -325,31 +389,40 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
         if len(groups) != len(group_ids):
             raise HTTPException(status_code=400, detail="Invalid group selection")
 
-    user.username = name
+    current_group_ids = {group_id for (group_id,) in db.query(models.employee_company_groups.c.company_group_id)
+        .filter(models.employee_company_groups.c.employee_id == employee_id).all()}
+    for removed_group_id in current_group_ids - set(group_ids):
+        ensure_group_membership_mutable(removed_group_id, employee_id, db)
+    if person.company_role_id != company_role.id:
+        ensure_group_membership_mutable(None, employee_id, db, role_change=True)
+
+    person.full_name = name
     user.email = employee.email
-    user.company_role_id = company_role.id
+    person.company_role_id = company_role.id
 
     db.execute(
-        models.user_company_groups.delete().where(
-            models.user_company_groups.c.user_id == employee_id
+        models.employee_company_groups.delete().where(
+            models.employee_company_groups.c.employee_id == employee_id
         )
     )
     for group in groups:
         db.execute(
-            models.user_company_groups.insert().values(
-                user_id=employee_id,
+            models.employee_company_groups.insert().values(
+                employee_id=employee_id,
                 company_group_id=group.id,
             )
         )
 
     db.commit()
-    db.refresh(user)
+    db.refresh(person)
 
     return {
-        "id": user.id,
+        "id": person.id,
+        "user_id": user.id,
         "username": user.username,
+        "full_name": person.full_name,
         "email": user.email,
-        "company_role_id": user.company_role_id,
+        "company_role_id": person.company_role_id,
         "role_name": company_role.name,
         "groups": [
             {
@@ -360,7 +433,7 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
             }
             for group in groups
         ],
-        "is_active": user.is_active,
+        "is_active": person.is_active,
     }
 
 
@@ -417,8 +490,8 @@ def update_people_group(group_id: int, group: schemas.PeopleGroupUpdate, db: Ses
     db.refresh(existing_group)
 
     member_count = (
-        db.query(models.user_company_groups)
-        .filter(models.user_company_groups.c.company_group_id == group_id)
+        db.query(models.employee_company_groups)
+        .filter(models.employee_company_groups.c.company_group_id == group_id)
         .count()
     )
     return {
@@ -435,30 +508,30 @@ def add_people_group_member(group_id: int, member: schemas.PeopleGroupMemberCrea
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    user = db.query(models.User).filter(models.User.id == member.user_id).first()
-    if user is None:
+    person = db.query(models.Employee).filter(models.Employee.id == member.employee_id).first()
+    if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
 
     existing_membership = (
-        db.query(models.user_company_groups)
-        .filter(models.user_company_groups.c.user_id == member.user_id)
-        .filter(models.user_company_groups.c.company_group_id == group_id)
+        db.query(models.employee_company_groups)
+        .filter(models.employee_company_groups.c.employee_id == member.employee_id)
+        .filter(models.employee_company_groups.c.company_group_id == group_id)
         .first()
     )
     if existing_membership is not None:
         raise HTTPException(status_code=400, detail="Employee is already in this group")
 
     db.execute(
-        models.user_company_groups.insert().values(
-            user_id=member.user_id,
+        models.employee_company_groups.insert().values(
+            employee_id=member.employee_id,
             company_group_id=group_id,
         )
     )
     db.commit()
 
     member_count = (
-        db.query(models.user_company_groups)
-        .filter(models.user_company_groups.c.company_group_id == group_id)
+        db.query(models.employee_company_groups)
+        .filter(models.employee_company_groups.c.company_group_id == group_id)
         .count()
     )
     return {
@@ -470,26 +543,28 @@ def add_people_group_member(group_id: int, member: schemas.PeopleGroupMemberCrea
 
 
 @app.delete(
-    "/people/groups/{group_id}/members/{user_id}",
+    "/people/groups/{group_id}/members/{employee_id}",
     response_model=schemas.PeopleGroupResponse,
 )
 def remove_people_group_member(
     group_id: int,
-    user_id: int,
+    employee_id: int,
     db: Session = Depends(get_db),
 ):
     group = db.query(models.CompanyGroup).filter(models.CompanyGroup.id == group_id).first()
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if user is None:
+    person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
 
+    ensure_group_membership_mutable(group_id, employee_id, db)
+
     delete_result = db.execute(
-        models.user_company_groups.delete()
-        .where(models.user_company_groups.c.user_id == user_id)
-        .where(models.user_company_groups.c.company_group_id == group_id)
+        models.employee_company_groups.delete()
+        .where(models.employee_company_groups.c.employee_id == employee_id)
+        .where(models.employee_company_groups.c.company_group_id == group_id)
     )
     if delete_result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Employee is not in this group")
@@ -497,8 +572,8 @@ def remove_people_group_member(
     db.commit()
 
     member_count = (
-        db.query(models.user_company_groups)
-        .filter(models.user_company_groups.c.company_group_id == group_id)
+        db.query(models.employee_company_groups)
+        .filter(models.employee_company_groups.c.company_group_id == group_id)
         .count()
     )
     return {
@@ -593,12 +668,8 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
 
     errors = []
     rows = []
-    seen_names = set()
     seen_emails = set()
-    existing_names = {
-        username.lower()
-        for (username,) in db.query(models.User.username).all()
-    }
+    used_usernames = {username for (username,) in db.query(models.User.username).all()}
     existing_emails = {
         email.lower()
         for (email,) in db.query(models.User.email).all()
@@ -628,18 +699,12 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
         if system_role_name == "":
             errors.append(f"Row {row_number}: Employee System Role is required.")
 
-        name_key = name.lower()
         email_key = email.lower()
-        if name_key != "" and name_key in seen_names:
-            errors.append(f"Row {row_number}: Employee Name is duplicated in the file.")
         if email_key != "" and email_key in seen_emails:
             errors.append(f"Row {row_number}: Employee Email Address is duplicated in the file.")
-        if name_key != "" and name_key in existing_names:
-            errors.append(f"Row {row_number}: Employee Name already exists in the database.")
         if email_key != "" and email_key in existing_emails:
             errors.append(f"Row {row_number}: Employee Email Address already exists in the database.")
 
-        seen_names.add(name_key)
         seen_emails.add(email_key)
         rows.append((name, email, company_role_name, system_role_name))
 
@@ -649,21 +714,28 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
     if len(errors) > 0:
         return {"created_count": 0, "errors": errors}
 
-    for name, email, company_role_name, system_role_name in rows:
-        company_role = get_or_create_company_role(company_role_name, db)
-        system_role = get_or_create_system_role(system_role_name, db)
-        db.add(
-            models.User(
-                username=name,
-                email=email,
-                password_hash="",
-                company_role_id=company_role.id,
-                system_role_id=system_role.id,
-                is_active=True,
-            )
-        )
-
-    db.commit()
+    try:
+        for name, email, company_role_name, system_role_name in rows:
+            company_role = get_or_create_company_role(company_role_name, db)
+            system_role = get_or_create_system_role(system_role_name, db)
+            new_user = models.User(
+                    username=employee_username(" ".join(name.split()), email, used_usernames),
+                    email=email,
+                    password_hash="",
+                    system_role_id=system_role.id,
+                    is_active=True,
+                )
+            db.add(new_user)
+            db.flush()
+            db.add(models.Employee(user_id=new_user.id, full_name=" ".join(name.split()),
+                                   company_role_id=company_role.id, is_active=True))
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Employee email or username already exists") from error
+    except Exception:
+        db.rollback()
+        raise
     return {"created_count": len(rows), "errors": []}
 
 
@@ -688,15 +760,15 @@ def get_campaign_form_ids(campaign_id: int, db: Session):
 
 def get_campaign_participant_count(campaign_id: int, db: Session):
     evaluator_ids = {
-        user_id
-        for (user_id,) in db.query(models.FilledForm.evaluator_id)
+        employee_id
+        for (employee_id,) in db.query(models.FilledForm.evaluator_id)
         .filter(models.FilledForm.campaign_id == campaign_id)
         .distinct()
         .all()
     }
     evaluatee_ids = {
-        user_id
-        for (user_id,) in db.query(models.FilledForm.evaluatee_id)
+        employee_id
+        for (employee_id,) in db.query(models.FilledForm.evaluatee_id)
         .filter(models.FilledForm.campaign_id == campaign_id)
         .distinct()
         .all()
@@ -711,13 +783,15 @@ def get_campaign_participants(campaign_id: int, db: Session):
         return []
 
     rows = (
-        db.query(models.User, models.CompanyRole, models.CompanyGroup)
-        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
-        .join(models.user_company_groups, models.user_company_groups.c.user_id == models.User.id)
-        .join(models.CompanyGroup, models.CompanyGroup.id == models.user_company_groups.c.company_group_id)
-        .filter(models.user_company_groups.c.company_group_id.in_(assigned_group_ids))
-        .filter(models.User.is_active.is_(True))
-        .order_by(models.User.username.asc(), models.CompanyGroup.name.asc())
+        db.query(models.Employee, models.User, models.CompanyRole, models.CompanyGroup)
+        .outerjoin(models.User, models.User.id == models.Employee.user_id)
+        .join(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
+        .join(models.employee_company_groups, models.employee_company_groups.c.employee_id == models.Employee.id)
+        .join(models.CompanyGroup, models.CompanyGroup.id == models.employee_company_groups.c.company_group_id)
+        .filter(models.employee_company_groups.c.company_group_id.in_(assigned_group_ids))
+        .filter(models.Employee.is_active.is_(True))
+        .filter(or_(models.Employee.user_id.is_(None), models.User.is_active.is_(True)))
+        .order_by(models.Employee.full_name.asc(), models.CompanyGroup.name.asc())
         .all()
     )
 
@@ -726,25 +800,93 @@ def get_campaign_participants(campaign_id: int, db: Session):
         db.query(models.FilledForm.evaluator_id, func.count(models.FilledForm.id))
         .filter(models.FilledForm.campaign_id == campaign_id)
         .filter(models.FilledForm.finish_date.is_(None))
+        .filter(issued_snapshot_filter())
         .group_by(models.FilledForm.evaluator_id)
         .all()
     )
-    for user, role, group in rows:
+    for employee, user, role, group in rows:
         participant = participants_by_id.setdefault(
-            user.id,
+            employee.id,
             {
-                "user_id": user.id,
-                "name": user.username,
-                "email": user.email,
-                "profile_image_url": user.profile_image_url,
+                "employee_id": employee.id,
+                "name": employee.full_name,
+                "email": user.email if user else None,
+                "profile_image_url": employee.profile_image_url,
                 "role_name": role.name,
                 "groups": [],
-                "evaluations_left": evaluations_left_by_user_id.get(user.id, 0),
+                "evaluations_left": evaluations_left_by_user_id.get(employee.id, 0),
             },
         )
         participant["groups"].append(group.name)
 
     return list(participants_by_id.values())
+
+
+def campaign_lifecycle_status(campaign: models.Campaign, today: date) -> str:
+    return campaign_status(campaign.start_date, campaign.end_date, campaign.is_active, today)
+
+
+def campaign_payload(campaign: models.Campaign, today: date, issued: int = 0, submitted: int = 0) -> dict:
+    return {**campaign.__dict__, "current_date": today, "lifecycle_status": campaign_lifecycle_status(campaign, today),
+            "issued_forms_count": issued, "submitted_forms_count": submitted}
+
+
+def unissued_snapshot_filter():
+    # Older planned rows may contain JSON null; new rows use SQL NULL.
+    return or_(models.FilledForm.form_snapshot.is_(None), models.FilledForm.form_snapshot == JSONB.NULL)
+
+
+def issued_snapshot_filter():
+    return and_(models.FilledForm.form_snapshot.isnot(None), models.FilledForm.form_snapshot != JSONB.NULL)
+
+
+def ensure_campaign_issued(campaign_id: int, db: Session, *, commit: bool = True, today: date | None = None):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
+    if campaign is None or not campaign.is_active or campaign.start_date > (today or campaign_today()):
+        return []
+
+    errors = []
+    for assignment in db.query(models.FilledForm).filter(
+        models.FilledForm.campaign_id == campaign_id,
+        unissued_snapshot_filter(),
+    ).order_by(models.FilledForm.id).all():
+        # Historical answers cannot be reconstructed from today's editable form.
+        if assignment.finish_date is not None or assignment.answers:
+            continue
+        form = db.query(models.Form).filter(models.Form.id == assignment.form_id).first()
+        if form is None:
+            errors.append(f"Assignment {assignment.id}: source form no longer exists")
+            continue
+        problems = form_issuance_errors(form.questions if isinstance(form.questions, list) else [], db)
+        if problems:
+            errors.append(f"Assignment {assignment.id} ({form.name}): {' '.join(problems)}")
+            continue
+        assignment.form_snapshot = form_snapshot_service.create_form_snapshot(form, db)
+        assignment.snapshot_status = "verified"
+
+    if commit:
+        db.commit()
+    return errors
+
+
+def assignment_is_immutable(assignment):
+    # Existing answers without a snapshot are historical and must also stay untouched.
+    return assignment.form_snapshot is not None or assignment.finish_date is not None or bool(assignment.answers)
+
+
+def ensure_group_membership_mutable(group_id: int | None, employee_id: int, db: Session, *, role_change: bool = False):
+    assignment_query = db.query(models.FilledForm).filter(
+        or_(models.FilledForm.evaluator_id == employee_id, models.FilledForm.evaluatee_id == employee_id),
+    )
+    if group_id is not None:
+        assignment_query = assignment_query.filter(models.FilledForm.company_group_id == group_id)
+    existing_assignments = assignment_query.all()
+    campaign_ids = {assignment.campaign_id for assignment in existing_assignments}
+    for campaign_id in campaign_ids:
+        ensure_campaign_issued(campaign_id, db, commit=False)
+    if any(assignment_is_immutable(assignment) for assignment in existing_assignments):
+        detail = "Employee role cannot change while this group has issued evaluations" if role_change else "Employee cannot be removed from this group while issued evaluations reference them"
+        raise HTTPException(status_code=409, detail=detail)
 
 
 @app.get("/users/{user_id}/assigned-evaluations", response_model=list[schemas.AssignedEvaluationResponse])
@@ -757,6 +899,15 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
     )
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    employee = user.employee
+    if employee is None:
+        return []
+
+    campaign_ids = sorted(campaign_id for (campaign_id,) in db.query(models.FilledForm.campaign_id).filter(
+        models.FilledForm.evaluator_id == employee.id,
+    ).distinct().all())
+    for campaign_id in campaign_ids:
+        ensure_campaign_issued(campaign_id, db)
 
     rows = (
         db.query(
@@ -764,13 +915,14 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
             models.Campaign,
             models.Form,
             models.FormStatus,
-            models.User,
+            models.Employee,
         )
         .join(models.Campaign, models.Campaign.id == models.FilledForm.campaign_id)
         .join(models.Form, models.Form.id == models.FilledForm.form_id)
         .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
-        .join(models.User, models.User.id == models.FilledForm.evaluatee_id)
-        .filter(models.FilledForm.evaluator_id == user_id)
+        .join(models.Employee, models.Employee.id == models.FilledForm.evaluatee_id)
+        .filter(models.FilledForm.evaluator_id == employee.id)
+        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
         .order_by(
             models.FilledForm.finish_date.isnot(None).asc(),
             models.Campaign.end_date.asc().nullslast(),
@@ -779,11 +931,14 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
+    today = campaign_today()
     evaluations = []
     for filled_form, campaign, form, status, evaluatee in rows:
-        questions = form_snapshot_service.snapshot_questions(filled_form, form)
+        questions = form_snapshot_service.snapshot_questions(filled_form, form) if filled_form.form_snapshot is not None else []
         answers = filled_form.answers if isinstance(filled_form.answers, list) else []
-        answered_count = sum(1 for answer in answers if isinstance(answer, dict) and len(answer) > 0)
+        issued_questions = list(form_snapshot_service.iter_snapshot_questions(questions))
+        question_ids = {question.get("id") for question in issued_questions if isinstance(question.get("id"), str)}
+        answered_count = len({answer.get("question_id") for answer in answers if isinstance(answer, dict) and answer.get("question_id") in question_ids})
 
         evaluations.append({
             "id": filled_form.id,
@@ -792,16 +947,18 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
             "campaign_name": campaign.name,
             "campaign_start_date": campaign.start_date,
             "campaign_is_active": campaign.is_active,
+            "campaign_lifecycle_status": campaign_lifecycle_status(campaign, today),
+            "current_date": today,
             "form_id": form.id,
             "form_name": form_snapshot_service.snapshot_form_name(filled_form, form),
             "form_description": form_snapshot_service.snapshot_form_description(filled_form, form),
             "evaluatee_id": evaluatee.id,
-            "evaluatee_name": evaluatee.username,
+            "evaluatee_name": evaluatee.full_name,
             "status_name": status.name,
             "due_date": campaign.end_date,
             "finish_date": filled_form.finish_date,
-            "question_count": len(questions),
-            "answered_count": min(answered_count, len(questions)) if len(questions) > 0 else answered_count,
+            "question_count": len(issued_questions),
+            "answered_count": answered_count,
             "created_at": filled_form.created_at,
         })
 
@@ -813,7 +970,11 @@ def get_assigned_questionnaire(user_id: int, evaluation_id: int, db: Session = D
     evaluation = next((item for item in get_assigned_evaluations(user_id, db) if item["id"] == evaluation_id), None)
     if evaluation is None:
         raise HTTPException(status_code=404, detail="Assigned evaluation not found")
+    if evaluation["campaign_start_date"] > campaign_today() and evaluation["finish_date"] is None:
+        raise HTTPException(status_code=403, detail="This questionnaire is not available before the campaign starts")
     filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).first()
+    if filled_form.form_snapshot is None:
+        raise HTTPException(status_code=403, detail="This questionnaire has not been issued")
     form = db.query(models.Form).filter(models.Form.id == filled_form.form_id).first()
     return {"evaluation": evaluation, "questions": form_snapshot_service.snapshot_questions(filled_form, form), "answers": filled_form.answers}
 
@@ -822,31 +983,33 @@ def get_assigned_questionnaire(user_id: int, evaluation_id: int, db: Session = D
 def update_assigned_questionnaire(user_id: int, evaluation_id: int, payload: schemas.AssignedQuestionnaireUpdate, db: Session = Depends(get_db)):
     questionnaire = get_assigned_questionnaire(user_id, evaluation_id, db)
     evaluation = questionnaire["evaluation"]
-    today = date.today()
+    today = campaign_today()
     if not evaluation["campaign_is_active"] or evaluation["campaign_start_date"] > today or (evaluation["due_date"] is not None and evaluation["due_date"] < today):
         raise HTTPException(status_code=403, detail="This questionnaire is not currently available")
     if evaluation["finish_date"] is not None:
         raise HTTPException(status_code=409, detail="This questionnaire has already been submitted")
 
-    questions = questionnaire["questions"]
-    by_id = {question.get("id"): question for question in questions if isinstance(question, dict)}
+    questions = list(form_snapshot_service.iter_snapshot_questions(questionnaire["questions"]))
+    by_id = {question.get("id"): question for question in questions}
     seen = set()
     for answer in payload.answers:
         question_id = answer.get("question_id")
         if not isinstance(question_id, str) or question_id not in by_id or question_id in seen or set(answer) != {"question_id", "value"}:
-            raise HTTPException(status_code=400, detail="Invalid questionnaire answer")
+            raise HTTPException(status_code=400, detail="Unknown or duplicate questionnaire answer")
         seen.add(question_id)
         question = by_id[question_id]
         value = answer["value"]
         kind = question.get("type")
         options = question.get("options", question.get("choices", []))
-        choices = [option if isinstance(option, str) else option.get("id", option.get("value", option.get("label"))) for option in options] if isinstance(options, list) else []
-        if kind in {"Scale 1-5", "Scale 1-10"}:
-            valid = isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= (10 if kind == "Scale 1-10" else 5)
+        choices = [option if isinstance(option, str) else next((option[key] for key in ("id", "value", "label") if option.get(key) is not None), None) for option in options if isinstance(option, (str, dict))] if isinstance(options, list) else []
+        if kind in {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}:
+            minimum = question.get("scale_min", 1)
+            maximum = question.get("scale_max", 10 if kind == "Scale 1-10" else 5)
+            valid = isinstance(value, int) and not isinstance(value, bool) and isinstance(minimum, int) and not isinstance(minimum, bool) and isinstance(maximum, int) and not isinstance(maximum, bool) and minimum <= value <= maximum
         elif kind == "Single choice":
             valid = isinstance(value, str) and value in choices
         elif kind == "Multiple choice":
-            valid = isinstance(value, list) and len(value) == len(set(str(item) for item in value)) and all(isinstance(item, str) and item in choices for item in value)
+            valid = isinstance(value, list) and len(value) > 0 and len(value) == len(set(str(item) for item in value)) and all(isinstance(item, str) and item in choices for item in value)
         elif kind == "Text":
             valid = isinstance(value, str) and value.strip() != ""
         elif kind == "Number":
@@ -859,11 +1022,19 @@ def update_assigned_questionnaire(user_id: int, evaluation_id: int, payload: sch
         else:
             valid = False
         if not valid:
-            raise HTTPException(status_code=400, detail="Invalid questionnaire answer")
+            if kind in {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}:
+                detail = f"Rating for question {question_id} must be a whole number from {minimum} to {maximum}"
+            elif kind in {"Single choice", "Multiple choice"}:
+                detail = f"Select valid issued options for question {question_id}"
+            else:
+                detail = f"Invalid answer for question {question_id}"
+            raise HTTPException(status_code=400, detail=detail)
     if payload.submit and (not questions or any(question.get("required") and question.get("id") not in seen for question in questions)):
         raise HTTPException(status_code=400, detail="Answer all required questions before submitting")
 
-    filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).first()
+    filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).with_for_update().first()
+    if filled_form.finish_date is not None or filled_form.form_snapshot is None:
+        raise HTTPException(status_code=409, detail="This questionnaire is no longer available for editing")
     filled_form.answers = payload.answers
     status_name = "Completed" if payload.submit else "In progress"
     status = db.query(models.FormStatus).filter(func.lower(models.FormStatus.name) == status_name.lower()).first()
@@ -881,12 +1052,13 @@ def update_assigned_questionnaire(user_id: int, evaluation_id: int, payload: sch
 @app.get("/users/{user_id}/employee-dashboard", response_model=schemas.EmployeeDashboardResponse)
 def get_employee_dashboard(user_id: int, db: Session = Depends(get_db)):
     evaluations = get_assigned_evaluations(user_id, db)
+    employee = db.query(models.Employee).filter(models.Employee.user_id == user_id).first()
     open_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is None]
     completed_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is not None]
     active_campaign = (
         db.query(models.Campaign)
         .join(models.FilledForm, models.FilledForm.campaign_id == models.Campaign.id)
-        .filter(models.FilledForm.evaluator_id == user_id)
+        .filter(models.FilledForm.evaluator_id == employee.id if employee else False)
         .filter(models.Campaign.is_active.is_(True))
         .order_by(models.Campaign.end_date.asc().nullslast(), models.Campaign.start_date.asc())
         .first()
@@ -895,7 +1067,7 @@ def get_employee_dashboard(user_id: int, db: Session = Depends(get_db)):
     if active_campaign is None:
         next_campaign = (
             db.query(models.Campaign)
-            .filter(models.Campaign.start_date >= date.today())
+            .filter(models.Campaign.start_date >= campaign_today())
             .filter(models.Campaign.is_active.is_(True))
             .order_by(models.Campaign.start_date.asc())
             .first()
@@ -911,6 +1083,7 @@ def get_employee_dashboard(user_id: int, db: Session = Depends(get_db)):
     latest_result = completed_evaluations[0] if len(completed_evaluations) > 0 else None
 
     return {
+        "current_date": campaign_today(),
         "evaluations": evaluations,
         "open_count": len(open_evaluations),
         "completed_count": len(completed_evaluations),
@@ -939,6 +1112,10 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
         .order_by(models.Campaign.is_active.desc(), models.Campaign.start_date.desc())
         .all()
     )
+    today = campaign_today()
+    for campaign in campaigns:
+        if campaign.is_active and campaign.start_date <= today:
+            ensure_campaign_issued(campaign.id, db, today=today)
 
     selected_campaign = None
     if campaign_id is not None:
@@ -947,7 +1124,6 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
     if selected_campaign is None and len(campaigns) > 0:
         selected_campaign = campaigns[0]
 
-    today = date.today()
     upcoming_campaigns = (
         db.query(models.Campaign)
         .filter(models.Campaign.start_date >= today)
@@ -996,12 +1172,15 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
             "is_active": campaign.is_active,
             "start_date": campaign.start_date,
             "end_date": campaign.end_date,
+            "current_date": today,
+            "lifecycle_status": campaign_lifecycle_status(campaign, today),
         }
         for campaign in campaigns
     ]
 
     if selected_campaign is None:
         return {
+            "current_date": today,
             "campaigns": campaign_summaries,
             "selected_campaign_id": None,
             "metrics": None,
@@ -1016,12 +1195,13 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
         .filter(models.FilledForm.campaign_id == selected_campaign.id)
         .all()
     )
-    assignment_count = len(assignments)
+    planned_count = sum(1 for assignment in assignments if assignment.form_snapshot is None and assignment.finish_date is None and not assignment.answers)
+    assignment_count = len(assignments) - planned_count
     submitted_count = sum(1 for assignment in assignments if assignment.finish_date is not None)
     overdue_assignments = [
         assignment
         for assignment in assignments
-        if assignment.finish_date is None
+        if assignment.form_snapshot is not None and assignment.finish_date is None
         and selected_campaign.end_date is not None
         and selected_campaign.end_date < today
     ]
@@ -1031,6 +1211,7 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
 
     metrics = {
         "assignment_count": assignment_count,
+        "planned_count": planned_count,
         "submitted_count": submitted_count,
         "completion_rate": round((submitted_count / assignment_count) * 100) if assignment_count > 0 else 0,
         "awaiting_submission_count": assignment_count - submitted_count,
@@ -1072,6 +1253,7 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
         })
 
     return {
+        "current_date": today,
         "campaigns": campaign_summaries,
         "selected_campaign_id": selected_campaign.id,
         "metrics": metrics,
@@ -1098,17 +1280,18 @@ def require_completion_status_access(campaign_id: int, requester_user_id: int, d
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
     user_role = (
-        db.query(models.User, models.CompanyRole.name.label("role_name"))
-        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
+        db.query(models.User, models.CompanyRole.name.label("role_name"), models.SystemRole.name.label("system_role_name"))
+        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
+        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
+        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
         .filter(models.User.id == requester_user_id)
         .filter(models.User.is_active.is_(True))
         .first()
     )
     if user_role is None:
         raise HTTPException(status_code=403, detail="User is not authorized to view completion status")
-    _, role_name = user_role
-    role = role_name.strip().lower()
-    if role != "hr" and "manager" not in role:
+    _, role_name, system_role_name = user_role
+    if not any(role and (role.strip().lower() == "hr" or "manager" in role.strip().lower()) for role in (role_name, system_role_name)):
         raise HTTPException(status_code=403, detail="User is not authorized to view completion status")
     return campaign
 
@@ -1128,18 +1311,20 @@ def get_campaign_completion_status(
     db: Session = Depends(get_db),
 ):
     campaign = require_completion_status_access(campaign_id, requester_user_id, db)
-    today = date.today()
-    evaluator = aliased(models.User)
-    evaluatee = aliased(models.User)
+    today = campaign_today()
+    evaluator = aliased(models.Employee)
+    evaluatee = aliased(models.Employee)
+    evaluator_account = aliased(models.User)
+    evaluatee_account = aliased(models.User)
     rows = (
         db.query(
             models.FilledForm.id,
             models.FilledForm.evaluator_id,
-            evaluator.username.label("evaluator_name"),
-            evaluator.email.label("evaluator_email"),
+            evaluator.full_name.label("evaluator_name"),
+            evaluator_account.email.label("evaluator_email"),
             models.FilledForm.evaluatee_id,
-            evaluatee.username.label("evaluatee_name"),
-            evaluatee.email.label("evaluatee_email"),
+            evaluatee.full_name.label("evaluatee_name"),
+            evaluatee_account.email.label("evaluatee_email"),
             models.FilledForm.form_id.label("questionnaire_id"),
             models.Form.name.label("questionnaire_name"),
             models.FormStatus.name.label("status_name"),
@@ -1148,6 +1333,8 @@ def get_campaign_completion_status(
         )
         .join(evaluator, evaluator.id == models.FilledForm.evaluator_id)
         .join(evaluatee, evaluatee.id == models.FilledForm.evaluatee_id)
+        .outerjoin(evaluator_account, evaluator_account.id == evaluator.user_id)
+        .outerjoin(evaluatee_account, evaluatee_account.id == evaluatee.user_id)
         .join(models.Form, models.Form.id == models.FilledForm.form_id)
         .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
         .filter(models.FilledForm.campaign_id == campaign.id)
@@ -1259,6 +1446,25 @@ def get_campaign_report_overview(
     return reporting_service.build_campaign_report_overview(campaign_id, requester_user_id, db)
 
 
+@app.get("/reports/campaigns/{campaign_id}/questions", response_model=schemas.ReportQuestionsResponse)
+def get_campaign_report_questions(
+    campaign_id: int,
+    requester_user_id: int = Query(...),
+    group_id: int | None = Query(default=None),
+    role_id: int | None = Query(default=None),
+    employee_id: int | None = Query(default=None),
+    perspective: str = Query(default="evaluatee"),
+    db: Session = Depends(get_db),
+):
+    if sum(value is not None for value in (group_id, role_id, employee_id)) > 1:
+        raise HTTPException(status_code=400, detail="Select one Reports scope at a time")
+    if perspective not in {"evaluatee", "evaluator"} or (perspective == "evaluator" and role_id is None):
+        raise HTTPException(status_code=400, detail="Invalid question analytics perspective")
+    return question_analytics_service.build_question_report(
+        campaign_id, requester_user_id, db, group_id=group_id, role_id=role_id, employee_id=employee_id, perspective=perspective,
+    )
+
+
 @app.get("/reports/campaigns/{campaign_id}/groups")
 def get_campaign_report_groups(
     campaign_id: int,
@@ -1318,97 +1524,97 @@ def get_campaign_report_employee_detail(
     return reporting_service.build_employee_report_detail(campaign_id, employee_id, requester_user_id, db)
 
 
-def require_dimension_access(requester_user_id: int, db: Session) -> models.User:
+def require_section_access(requester_user_id: int, db: Session) -> models.User:
     user_role = (
-        db.query(models.User, models.CompanyRole.name.label("role_name"))
-        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
+        db.query(models.User, models.CompanyRole.name.label("role_name"), models.SystemRole.name.label("system_role_name"))
+        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
+        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
+        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
         .filter(models.User.id == requester_user_id)
         .filter(models.User.is_active.is_(True))
         .first()
     )
     if user_role is None:
-        raise HTTPException(status_code=403, detail="User is not authorized to manage performance dimensions")
-    user, role_name = user_role
-    role = role_name.strip().lower()
-    if role != "hr" and "manager" not in role:
-        raise HTTPException(status_code=403, detail="User is not authorized to manage performance dimensions")
+        raise HTTPException(status_code=403, detail="User is not authorized to manage sections")
+    user, role_name, system_role_name = user_role
+    if not any(role and (role.strip().lower() == "hr" or "manager" in role.strip().lower()) for role in (role_name, system_role_name)):
+        raise HTTPException(status_code=403, detail="User is not authorized to manage sections")
     return user
 
 
-def normalize_dimension_name(name: str) -> str:
-    return " ".join(name.strip().lower().split())
+def normalize_section_name(name: str) -> tuple[str, str]:
+    display = " ".join(name.strip().split())
+    if not display or len(display) > 120:
+        raise HTTPException(status_code=400, detail="Section name must contain 1 to 120 characters")
+    normalized = display.casefold()
+    if len(normalized) > 120:
+        raise HTTPException(status_code=400, detail="Normalized section name must contain at most 120 characters")
+    return display, normalized
 
 
-def validate_dimension_payload(name: str, db: Session, dimension_id: int | None = None) -> tuple[str, str]:
-    trimmed = " ".join(name.strip().split())
-    if len(trimmed) < 2:
-        raise HTTPException(status_code=400, detail="Dimension name is required")
-    normalized = normalize_dimension_name(trimmed)
-    duplicate = (
-        db.query(models.PerformanceDimension)
-        .filter(models.PerformanceDimension.scope_key == "default")
-        .filter(models.PerformanceDimension.normalized_name == normalized)
-    )
-    if dimension_id is not None:
-        duplicate = duplicate.filter(models.PerformanceDimension.id != dimension_id)
-    if duplicate.first() is not None:
-        raise HTTPException(status_code=400, detail="A performance dimension with this name already exists")
-    return trimmed, normalized
+@app.get("/sections", response_model=list[schemas.SectionResponse])
+def get_sections(requester_user_id: int = Query(...), include_archived: bool = Query(default=True), db: Session = Depends(get_db)):
+    require_section_access(requester_user_id, db)
+    query = db.query(models.Section).filter(models.Section.scope_key == "default")
+    if not include_archived:
+        query = query.filter(models.Section.is_archived.is_(False))
+    return query.order_by(models.Section.is_archived.asc(), models.Section.name.asc()).all()
 
 
-@app.get("/performance-dimensions", response_model=list[schemas.PerformanceDimensionResponse])
-def get_performance_dimensions(
-    requester_user_id: int = Query(...),
-    include_inactive: bool = Query(default=True),
-    db: Session = Depends(get_db),
-):
-    require_dimension_access(requester_user_id, db)
-    query = db.query(models.PerformanceDimension).filter(models.PerformanceDimension.scope_key == "default")
-    if not include_inactive:
-        query = query.filter(models.PerformanceDimension.is_active.is_(True))
-    return query.order_by(models.PerformanceDimension.is_active.desc(), models.PerformanceDimension.name.asc()).all()
+@app.post("/sections", response_model=schemas.SectionResponse, status_code=201)
+def create_section(payload: schemas.SectionCreate, requester_user_id: int = Query(...), db: Session = Depends(get_db)):
+    require_section_access(requester_user_id, db)
+    name, normalized = normalize_section_name(payload.name)
+    section = models.Section(scope_key="default", name=name, normalized_name=normalized)
+    db.add(section)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        if getattr(getattr(error.orig, "diag", None), "constraint_name", None) != "uq_section_scope_name":
+            raise
+        raise HTTPException(status_code=409, detail="A section with this name already exists") from error
+    db.refresh(section)
+    return section
 
 
-@app.post("/performance-dimensions", response_model=schemas.PerformanceDimensionResponse)
-def create_performance_dimension(
-    payload: schemas.PerformanceDimensionCreate,
-    requester_user_id: int = Query(...),
-    db: Session = Depends(get_db),
-):
-    require_dimension_access(requester_user_id, db)
-    name, normalized = validate_dimension_payload(payload.name, db)
-    dimension = models.PerformanceDimension(
-        scope_key="default",
-        name=name,
-        normalized_name=normalized,
-        description=payload.description.strip() if payload.description is not None and payload.description.strip() else None,
-        is_active=True,
-    )
-    db.add(dimension)
+@app.put("/sections/{section_id}", response_model=schemas.SectionResponse)
+def update_section(section_id: int, payload: schemas.SectionUpdate, requester_user_id: int = Query(...), db: Session = Depends(get_db)):
+    require_section_access(requester_user_id, db)
+    section = db.query(models.Section).filter(models.Section.id == section_id, models.Section.scope_key == "default").first()
+    if section is None:
+        raise HTTPException(status_code=404, detail="Section not found")
+    section.name, section.normalized_name = normalize_section_name(payload.name)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        if getattr(getattr(error.orig, "diag", None), "constraint_name", None) != "uq_section_scope_name":
+            raise
+        raise HTTPException(status_code=409, detail="A section with this name already exists") from error
+    db.refresh(section)
+    return section
+
+
+@app.post("/sections/{section_id}/archive", response_model=schemas.SectionResponse)
+def archive_section(section_id: int, requester_user_id: int = Query(...), db: Session = Depends(get_db)):
+    return set_section_archived(section_id, True, requester_user_id, db)
+
+
+@app.post("/sections/{section_id}/restore", response_model=schemas.SectionResponse)
+def restore_section(section_id: int, requester_user_id: int = Query(...), db: Session = Depends(get_db)):
+    return set_section_archived(section_id, False, requester_user_id, db)
+
+
+def set_section_archived(section_id: int, archived: bool, requester_user_id: int, db: Session):
+    require_section_access(requester_user_id, db)
+    section = db.query(models.Section).filter(models.Section.id == section_id, models.Section.scope_key == "default").first()
+    if section is None:
+        raise HTTPException(status_code=404, detail="Section not found")
+    section.is_archived = archived
     db.commit()
-    db.refresh(dimension)
-    return dimension
-
-
-@app.put("/performance-dimensions/{dimension_id}", response_model=schemas.PerformanceDimensionResponse)
-def update_performance_dimension(
-    dimension_id: int,
-    payload: schemas.PerformanceDimensionUpdate,
-    requester_user_id: int = Query(...),
-    db: Session = Depends(get_db),
-):
-    require_dimension_access(requester_user_id, db)
-    dimension = db.query(models.PerformanceDimension).filter(models.PerformanceDimension.id == dimension_id).first()
-    if dimension is None:
-        raise HTTPException(status_code=404, detail="Performance dimension not found")
-    name, normalized = validate_dimension_payload(payload.name, db, dimension_id)
-    dimension.name = name
-    dimension.normalized_name = normalized
-    dimension.description = payload.description.strip() if payload.description is not None and payload.description.strip() else None
-    dimension.is_active = payload.is_active
-    db.commit()
-    db.refresh(dimension)
-    return dimension
+    db.refresh(section)
+    return section
 
 
 @app.get("/campaigns", response_model=list[schemas.CampaignResponse])
@@ -1418,9 +1624,14 @@ def get_campaigns(db: Session = Depends(get_db)):
         .order_by(models.Campaign.is_active.desc(), models.Campaign.start_date.desc())
         .all()
     )
+    today = campaign_today()
+    for campaign in campaigns:
+        if campaign.is_active and campaign.start_date <= today:
+            ensure_campaign_issued(campaign.id, db, today=today)
 
     issued_counts = dict(
         db.query(models.FilledForm.campaign_id, func.count(models.FilledForm.id))
+        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
         .group_by(models.FilledForm.campaign_id)
         .all()
     )
@@ -1432,11 +1643,7 @@ def get_campaigns(db: Session = Depends(get_db)):
     )
 
     return [
-        {
-            **campaign.__dict__,
-            "issued_forms_count": issued_counts.get(campaign.id, 0),
-            "submitted_forms_count": submitted_counts.get(campaign.id, 0),
-        }
+        campaign_payload(campaign, today, issued_counts.get(campaign.id, 0), submitted_counts.get(campaign.id, 0))
         for campaign in campaigns
     ]
 
@@ -1452,20 +1659,33 @@ def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
+    today = campaign_today()
+    ensure_campaign_issued(campaign_id, db, today=today)
+    # Issuance commits the session and expires ORM attributes; reload the full
+    # campaign before building the response from its mapped state.
+    db.refresh(campaign)
+
     issued_forms_count = (
         db.query(models.FilledForm)
         .filter(models.FilledForm.campaign_id == campaign_id)
+        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
         .count()
     )
 
-    return {
-        **campaign.__dict__,
-        "issued_forms_count": issued_forms_count,
-        "submitted_forms_count": db.query(models.FilledForm).filter(
+    submitted_forms_count = db.query(models.FilledForm).filter(
             models.FilledForm.campaign_id == campaign_id,
             models.FilledForm.finish_date.isnot(None),
-        ).count(),
-    }
+        ).count()
+    return campaign_payload(campaign, today, issued_forms_count, submitted_forms_count)
+
+
+def duplicate_campaign_name(db: Session, name: str, exclude_id: int | None = None) -> bool:
+    normalized = func.lower(func.regexp_replace(models.Campaign.name, r"^[[:space:]]+|[[:space:]]+$", "", "g"))
+    requested = func.lower(func.regexp_replace(name, r"^[[:space:]]+|[[:space:]]+$", "", "g"))
+    query = db.query(models.Campaign.id).filter(normalized == requested)
+    if exclude_id is not None:
+        query = query.filter(models.Campaign.id != exclude_id)
+    return query.first() is not None
 
 
 @app.post("/campaigns", response_model=schemas.CampaignResponse)
@@ -1485,6 +1705,9 @@ def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_
     if creator is None:
         raise HTTPException(status_code=400, detail="Invalid campaign creator")
 
+    if duplicate_campaign_name(db, campaign.name):
+        raise HTTPException(status_code=409, detail="A campaign with this name already exists.")
+
     new_campaign = models.Campaign(
         name=campaign.name.strip(),
         description=campaign.description,
@@ -1496,35 +1719,47 @@ def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_
     )
 
     db.add(new_campaign)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        if getattr(getattr(error.orig, "diag", None), "constraint_name", None) == "uq_campaigns_normalized_name":
+            raise HTTPException(status_code=409, detail="A campaign with this name already exists.") from error
+        raise
     db.refresh(new_campaign)
 
-    return new_campaign
+    return campaign_payload(new_campaign, campaign_today())
 
 
 @app.put("/campaigns/{campaign_id}", response_model=schemas.CampaignResponse)
 def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, db: Session = Depends(get_db)):
+    ensure_campaign_issued(campaign_id, db)
     if not campaign_update.name.strip():
         raise HTTPException(status_code=400, detail="Campaign name is required")
     campaign = (
         db.query(models.Campaign)
         .filter(models.Campaign.id == campaign_id)
+        .with_for_update()
         .first()
     )
 
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
+    if duplicate_campaign_name(db, campaign_update.name, campaign_id):
+        raise HTTPException(status_code=409, detail="A campaign with this name already exists.")
+
     issued_forms_count = (
         db.query(models.FilledForm)
         .filter(models.FilledForm.campaign_id == campaign_id)
+        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
         .count()
     )
 
     if campaign_update.end_date is not None and campaign_update.end_date < campaign_update.start_date:
         raise HTTPException(status_code=400, detail="End date cannot be earlier than start date")
 
-    if campaign.start_date <= date.today() and campaign_update.start_date != campaign.start_date:
+    if campaign.start_date <= campaign_today() and campaign_update.start_date != campaign.start_date:
         raise HTTPException(status_code=400, detail="Start date cannot be changed after the campaign has started")
 
     if (
@@ -1542,17 +1777,28 @@ def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, d
     campaign.is_active = campaign_update.is_active
     campaign.comment = campaign_update.comment
 
-    db.commit()
+    try:
+        db.flush()
+        issuance_errors = ensure_campaign_issued(campaign_id, db, commit=False)
+        if campaign.is_active and campaign.start_date <= campaign_today() and issuance_errors:
+            raise HTTPException(status_code=409, detail="Campaign cannot issue planned evaluations until their forms are ready: " + "; ".join(issuance_errors))
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        if getattr(getattr(error.orig, "diag", None), "constraint_name", None) == "uq_campaigns_normalized_name":
+            raise HTTPException(status_code=409, detail="A campaign with this name already exists.") from error
+        raise
+    issued_forms_count = db.query(models.FilledForm).filter(
+        models.FilledForm.campaign_id == campaign_id,
+        or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)),
+    ).count()
     db.refresh(campaign)
 
-    return {
-        **campaign.__dict__,
-        "issued_forms_count": issued_forms_count,
-        "submitted_forms_count": db.query(models.FilledForm).filter(
+    submitted_forms_count = db.query(models.FilledForm).filter(
             models.FilledForm.campaign_id == campaign_id,
             models.FilledForm.finish_date.isnot(None),
-        ).count(),
-    }
+        ).count()
+    return campaign_payload(campaign, campaign_today(), issued_forms_count, submitted_forms_count)
 
 
 @app.get("/campaigns/{campaign_id}/groups", response_model=schemas.CampaignGroupsResponse)
@@ -1560,6 +1806,8 @@ def get_campaign_groups(campaign_id: int, db: Session = Depends(get_db)):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
+
+    ensure_campaign_issued(campaign_id, db)
 
     groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
     assigned_group_ids = [
@@ -1577,6 +1825,7 @@ def get_campaign_groups(campaign_id: int, db: Session = Depends(get_db)):
 
 @app.put("/campaigns/{campaign_id}/groups", response_model=schemas.CampaignGroupsResponse)
 def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpdate, db: Session = Depends(get_db)):
+    ensure_campaign_issued(campaign_id, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -1597,12 +1846,20 @@ def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpda
             models.CampaignEvaluationRule.campaign_id == campaign_id,
             models.CampaignEvaluationRule.company_group_id.in_(removed_ids),
         ).first() is not None
-        has_evaluations = db.query(models.FilledForm.id).filter(
+        group_assignments = db.query(models.FilledForm).filter(
             models.FilledForm.campaign_id == campaign_id,
             models.FilledForm.company_group_id.in_(removed_ids),
-        ).first() is not None
-        if has_rules or has_evaluations:
-            raise HTTPException(status_code=400, detail="Remove saved form rules and evaluations before deselecting these groups")
+        ).all()
+        has_evaluations = any(assignment_is_immutable(record) for record in group_assignments)
+        if has_evaluations:
+            raise HTTPException(status_code=409, detail="Groups with issued evaluations cannot be removed")
+        if has_rules:
+            raise HTTPException(status_code=409, detail="Remove saved form rules before deselecting these groups")
+        db.query(models.FilledForm).filter(
+            models.FilledForm.campaign_id == campaign_id,
+            models.FilledForm.company_group_id.in_(removed_ids),
+            unissued_snapshot_filter(),
+        ).delete(synchronize_session=False)
 
     db.execute(
         models.campaign_company_groups.delete().where(
@@ -1637,10 +1894,12 @@ def get_campaign_assigned_group_ids(campaign_id: int, db: Session):
 def get_group_roles(group_id: int, db: Session):
     return (
         db.query(models.CompanyRole)
-        .join(models.User, models.User.company_role_id == models.CompanyRole.id)
-        .join(models.user_company_groups, models.user_company_groups.c.user_id == models.User.id)
-        .filter(models.user_company_groups.c.company_group_id == group_id)
-        .filter(models.User.is_active.is_(True))
+        .join(models.Employee, models.Employee.company_role_id == models.CompanyRole.id)
+        .join(models.employee_company_groups, models.employee_company_groups.c.employee_id == models.Employee.id)
+        .outerjoin(models.User, models.User.id == models.Employee.user_id)
+        .filter(models.employee_company_groups.c.company_group_id == group_id)
+        .filter(models.Employee.is_active.is_(True))
+        .filter(or_(models.Employee.user_id.is_(None), models.User.is_active.is_(True)))
         .distinct()
         .order_by(models.CompanyRole.name.asc())
         .all()
@@ -1649,12 +1908,14 @@ def get_group_roles(group_id: int, db: Session):
 
 def get_group_employees(group_id: int, db: Session):
     return (
-        db.query(models.User, models.CompanyRole)
-        .join(models.CompanyRole, models.CompanyRole.id == models.User.company_role_id)
-        .join(models.user_company_groups, models.user_company_groups.c.user_id == models.User.id)
-        .filter(models.user_company_groups.c.company_group_id == group_id)
-        .filter(models.User.is_active.is_(True))
-        .order_by(models.User.username.asc())
+        db.query(models.Employee, models.CompanyRole)
+        .join(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
+        .join(models.employee_company_groups, models.employee_company_groups.c.employee_id == models.Employee.id)
+        .outerjoin(models.User, models.User.id == models.Employee.user_id)
+        .filter(models.employee_company_groups.c.company_group_id == group_id)
+        .filter(models.Employee.is_active.is_(True))
+        .filter(or_(models.Employee.user_id.is_(None), models.User.is_active.is_(True)))
+        .order_by(models.Employee.full_name.asc())
         .all()
     )
 
@@ -1666,7 +1927,7 @@ def get_self_evaluation_participants(campaign_id: int, db: Session):
         for employee, role in get_group_employees(group_id, db):
             row = participants.setdefault(employee.id, {
                 "employee_id": employee.id,
-                "employee_name": employee.username,
+                "employee_name": employee.full_name,
                 "role_name": role.name,
                 "group_names": [],
             })
@@ -1686,12 +1947,13 @@ def build_campaign_self_evaluations(campaign_id: int, db: Session):
         models.FilledForm.campaign_id == campaign_id,
         models.FilledForm.evaluator_id == models.FilledForm.evaluatee_id,
     ).all():
-        issued.setdefault(row.evaluator_id, row.form_id)
+        if assignment_is_immutable(row):
+            issued.setdefault(row.evaluator_id, row.form_id)
     forms = db.query(models.Form).order_by(models.Form.name.asc()).all()
     return {
         "forms": [{"id": form.id, "name": form.name} for form in forms],
         "participants": [
-            {**participant, "form_id": mappings.get(employee_id, issued.get(employee_id)), "locked": employee_id in issued}
+            {**participant, "form_id": issued.get(employee_id, mappings.get(employee_id)), "locked": employee_id in issued}
             for employee_id, participant in sorted(participants.items(), key=lambda item: (item[1]["employee_name"], item[0]))
         ],
     }
@@ -1701,11 +1963,13 @@ def build_campaign_self_evaluations(campaign_id: int, db: Session):
 def get_campaign_self_evaluations(campaign_id: int, db: Session = Depends(get_db)):
     if db.query(models.Campaign.id).filter(models.Campaign.id == campaign_id).first() is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    ensure_campaign_issued(campaign_id, db)
     return build_campaign_self_evaluations(campaign_id, db)
 
 
 @app.put("/campaigns/{campaign_id}/self-evaluations", response_model=schemas.CampaignSelfEvaluationsResponse)
 def update_campaign_self_evaluations(campaign_id: int, payload: schemas.CampaignSelfEvaluationsUpdate, db: Session = Depends(get_db)):
+    ensure_campaign_issued(campaign_id, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -1726,7 +1990,7 @@ def update_campaign_self_evaluations(campaign_id: int, payload: schemas.Campaign
         models.FilledForm.evaluator_id == models.FilledForm.evaluatee_id,
     ).all()
     for record in issued:
-        if record.evaluator_id in participants and desired.get(record.evaluator_id) != record.form_id:
+        if assignment_is_immutable(record) and record.evaluator_id in participants and desired.get(record.evaluator_id) != record.form_id:
             raise HTTPException(status_code=409, detail="Issued self-evaluations cannot be changed or removed")
 
     existing = {
@@ -1748,6 +2012,22 @@ def update_campaign_self_evaluations(campaign_id: int, payload: schemas.Campaign
             db.add(models.CampaignEmployeeSelfEvaluation(
                 campaign_id=campaign_id, employee_id=employee_id, form_id=form_id,
             ))
+    changed_ids = set()
+    for record in issued:
+        if assignment_is_immutable(record) or record.evaluator_id not in participants:
+            continue
+        form_id = desired.get(record.evaluator_id)
+        if form_id is None:
+            db.delete(record)
+        else:
+            if record.form_id != form_id:
+                changed_ids.add(record.id)
+            record.form_id = form_id
+    db.flush()
+    errors = ensure_campaign_issued(campaign_id, db, commit=False)
+    blocking_errors = [error for error in errors if any(error.startswith(f"Assignment {record_id}:") or error.startswith(f"Assignment {record_id} (") for record_id in changed_ids)]
+    if campaign.start_date <= campaign_today() and blocking_errors:
+        raise HTTPException(status_code=409, detail="Cannot issue self-evaluation: " + "; ".join(blocking_errors))
     db.commit()
     return build_campaign_self_evaluations(campaign_id, db)
 
@@ -1769,6 +2049,7 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session):
         .filter(models.CampaignEvaluationRule.campaign_id == campaign_id)
         .all()
     }
+    locked_role_pairs = issued_role_pair_keys(campaign_id, db)
 
     matrices = []
     for group in groups:
@@ -1784,6 +2065,7 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session):
                     "evaluatee_role_name": evaluatee_role.name,
                     "form_id": rule.form_id if rule is not None else None,
                     "rule_id": rule.id if rule is not None else None,
+                    "locked": rule is not None and (group.id, evaluator_role.id, evaluatee_role.id) in locked_role_pairs,
                 })
         matrices.append({
             "group_id": group.id,
@@ -1795,6 +2077,22 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session):
     return {
         "forms": [{"id": form.id, "name": form.name} for form in forms],
         "groups": matrices,
+    }
+
+
+def issued_role_pair_keys(campaign_id: int, db: Session):
+    assignments = db.query(models.FilledForm).filter(
+        models.FilledForm.campaign_id == campaign_id,
+        models.FilledForm.company_group_id.isnot(None),
+        models.FilledForm.evaluator_id != models.FilledForm.evaluatee_id,
+    ).all()
+    issued = [assignment for assignment in assignments if assignment_is_immutable(assignment)]
+    employee_ids = {employee_id for assignment in issued for employee_id in (assignment.evaluator_id, assignment.evaluatee_id)}
+    roles = {person.id: person.company_role_id for person in db.query(models.Employee).filter(models.Employee.id.in_(employee_ids)).all()} if employee_ids else {}
+    return {
+        (assignment.company_group_id, roles[assignment.evaluator_id], roles[assignment.evaluatee_id])
+        for assignment in issued
+        if assignment.evaluator_id in roles and assignment.evaluatee_id in roles
     }
 
 
@@ -1825,7 +2123,7 @@ def get_form_id_for_employee_pair(campaign_id: int, group_id: int, evaluator, ev
     return rule.form_id if rule is not None else None
 
 
-def build_campaign_evaluation_matrix(campaign_id: int, db: Session):
+def build_campaign_evaluation_matrix(campaign_id: int, db: Session, issuance_errors=None):
     assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db)
     groups = []
     if len(assigned_group_ids) > 0:
@@ -1844,23 +2142,37 @@ def build_campaign_evaluation_matrix(campaign_id: int, db: Session):
         .filter(models.FilledForm.company_group_id.isnot(None))
         .all()
     ):
-        filled_forms_by_pair[(filled_form.company_group_id, filled_form.evaluator_id, filled_form.evaluatee_id)] = filled_form
+        key = (filled_form.company_group_id, filled_form.evaluator_id, filled_form.evaluatee_id)
+        existing = filled_forms_by_pair.get(key)
+        if existing is None or assignment_is_immutable(filled_form) and not assignment_is_immutable(existing):
+            filled_forms_by_pair[key] = filled_form
 
     matrices = []
     for group in groups:
         employee_rows = get_group_employees(group.id, db)
-        employees = [user for user, _role in employee_rows]
+        active_member_ids = {person.id for person, _role in employee_rows}
+        employees_by_id = {person.id: (person, role) for person, role in employee_rows}
+        group_assignments = [row for row in filled_forms_by_pair.values() if row.company_group_id == group.id and assignment_is_immutable(row)]
+        historical_employee_ids = {employee_id for row in group_assignments for employee_id in (row.evaluator_id, row.evaluatee_id)} - set(employees_by_id)
+        if historical_employee_ids:
+            for person, role in db.query(models.Employee, models.CompanyRole).join(
+                models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id,
+            ).filter(models.Employee.id.in_(historical_employee_ids)).all():
+                employees_by_id[person.id] = (person, role)
+        employee_rows = sorted(employees_by_id.values(), key=lambda item: (item[0].full_name.lower(), item[0].id))
+        employees = [person for person, _role in employee_rows]
         matrices.append({
             "group_id": group.id,
             "group_name": group.name,
             "employees": [
                 {
-                    "id": user.id,
-                    "name": user.username,
+                    "id": person.id,
+                    "name": person.full_name,
                     "role_id": role.id,
                     "role_name": role.name,
+                    "active": person.id in active_member_ids and person.is_active,
                 }
-                for user, role in employee_rows
+                for person, role in employee_rows
             ],
             "assignments": [
                 {
@@ -1868,8 +2180,9 @@ def build_campaign_evaluation_matrix(campaign_id: int, db: Session):
                     "evaluatee_id": evaluatee.id,
                     "form_id": filled_form.form_id,
                     "filled_form_id": filled_form.id,
+                    "issued": assignment_is_immutable(filled_form),
                     "is_completed": filled_form.finish_date is not None,
-                    "status_name": status_names.get(filled_form.status_id, "Issued"),
+                    "status_name": status_names.get(filled_form.status_id, "Not started") if assignment_is_immutable(filled_form) else "Planned",
                     "has_answers": bool(filled_form.answers),
                 }
                 for evaluator in employees
@@ -1879,7 +2192,7 @@ def build_campaign_evaluation_matrix(campaign_id: int, db: Session):
             ],
         })
 
-    return {"groups": matrices}
+    return {"groups": matrices, "issuance_errors": issuance_errors or []}
 
 
 @app.get("/campaigns/{campaign_id}/evaluation-rules", response_model=schemas.CampaignEvaluationRulesResponse)
@@ -1887,11 +2200,13 @@ def get_campaign_evaluation_rules(campaign_id: int, db: Session = Depends(get_db
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    ensure_campaign_issued(campaign_id, db)
     return build_campaign_rule_matrix(campaign_id, db)
 
 
 @app.put("/campaigns/{campaign_id}/evaluation-rules", response_model=schemas.CampaignEvaluationRulesResponse)
 def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.CampaignEvaluationRulesUpdate, db: Session = Depends(get_db)):
+    ensure_campaign_issued(campaign_id, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -1921,17 +2236,47 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
             raise HTTPException(status_code=400, detail="Duplicate rule for the same group and role pair")
         seen_pairs.add(unique_key)
 
-    db.query(models.CampaignEvaluationRule).filter(
-        models.CampaignEvaluationRule.campaign_id == campaign_id
-    ).delete()
-    for rule in payload.rules:
-        db.add(models.CampaignEvaluationRule(
-            campaign_id=campaign_id,
-            company_group_id=rule.company_group_id,
-            evaluator_role_id=rule.evaluator_role_id,
-            evaluatee_role_id=rule.evaluatee_role_id,
-            form_id=rule.form_id,
-        ))
+    selected_rules = {(rule.company_group_id, rule.evaluator_role_id, rule.evaluatee_role_id): rule.form_id for rule in payload.rules}
+    existing_rules = {
+        (rule.company_group_id, rule.evaluator_role_id, rule.evaluatee_role_id): rule
+        for rule in db.query(models.CampaignEvaluationRule).filter(models.CampaignEvaluationRule.campaign_id == campaign_id).all()
+    }
+    for key in issued_role_pair_keys(campaign_id, db):
+        current = existing_rules.get(key)
+        if current is not None and selected_rules.get(key) != current.form_id:
+            raise HTTPException(status_code=409, detail="Form rules used by issued evaluations cannot be changed or removed")
+
+    for key, rule in existing_rules.items():
+        if key not in selected_rules:
+            db.delete(rule)
+        else:
+            rule.form_id = selected_rules[key]
+    for key, form_id in selected_rules.items():
+        if key not in existing_rules:
+            group_id, evaluator_role_id, evaluatee_role_id = key
+            db.add(models.CampaignEvaluationRule(
+                campaign_id=campaign_id,
+                company_group_id=group_id,
+                evaluator_role_id=evaluator_role_id,
+                evaluatee_role_id=evaluatee_role_id,
+                form_id=form_id,
+            ))
+    for assignment in db.query(models.FilledForm).filter(
+        models.FilledForm.campaign_id == campaign_id,
+        unissued_snapshot_filter(),
+        models.FilledForm.company_group_id.isnot(None),
+    ).all():
+        if assignment.finish_date is not None or assignment.answers or assignment.evaluator_id == assignment.evaluatee_id:
+            continue
+        evaluator = db.query(models.Employee).filter(models.Employee.id == assignment.evaluator_id).first()
+        evaluatee = db.query(models.Employee).filter(models.Employee.id == assignment.evaluatee_id).first()
+        form_id = selected_rules.get((assignment.company_group_id, evaluator.company_role_id, evaluatee.company_role_id)) if evaluator and evaluatee else None
+        if form_id is None:
+            db.delete(assignment)
+        else:
+            assignment.form_id = form_id
+    db.flush()
+    ensure_campaign_issued(campaign_id, db, commit=False)
     db.commit()
 
     return build_campaign_rule_matrix(campaign_id, db)
@@ -1943,11 +2288,13 @@ def get_campaign_evaluation_matrix(campaign_id: int, db: Session = Depends(get_d
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    return build_campaign_evaluation_matrix(campaign_id, db)
+    errors = ensure_campaign_issued(campaign_id, db)
+    return build_campaign_evaluation_matrix(campaign_id, db, errors)
 
 
 def validate_matrix_issued_assignments(existing_by_pair, scoped_pairs, selected_pairs, requested_tasks, existing_tasks):
-    if set(existing_by_pair).intersection(scoped_pairs) - selected_pairs:
+    issued_pairs = {pair for pair, form in existing_by_pair.items() if assignment_is_immutable(form)}
+    if issued_pairs.intersection(scoped_pairs) - selected_pairs:
         raise HTTPException(status_code=409, detail="Issued evaluations cannot be removed from the matrix. Reload and keep their selections")
 
     new_tasks = set()
@@ -1967,19 +2314,20 @@ def validate_matrix_form_readiness(rule_matrix):
         missing_pairs = [
             {"evaluator_role_id": pair["evaluator_role_id"], "evaluatee_role_id": pair["evaluatee_role_id"]}
             for pair in group["role_pairs"]
-            if pair["form_id"] not in valid_form_ids
+            if pair["evaluator_role_id"] != pair["evaluatee_role_id"] and pair["form_id"] not in valid_form_ids
         ]
+        required = sum(pair["evaluator_role_id"] != pair["evaluatee_role_id"] for pair in group["role_pairs"])
         groups.append({
             "group_id": group["group_id"],
             "group_name": group["group_name"],
-            "required": len(group["role_pairs"]),
-            "configured": len(group["role_pairs"]) - len(missing_pairs),
+            "required": required,
+            "configured": required - len(missing_pairs),
             "missing": len(missing_pairs),
             "missing_role_pairs": missing_pairs,
         })
     required = sum(group["required"] for group in groups)
     missing = sum(group["missing"] for group in groups)
-    if not groups or required == 0 or missing:
+    if not groups or not any(group["role_pairs"] for group in rule_matrix["groups"]) or missing:
         raise HTTPException(status_code=409, detail={
             "code": "form_assignments_incomplete",
             "message": (
@@ -1996,6 +2344,7 @@ def validate_matrix_form_readiness(rule_matrix):
 
 @app.put("/campaigns/{campaign_id}/evaluation-matrix", response_model=schemas.CampaignEvaluationMatrixUpdateResponse)
 def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.CampaignEvaluationMatrixUpdate, db: Session = Depends(get_db)):
+    ensure_campaign_issued(campaign_id, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -2019,7 +2368,7 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
         for row in db.query(models.CampaignEmployeeSelfEvaluation)
         .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id).all()
     }
-    existing_self_forms = {form.evaluator_id: form for form in existing_forms if form.evaluator_id == form.evaluatee_id}
+    existing_self_forms = {form.evaluator_id: form for form in existing_forms if form.evaluator_id == form.evaluatee_id and assignment_is_immutable(form)}
     existing_by_pair = {}
     for filled_form in existing_forms:
         if filled_form.company_group_id is None:
@@ -2028,6 +2377,7 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
         if key in existing_by_pair:
             raise HTTPException(status_code=409, detail="Duplicate issued evaluations exist for a matrix pair; resolve them before saving")
         existing_by_pair[key] = filled_form
+    scoped_group_user_pairs.update(pair for pair, assignment in existing_by_pair.items() if assignment_is_immutable(assignment))
 
     seen_assignments = set()
     desired_assignments = set()
@@ -2035,21 +2385,25 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
         if assignment.company_group_id not in assigned_group_ids:
             raise HTTPException(status_code=400, detail="Assignment group is not assigned to this campaign")
 
+        unique_group_pair = (assignment.company_group_id, assignment.evaluator_id, assignment.evaluatee_id)
+        existing = existing_by_pair.get(unique_group_pair)
+        if existing is not None and assignment_is_immutable(existing):
+            if unique_group_pair in seen_assignments:
+                raise HTTPException(status_code=400, detail="Duplicate matrix assignment")
+            seen_assignments.add(unique_group_pair)
+            desired_assignments.add((*unique_group_pair, existing.form_id))
+            continue
+
         group_members = group_members_by_group.get(assignment.company_group_id, {})
         evaluator = group_members.get(assignment.evaluator_id)
         evaluatee = group_members.get(assignment.evaluatee_id)
         if evaluator is None or evaluatee is None:
-            raise HTTPException(status_code=400, detail="Assignment users must be active members of the selected group")
+            raise HTTPException(status_code=400, detail="Assignment employees must be active members of the selected group")
 
-        unique_group_pair = (assignment.company_group_id, assignment.evaluator_id, assignment.evaluatee_id)
         if unique_group_pair in seen_assignments:
             raise HTTPException(status_code=400, detail="Duplicate matrix assignment")
         seen_assignments.add(unique_group_pair)
 
-        existing = existing_by_pair.get(unique_group_pair)
-        if existing is not None:
-            desired_assignments.add((*unique_group_pair, existing.form_id))
-            continue
         if assignment.evaluator_id == assignment.evaluatee_id:
             if assignment.evaluator_id in existing_self_forms:
                 # Another group already issued this employee's single campaign-wide task.
@@ -2068,32 +2422,61 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
     self_tasks = {}
     for task in sorted(desired_assignments):
         group_id, evaluator_id, evaluatee_id, form_id = task
-        if evaluator_id != evaluatee_id or (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
+        if evaluator_id != evaluatee_id or (group_id, evaluator_id, evaluatee_id) in existing_by_pair and assignment_is_immutable(existing_by_pair[(group_id, evaluator_id, evaluatee_id)]):
             continue
         if evaluator_id in self_tasks:
             desired_assignments.remove(task)
         else:
             self_tasks[evaluator_id] = form_id
 
-    # Issued records are immutable here, including unfinished work. Matrix saves only add new tasks.
+    selected_people_pairs = set()
+    for _group_id, evaluator_id, evaluatee_id, _form_id in desired_assignments:
+        pair = (evaluator_id, evaluatee_id)
+        if pair in selected_people_pairs:
+            raise HTTPException(status_code=409, detail="Only one assignment per evaluator/evaluatee pair is allowed in a campaign")
+        selected_people_pairs.add(pair)
+
+    # Duplicate pairs are forbidden even when different groups specify different forms.
     existing_tasks = {
         (form.evaluator_id, form.evaluatee_id, form.form_id)
         for form in existing_forms
+        if assignment_is_immutable(form)
     }
     validate_matrix_issued_assignments(
         existing_by_pair, scoped_group_user_pairs, seen_assignments, desired_assignments, existing_tasks
     )
 
+    desired_by_pair = {(group_id, evaluator_id, evaluatee_id): form_id for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments}
+    removed_count = 0
+    changed_ids = set()
+    for pair, existing in existing_by_pair.items():
+        if assignment_is_immutable(existing):
+            continue
+        if pair not in desired_by_pair:
+            db.delete(existing)
+            removed_count += 1
+        else:
+            if existing.form_id != desired_by_pair[pair]:
+                changed_ids.add(existing.id)
+            existing.form_id = desired_by_pair[pair]
+
+    remaining_pairs = {(form.evaluator_id, form.evaluatee_id) for form in existing_forms if assignment_is_immutable(form) or (form.company_group_id, form.evaluator_id, form.evaluatee_id) in desired_by_pair}
+    for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
+        if (group_id, evaluator_id, evaluatee_id) not in existing_by_pair and (evaluator_id, evaluatee_id) in remaining_pairs:
+            raise HTTPException(status_code=409, detail="This evaluator/evaluatee pair already has an assignment in this campaign")
+        remaining_pairs.add((evaluator_id, evaluatee_id))
+
     status = get_or_create_default_form_status(db)
 
     created_count = 0
+    created_records = []
     for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
         if (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
             continue
         form = db.query(models.Form).filter(models.Form.id == form_id).first()
         if form is None:
             raise HTTPException(status_code=400, detail="Assignment form does not exist")
-        db.add(models.FilledForm(
+        record = models.FilledForm(
             campaign_id=campaign_id,
             company_group_id=group_id,
             evaluator_id=evaluator_id,
@@ -2102,17 +2485,25 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
             status_id=status.id,
             finish_date=None,
             answers=[],
-            form_snapshot=form_snapshot_service.create_form_snapshot(form, db),
-            snapshot_status="verified",
-        ))
+            form_snapshot=None,
+            snapshot_status=None,
+        )
+        db.add(record)
+        created_records.append(record)
         created_count += 1
 
+    db.flush()
+    errors = ensure_campaign_issued(campaign_id, db, commit=False)
+    touched_ids = changed_ids | {record.id for record in created_records}
+    blocking_errors = [error for error in errors if any(error.startswith(f"Assignment {record_id}:") or error.startswith(f"Assignment {record_id} (") for record_id in touched_ids)]
+    if campaign.start_date <= campaign_today() and blocking_errors:
+        raise HTTPException(status_code=409, detail="Cannot issue selected assignments: " + "; ".join(blocking_errors))
     db.commit()
-    matrix = build_campaign_evaluation_matrix(campaign_id, db)
+    matrix = build_campaign_evaluation_matrix(campaign_id, db, errors)
     return {
         **matrix,
         "created_count": created_count,
-        "removed_count": 0,
+        "removed_count": removed_count,
         "kept_completed_count": sum(form.finish_date is not None for form in existing_forms),
     }
 
@@ -2129,10 +2520,13 @@ def get_form_templates(db: Session = Depends(get_db)):
 
 def clone_template_questions(questions: list[dict]):
     cloned_questions = deepcopy(questions)
-    for question in cloned_questions:
-        if isinstance(question, dict):
-            question["id"] = str(uuid4())
+    for question in iter_form_questions(cloned_questions):
+        question["id"] = str(uuid4())
     return cloned_questions
+
+
+def iter_form_questions(structure):
+    yield from form_snapshot_service.iter_snapshot_questions(structure)
 
 
 def validate_choice_question_options(question: dict, question_index: int):
@@ -2184,41 +2578,142 @@ def validate_choice_question_options(question: dict, question_index: int):
 def validate_question_definitions(questions: list[dict], db: Session | None = None):
     if not isinstance(questions, list):
         raise HTTPException(status_code=400, detail="Questions must be a list")
+    is_block_structure = any(isinstance(item, dict) and item.get("type") in {"section", "question"} for item in questions)
+    if is_block_structure:
+        seen_sections = set()
+        seen_questions = set()
+        for block_index, block in enumerate(questions):
+            if not isinstance(block, dict):
+                raise HTTPException(status_code=400, detail=f"Block {block_index + 1} is invalid")
+            if block.get("type") == "section":
+                section_id = block.get("section_id")
+                if not isinstance(section_id, int) or section_id in seen_sections:
+                    raise HTTPException(status_code=400, detail="Section references must be valid and unique within a form")
+                seen_sections.add(section_id)
+                section = db.query(models.Section).filter(models.Section.id == section_id, models.Section.scope_key == "default").first() if db is not None else True
+                if not section:
+                    raise HTTPException(status_code=400, detail=f"Section {section_id} is unavailable to this account")
+                nested = block.get("questions")
+                if not isinstance(nested, list):
+                    raise HTTPException(status_code=400, detail=f"Section {section_id} questions must be a list")
+                for question in nested:
+                    if not isinstance(question, dict):
+                        raise HTTPException(status_code=400, detail=f"Section {section_id} contains an invalid question")
+                    _validate_structured_question(question, seen_questions, db)
+            elif block.get("type") == "question":
+                question = block.get("question")
+                if not isinstance(question, dict):
+                    raise HTTPException(status_code=400, detail=f"Question block {block_index + 1} is invalid")
+                _validate_structured_question(question, seen_questions, db)
+            else:
+                raise HTTPException(status_code=400, detail=f"Block {block_index + 1} has an unknown type")
+        return
     for index, question in enumerate(questions):
         if not isinstance(question, dict):
             raise HTTPException(status_code=400, detail=f"Question {index + 1} is invalid")
         validate_choice_question_options(question, index)
-        dimension_id = question.get("dimension_id") or question.get("dimensionId")
-        if dimension_id is not None:
-            if question.get("type") not in {"Scale 1-5", "Scale 1-10"}:
-                raise HTTPException(status_code=400, detail=f"Question {index + 1} cannot use a performance dimension")
-            if not isinstance(dimension_id, int):
-                raise HTTPException(status_code=400, detail=f"Question {index + 1} has an invalid performance dimension")
-            if db is not None and db.query(models.PerformanceDimension.id).filter(models.PerformanceDimension.id == dimension_id).filter(models.PerformanceDimension.scope_key == "default").first() is None:
-                raise HTTPException(status_code=400, detail=f"Question {index + 1} references an unknown performance dimension")
+        validate_legacy_dimension_metadata(question)
 
 
-def resolve_legacy_question_dimensions(questions: list[dict], db: Session) -> list[dict]:
-    resolved = deepcopy(questions)
-    for question in resolved:
-        if not isinstance(question, dict) or question.get("type") not in {"Scale 1-5", "Scale 1-10"}:
-            continue
-        if isinstance(question.get("dimension_id"), int):
-            continue
-        raw = question.get("dimension")
-        raw_name = raw.get("name") if isinstance(raw, dict) else raw
-        if not isinstance(raw_name, str) or raw_name.strip() == "":
-            continue
-        name = " ".join(raw_name.strip().split())
-        normalized = normalize_dimension_name(name)
-        dimension = db.query(models.PerformanceDimension).filter(models.PerformanceDimension.scope_key == "default").filter(models.PerformanceDimension.normalized_name == normalized).first()
-        if dimension is None:
-            dimension = models.PerformanceDimension(scope_key="default", name=name, normalized_name=normalized, is_active=True)
-            db.add(dimension)
-            db.flush()
-        question["dimension_id"] = dimension.id
-        question["dimension"] = {"id": dimension.id, "name": dimension.name}
-    return resolved
+def validate_legacy_dimension_metadata(question: dict):
+    """Accept well-formed stored metadata verbatim; never resolve it through a catalog."""
+    id_fields = [question[field] for field in ("dimension_id", "dimensionId") if field in question]
+    raw = question.get("dimension")
+    if not id_fields and raw is None:
+        return
+    if question.get("type") not in {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}:
+        raise HTTPException(status_code=400, detail="Only rating questions can carry legacy dimension metadata")
+    if any(type(value) is not int or value <= 0 for value in id_fields) or len(set(id_fields)) > 1:
+        raise HTTPException(status_code=400, detail="Invalid legacy dimension ID")
+    if raw is not None:
+        if isinstance(raw, str):
+            valid = bool(raw.strip())
+        elif isinstance(raw, dict):
+            identifier = raw.get("id")
+            name = raw.get("name")
+            valid = ((identifier is None or type(identifier) is int and identifier > 0)
+                     and (name is None or isinstance(name, str) and bool(name.strip()))
+                     and (identifier is not None or name is not None)
+                     and (not id_fields or identifier is None or identifier == id_fields[0]))
+        else:
+            valid = False
+        if not valid:
+            raise HTTPException(status_code=400, detail="Invalid legacy dimension metadata")
+
+
+def form_issuance_errors(structure: list[dict], db: Session | None = None) -> list[str]:
+    """Readiness is deliberately separate from draft persistence."""
+    try:
+        validate_question_definitions(structure, db)
+    except HTTPException as error:
+        return [str(error.detail)]
+    errors: list[str] = []
+    questions = list(iter_form_questions(structure))
+    seen_ids: set[str] = set()
+    if not questions:
+        errors.append("A form must contain at least one question.")
+    for block in structure if isinstance(structure, list) else []:
+        if isinstance(block, dict) and block.get("type") == "section" and not block.get("questions"):
+            section = db.query(models.Section).filter(models.Section.id == block.get("section_id")).first() if db is not None else None
+            errors.append(f"{section.name if section else 'Section'} must contain at least one question.")
+    for index, question in enumerate(questions, start=1):
+        name = question.get("text") if isinstance(question.get("text"), str) and question["text"].strip() else f"Question {index}"
+        question_id = question.get("id")
+        if not isinstance(question_id, str) or not question_id.strip() or question_id in seen_ids:
+            errors.append(f"{name} needs a unique question ID.")
+        else:
+            seen_ids.add(question_id)
+        if not isinstance(question.get("text"), str) or not question["text"].strip():
+            errors.append(f"{name} needs question text.")
+        if question.get("type") not in {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10", "Single choice", "Multiple choice", "Text", "Number", "Date"}:
+            errors.append(f"{name} has an unsupported question type.")
+        if question.get("type") in {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}:
+            minimum = question.get("scale_min", 1 if question.get("type") in {"Scale 1-5", "Scale 1-10"} else None)
+            maximum = question.get("scale_max", 5 if question.get("type") == "Scale 1-5" else 10 if question.get("type") == "Scale 1-10" else None)
+            if type(minimum) is not int or type(maximum) is not int or maximum <= minimum:
+                errors.append(f"{name} needs integer scale limits with a maximum greater than its minimum.")
+            if question.get("scale_direction", "higher_is_better") != "higher_is_better":
+                errors.append(f"{name} must score higher values as better.")
+            if any(label in question and question[label] is not None and not isinstance(question[label], str) for label in ("min_label", "max_label")):
+                errors.append(f"{name} has an invalid endpoint label.")
+        if question.get("type") in {"Single choice", "Multiple choice"}:
+            options = question.get("options")
+            valid = isinstance(options, list) and len(options) >= 2 and all(
+                isinstance(option, dict)
+                and isinstance(option.get("id"), str)
+                and option["id"].strip()
+                and isinstance(option.get("label"), str)
+                and option["label"].strip()
+                for option in options
+            )
+            if valid:
+                option_ids = [option["id"].strip() for option in options]
+                option_labels = [option["label"].strip().casefold() for option in options]
+                valid = len(option_ids) == len(set(option_ids)) and len(option_labels) == len(set(option_labels))
+            if not valid:
+                errors.append(f'{name} must contain at least two valid answer options.')
+    return errors
+
+
+def _validate_structured_question(question: dict, seen_ids: set, db: Session | None):
+    question_id = question.get("id")
+    if not isinstance(question_id, str) or not question_id.strip() or question_id in seen_ids:
+        raise HTTPException(status_code=400, detail="Question IDs must be present and unique")
+    seen_ids.add(question_id)
+    validate_legacy_dimension_metadata(question)
+    # A structured form is an editable draft. Choice completeness is enforced by
+    # form_issuance_errors instead of preventing an HR user from saving progress.
+    if question.get("type") in {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}:
+        minimum = question.get("scale_min", 1 if question.get("type") == "Scale 1-5" else None)
+        maximum = question.get("scale_max", 5 if question.get("type") == "Scale 1-5" else 10 if question.get("type") == "Scale 1-10" else None)
+        if not isinstance(minimum, (int, float)) or not isinstance(maximum, (int, float)) or maximum <= minimum:
+            raise HTTPException(status_code=400, detail=f"Scale question {question_id} needs a maximum greater than its minimum")
+        direction = question.get("scale_direction", "higher_is_better")
+        if direction != "higher_is_better":
+            raise HTTPException(status_code=400, detail=f"Scale question {question_id} must score higher values as better")
+        for field in ("min_label", "max_label"):
+            if field in question and question[field] is not None and not isinstance(question[field], str):
+                raise HTTPException(status_code=400, detail=f"Scale question {question_id} has an invalid endpoint label")
 
 
 def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, item_id: int | None = None):
@@ -2232,7 +2727,7 @@ def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, 
     if existing_query.first() is not None:
         raise HTTPException(status_code=400, detail="Name already exists")
 
-    questions = resolve_legacy_question_dimensions(payload.questions, db)
+    questions = deepcopy(payload.questions)
     validate_question_definitions(questions, db)
 
     return {
@@ -2257,6 +2752,15 @@ def create_form(form: schemas.FormCreate, db: Session = Depends(get_db)):
     return new_form
 
 
+@app.get("/forms/{form_id}/validation", response_model=schemas.FormValidationResponse)
+def get_form_issuance_validation(form_id: int, db: Session = Depends(get_db)):
+    form = db.query(models.Form).filter(models.Form.id == form_id).first()
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    errors = form_issuance_errors(form.questions if isinstance(form.questions, list) else [], db)
+    return {"valid_for_issuance": not errors, "errors": errors}
+
+
 @app.post("/form-templates", response_model=schemas.FormTemplateResponse)
 def create_form_template(template: schemas.FormCreate, db: Session = Depends(get_db)):
     new_template = models.FormTemplate(**validate_form_like_payload(template, models.FormTemplate, db))
@@ -2268,6 +2772,13 @@ def create_form_template(template: schemas.FormCreate, db: Session = Depends(get
 
 @app.put("/forms/{form_id}", response_model=schemas.FormResponse)
 def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Depends(get_db)):
+    # Issue already-started references before the editable source Form changes.
+    campaign_ids = sorted(campaign_id for (campaign_id,) in db.query(models.FilledForm.campaign_id).filter(
+        models.FilledForm.form_id == form_id,
+        unissued_snapshot_filter(),
+    ).distinct().all())
+    for campaign_id in campaign_ids:
+        ensure_campaign_issued(campaign_id, db)
     form = db.query(models.Form).filter(models.Form.id == form_id).first()
     if form is None:
         raise HTTPException(status_code=404, detail="Form not found")

@@ -7,9 +7,10 @@ import { getFullDate, getTimeOfDay } from '../utils/hrHome.utils';
 
 type DashboardTopbarProps = {
   userName: string;
+  currentDate: string | null;
 };
 
-function DashboardTopbar({ userName }: DashboardTopbarProps) {
+function DashboardTopbar({ userName, currentDate }: DashboardTopbarProps) {
   const [tipIndex, setTipIndex] = useState(0);
   const activeTip = hrInsightTips[tipIndex];
 
@@ -23,7 +24,7 @@ function DashboardTopbar({ userName }: DashboardTopbarProps) {
         <div className="greeting-title">
           Good {getTimeOfDay()}, {userName}
         </div>
-        <div className="greeting-date">{getFullDate()}</div>
+        <div className="greeting-date">{getFullDate(currentDate)}</div>
       </div>
       <aside className="hr-insights" aria-label="HR insights">
         <div className="hr-insights-heading">

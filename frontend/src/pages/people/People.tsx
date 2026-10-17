@@ -1,4 +1,4 @@
-import { getUserInitials } from '../layout/sidebar-user';
+import { getSidebarUser, getUserInitials } from '../layout/sidebar-user';
 import AppLayout from '../layout/AppLayout';
 import {
   useEffect,
@@ -790,6 +790,7 @@ function ImportPanel({
 }
 
 export default function People() {
+  const currentUser = getSidebarUser();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [isPeopleLoading, setIsPeopleLoading] = useState(true);
@@ -1497,7 +1498,7 @@ export default function People() {
                                 {getUserInitials(employee.name)}
                               </div>
                               <div>
-                                <strong>{employee.name}</strong>
+                                <div className="people-person-name"><strong>{employee.name}</strong>{currentUser !== null && ((currentUser.employee_id !== null && employee.id === currentUser.employee_id) || (employee.userId !== null && employee.userId === currentUser.id)) && <span className="badge badge-neutral people-you-badge">You</span>}</div>
                                 <span>{employee.email}</span>
                               </div>
                             </div>

@@ -8,10 +8,11 @@ export function matrixKey(groupId: number, evaluatorId: number, evaluateeId: num
 
 export function matrixGroupWithSelfLocks(matrix: CampaignEvaluationMatrix, group: CampaignGroupEvaluationMatrix) {
   const issuedSelf = matrix.groups.flatMap((item) => item.assignments.filter((assignment) =>
-    assignment.evaluatorId === assignment.evaluateeId && group.employees.some((person) => person.id === assignment.evaluatorId)
+    assignment.issued && assignment.evaluatorId === assignment.evaluateeId && group.employees.some((person) => person.id === assignment.evaluatorId)
   ));
   return { ...group, assignments: [
-    ...group.assignments,
+    ...group.assignments.map((assignment) => assignment.issued ? assignment :
+      issuedSelf.find((item) => item.evaluatorId === assignment.evaluatorId && item.evaluateeId === assignment.evaluateeId) ?? assignment),
     ...issuedSelf.filter((assignment) => !group.assignments.some((item) => item.evaluatorId === assignment.evaluatorId && item.evaluateeId === assignment.evaluateeId)),
   ] };
 }
@@ -26,14 +27,14 @@ export function matrixCell(
   const evaluator = group.employees.find((employee) => employee.id === evaluatorId);
   const evaluatee = group.employees.find((employee) => employee.id === evaluateeId);
   const issued = group.assignments.find((assignment) =>
-    assignment.evaluatorId === evaluatorId && assignment.evaluateeId === evaluateeId
+    assignment.issued && assignment.evaluatorId === evaluatorId && assignment.evaluateeId === evaluateeId
   );
   if (issued) return { editable: false, reason: issued.isCompleted
     ? 'This evaluation has been completed and is locked.'
     : issued.hasAnswers || issued.statusName?.toLowerCase() === 'in progress'
       ? 'This evaluation is in progress and cannot be changed.'
       : `This evaluation has already been issued (${issued.statusName || 'Issued'}) and cannot be changed.`, issued: true };
-  if (!evaluator || !evaluatee) return { editable: false, reason: 'Employee is not in this group.', issued: false };
+  if (!evaluator || !evaluatee || evaluator.active === false || evaluatee.active === false) return { editable: false, reason: 'Employee is not in this group.', issued: false };
   if (evaluatorId === evaluateeId && selfForms[evaluatorId] == null) {
     return { editable: false, reason: 'Choose a self-evaluation form in the Self-evaluations section first.', issued: false };
   }
@@ -63,13 +64,13 @@ export function toggleMatrixPair(
   return { ...selection, [key]: !selection[key] };
 }
 
-export function synchronizeSelfPair(groups: CampaignGroupEvaluationMatrix[], selection: MatrixSelection, employeeId: number, selected: boolean) {
+export function synchronizeSelfPair(groups: CampaignGroupEvaluationMatrix[], selection: MatrixSelection, groupId: number, employeeId: number, selected: boolean) {
   const next = { ...selection };
   for (const group of groups) {
     if (!group.employees.some((person) => person.id === employeeId)) continue;
     const key = matrixKey(group.groupId, employeeId, employeeId);
-    if (group.assignments.some((item) => item.evaluatorId === employeeId && item.evaluateeId === employeeId)) continue;
-    next[key] = selected;
+    if (group.assignments.some((item) => item.issued && item.evaluatorId === employeeId && item.evaluateeId === employeeId)) continue;
+    if (selected || group.groupId === groupId) next[key] = selected && group.groupId === groupId;
   }
   return next;
 }

@@ -6,6 +6,7 @@ import { formatRelativeDate, parseDateOnly } from '../utils/hrHome.utils';
 
 type UpcomingDeadlinesProps = {
   deadlines: DashboardUpcomingDeadline[];
+  currentDate: string | null;
   onOpenCampaign: (campaignId: number) => void;
 };
 
@@ -25,7 +26,7 @@ function getDeadlineLabel(deadlineType: DashboardUpcomingDeadline['deadline_type
   return deadlineType === 'Starts' ? 'Campaign starts' : 'Campaign ends';
 }
 
-function UpcomingDeadlines({ deadlines, onOpenCampaign }: UpcomingDeadlinesProps) {
+function UpcomingDeadlines({ deadlines, currentDate, onOpenCampaign }: UpcomingDeadlinesProps) {
   const visibleDeadlines = deadlines.slice(0, 4);
 
   return (
@@ -64,7 +65,7 @@ function UpcomingDeadlines({ deadlines, onOpenCampaign }: UpcomingDeadlinesProps
                 {getDeadlineLabel(deadline.deadline_type)}
               </span>
             </span>
-            <span className="upcoming-relative">{formatRelativeDate(deadline.date)}</span>
+            <span className="upcoming-relative">{currentDate ? formatRelativeDate(deadline.date, currentDate) : null}</span>
           </button>
         ))}
       </div>

@@ -4,11 +4,13 @@ export type Campaign = {
   is_active: boolean;
   start_date: string;
   end_date: string | null;
-  current_date?: string;
+  current_date: string;
+  lifecycle_status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
 };
 
 export type DashboardMetrics = {
   assignment_count: number;
+  planned_count: number;
   submitted_count: number;
   completion_rate: number;
   awaiting_submission_count: number;
@@ -31,9 +33,9 @@ export type DashboardForm = {
 };
 
 export type DashboardParticipant = {
-  user_id: number;
+  employee_id: number;
   name: string;
-  email: string;
+  email: string | null;
   profile_image_url: string | null;
   role_name: string;
   groups: string[];
@@ -48,6 +50,7 @@ export type DashboardUpcomingDeadline = {
 };
 
 export type DashboardResponse = {
+  current_date: string;
   campaigns: Campaign[];
   selected_campaign_id: number | null;
   metrics: DashboardMetrics | null;

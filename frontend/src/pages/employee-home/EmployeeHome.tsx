@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import AppLayout from '../layout/AppLayout';
-import { formatUserName, getSidebarUser } from '../layout/sidebar-user';
+import { getSidebarUser, getUserDisplayName } from '../layout/sidebar-user';
 import { fetchEmployeeDashboard, type AssignedEvaluation } from './employee-home.api';
 import { dashboardWork, evaluationStatus, evaluationTitle } from './employee-home.utils';
-import { getCalendarToday } from '../campaigns/campaign.lifecycle';
 import '../hr-home/components/MetricsGrid.css';
 import './employee-home.css';
 
@@ -45,6 +44,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
   const user = getSidebarUser();
   const userId = user?.id;
   const [evaluations, setEvaluations] = useState<AssignedEvaluation[]>([]);
+  const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(!forceEmptyState && user !== null);
   const [error, setError] = useState('');
   const [historyLimit, setHistoryLimit] = useState(5);
@@ -53,7 +53,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
     if (forceEmptyState || userId === undefined) return;
     const controller = new AbortController();
     fetchEmployeeDashboard(userId, controller.signal)
-      .then((dashboard) => setEvaluations(dashboard.evaluations))
+      .then((dashboard) => { setEvaluations(dashboard.evaluations); setCurrentDate(dashboard.currentDate); })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Evaluations could not be loaded.');
       })
@@ -62,7 +62,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
   }, [forceEmptyState, userId]);
 
   const { actionable, completed, nextDeadline, upcoming, history } = dashboardWork(forceEmptyState ? [] : evaluations);
-  const firstName = user ? formatUserName(user.username).split(' ')[0] || 'Employee' : 'Employee';
+  const firstName = user ? getUserDisplayName(user).split(' ')[0] || 'Employee' : 'Employee';
   const visibleHistory = history.slice(0, historyLimit);
 
   return (
@@ -71,7 +71,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
         <header className="employee-home-header">
           <h1>{getGreeting()}, {firstName}</h1>
           <p>Here's what needs your attention.</p>
-          <time dateTime={getCalendarToday()}>{new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</time>
+           {currentDate && <time dateTime={currentDate}>{new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${currentDate}T12:00:00Z`))}</time>}
         </header>
 
         <section className="card kpi-section employee-kpi-section" aria-label="Evaluation summary for ongoing campaigns">

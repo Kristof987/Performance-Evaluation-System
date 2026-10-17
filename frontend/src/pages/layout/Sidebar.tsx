@@ -13,7 +13,7 @@ import {
   Users,
 } from 'lucide-react';
 import {
-  formatUserName,
+  getUserDisplayName,
   getDashboardPath,
   getSidebarUser,
   getUserInitials,
@@ -64,7 +64,7 @@ export default function Sidebar({
   const sidebarUser = getSidebarUser();
   const navigate = useNavigate();
   const sidebarUserName =
-    sidebarUser === null ? 'User' : formatUserName(sidebarUser.username);
+    sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser);
   const dashboardPath = getDashboardPath();
   const isDashboardActive =
     activePage === 'hr-home' || activePage === 'employee-home';

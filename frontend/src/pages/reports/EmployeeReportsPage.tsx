@@ -6,9 +6,9 @@ import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsLayout from './ReportsLayout';
 import type { EmployeeReportDetail, EmployeeReportRow, EmployeeReportsOverview } from './types/reports.types';
 
-function formatScore(value: number | null, scaleMax?: number | null) {
+function formatScore(value: number | null) {
   if (value === null) return '—';
-  return scaleMax ? `${value.toFixed(2)} / ${scaleMax}` : value.toFixed(2);
+  return `${value.toFixed(2)} / 5`;
 }
 
 function LoadingOrError({ error, retry }: { error: string; retry: () => void }) {
@@ -39,6 +39,8 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, requester
   useEffect(() => {
     if (!validCampaignId || requesterUserId === null) return undefined;
     const controller = new AbortController();
+    setData(null);
+    setError('');
     fetchEmployeeReportsOverview(selectedCampaignId, requesterUserId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Employee reports could not be loaded.'); });
@@ -49,7 +51,7 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, requester
   const groupOptions = useMemo(() => Array.from(new Set((data?.employees ?? []).flatMap((employee) => employee.groups))).sort(), [data]);
   const employees = useMemo(() => {
     const filtered = (data?.employees ?? []).filter((employee) => {
-      const matchesQuery = `${employee.employee_name} ${employee.email}`.toLowerCase().includes(query.toLowerCase());
+      const matchesQuery = `${employee.employee_name} ${employee.email ?? ''}`.toLowerCase().includes(query.toLowerCase());
       const matchesRole = role === 'all' || employee.company_role === role;
       const matchesGroup = group === 'all' || employee.groups.includes(group);
       return matchesQuery && matchesRole && matchesGroup;
@@ -63,7 +65,7 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, requester
   if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
   if (campaignsError) return <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={retryCampaigns}>Retry</button></div>;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
-  if (data === null) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
+  if (data === null || data.campaign.id !== selectedCampaignId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
 
   return <div className="reports-overview">
     <ReportKpis items={[{ label: 'Participating employees', value: data.kpis.participating_employees }, { label: 'Employees with peer feedback', value: data.kpis.employees_with_peer_feedback }, { label: 'Awaiting peer feedback', value: data.kpis.awaiting_peer_feedback }, { label: 'Self-evaluations completed', value: `${data.kpis.completed_self_evaluations}/${data.kpis.assigned_self_evaluations}`, context: 'assigned' }]} />
@@ -77,8 +79,9 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, requester
 }
 
 function EmployeeRow({ employee, campaignId }: { employee: EmployeeReportRow; campaignId: number }) {
-  const summary = employee.performance_summary.suppressed ? 'Insufficient feedback' : employee.performance_summary.average_score !== null ? formatScore(employee.performance_summary.average_score, employee.performance_summary.scale_max) : employee.peer_completed === 0 ? 'Not yet available' : 'No comparable scores';
-  return <div className="reports-table-row reports-employees-row"><div className="reports-person-cell"><strong>{employee.employee_name}</strong><small>{employee.email}</small></div><span>{employee.company_role}</span><span className="reports-groups-cell" title={employee.groups.join(', ')}>{employee.groups.length > 0 ? employee.groups.join(', ') : '—'}</span><span className="reports-number-cell" aria-label={`${employee.peer_completed} of ${employee.peer_assigned} incoming peer reviews completed`}>{employee.peer_completed} / {employee.peer_assigned}</span><span>{employee.self_evaluation.status}</span><span className="reports-number-cell" title={employee.performance_summary.suppressed ? 'Individual score is withheld to protect confidentiality.' : undefined}>{summary}</span><span className="reports-action-cell"><Link className="btn btn-secondary btn-small" to={`/reports/campaigns/${campaignId}/employees/${employee.employee_id}`}>View details</Link></span></div>;
+  const { availability, overall_peer_score, reportable_sections } = employee.performance_summary;
+  const summary = availability === 'suppressed' ? 'Insufficient feedback' : availability === 'available' && overall_peer_score !== null ? formatScore(overall_peer_score) : 'Not yet available';
+  return <div className="reports-table-row reports-employees-row"><div className="reports-person-cell"><strong>{employee.employee_name}</strong><small>{employee.email}</small></div><span>{employee.company_role}</span><span className="reports-groups-cell" title={employee.groups.join(', ')}>{employee.groups.length > 0 ? employee.groups.join(', ') : '—'}</span><span className="reports-number-cell" aria-label={`${employee.peer_completed} of ${employee.peer_assigned} incoming peer reviews completed`}>{employee.peer_completed} / {employee.peer_assigned}</span><span>{employee.self_evaluation.status}</span><span className="reports-number-cell" title={availability === 'suppressed' ? 'Individual score is withheld to protect confidentiality.' : undefined}>{summary}{availability === 'available' && <small>{reportable_sections} {reportable_sections === 1 ? 'section' : 'sections'}</small>}</span><span className="reports-action-cell"><Link className="btn btn-secondary btn-small" to={`/reports/campaigns/${campaignId}/employees/${employee.employee_id}`}>View details</Link></span></div>;
 }
 
 export function EmployeeReportDetailPage() {
@@ -97,12 +100,14 @@ function EmployeeReportDetailContent({ campaignId, employeeId, requesterUserId }
   useEffect(() => {
     if (requesterUserId === null) return undefined;
     const controller = new AbortController();
+    setData(null);
+    setError('');
     fetchEmployeeReportDetail(campaignId, employeeId, requesterUserId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Employee report could not be loaded.'); });
     return () => controller.abort();
   }, [campaignId, employeeId, requesterUserId, reload]);
 
-  if (data === null) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-  return <EmployeeReportDetailView data={data} selectedHistory={data.history[0] ?? null} onBack={() => navigate(`/reports/campaigns/${campaignId}/employees`)} />;
+  if (data === null || data.campaign.id !== campaignId || data.employee.id !== employeeId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
+  return <EmployeeReportDetailView data={data} requesterUserId={requesterUserId} onBack={() => navigate(`/reports/campaigns/${campaignId}/employees`)} />;
 }

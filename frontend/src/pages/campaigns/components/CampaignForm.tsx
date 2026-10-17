@@ -25,6 +25,7 @@ export default function CampaignForm({
   onSubmit,
   onCancel,
 }: Props) {
+  const nameConflict = message === 'A campaign with this name already exists.';
   return (
     <form className="campaign-create-form" onSubmit={onSubmit}>
       <label className="form-field campaign-field-wide">
@@ -32,10 +33,13 @@ export default function CampaignForm({
         <input
           className="form-control"
           required
+          aria-invalid={nameConflict}
+          aria-describedby={nameConflict ? 'campaign-name-error' : undefined}
           value={form.name}
           onChange={(event) => updateForm('name', event.target.value)}
           placeholder={campaign ? undefined : 'e.g. Winter 2027 review'}
         />
+        {nameConflict && <span className="campaign-name-error" id="campaign-name-error" role="alert">{message}</span>}
       </label>
 
       <label className="form-field campaign-field-wide">
@@ -110,7 +114,7 @@ export default function CampaignForm({
         </span>
       )}
 
-      {message !== '' && <div className="campaign-save-message">{message}</div>}
+      {message !== '' && !nameConflict && <div className="campaign-save-message">{message}</div>}
 
       <div className="campaign-modal-actions">
         <button className="btn btn-secondary" type="button" onClick={onCancel}>

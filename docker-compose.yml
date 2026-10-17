@@ -29,6 +29,9 @@ services:
 
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      COMPASS_ENV: development
+      COMPASS_DEV_LOGIN_ENABLED: "true"
+      APP_TIMEZONE: Europe/Budapest
 
     depends_on:
       - db

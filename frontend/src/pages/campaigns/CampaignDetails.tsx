@@ -77,6 +77,13 @@ export function CampaignDetails() {
   );
   const copyPreview = copyRequest ? previewRuleCopy(evaluationRules, selectedRuleFormIds, copyRequest) : null;
   const validFormIds = new Set(evaluationRules.forms.map((form) => form.id));
+  const issuedSelfIds = new Set(evaluationMatrix.groups.flatMap((group) => group.assignments.filter((assignment) => assignment.issued && assignment.evaluatorId === assignment.evaluateeId).map((assignment) => assignment.evaluatorId)));
+  const issuedRuleKeys = new Set(evaluationMatrix.groups.flatMap((group) => group.assignments.filter((assignment) => assignment.issued && assignment.evaluatorId !== assignment.evaluateeId).flatMap((assignment) => {
+    const evaluator = group.employees.find((person) => person.id === assignment.evaluatorId);
+    const evaluatee = group.employees.find((person) => person.id === assignment.evaluateeId);
+    return evaluator && evaluatee ? [`${group.groupId}:${evaluator.roleId}:${evaluatee.roleId}`] : [];
+  })));
+  const groupsWithIssuedAssignments = new Set(evaluationMatrix.groups.filter((group) => group.assignments.some((assignment) => assignment.issued)).map((group) => group.groupId));
   const selfCopyPreview = selfCopySourceId === null ? null : previewSelfCopy(selfEvaluations, selectedSelfForms, selfCopySourceId);
 
   function reviewMissingAssignments() {
@@ -175,11 +182,14 @@ export function CampaignDetails() {
                   <input
                     type="checkbox"
                     checked={selectedGroupIds.includes(group.id)}
+                    disabled={selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id)}
+                    title={groupsWithIssuedAssignments.has(group.id) ? 'This group has issued evaluations and cannot be removed.' : undefined}
                     onChange={() => toggleGroup(group.id)}
                   />
                   <span>
                     <strong>{group.name}</strong>
                     {group.description && <small>{group.description}</small>}
+                    {groupsWithIssuedAssignments.has(group.id) && <small>Issued evaluations · group locked</small>}
                   </span>
                 </label>
               ))}
@@ -264,8 +274,9 @@ export function CampaignDetails() {
                           </tr>
                         </thead>
                         <tbody>
-                          {group.rolePairs.map((pair) => {
-                            const ruleKey = `${group.groupId}:${pair.evaluatorRoleId}:${pair.evaluateeRoleId}`;
+                           {group.rolePairs.map((pair) => {
+                             const ruleKey = `${group.groupId}:${pair.evaluatorRoleId}:${pair.evaluateeRoleId}`;
+                             const ruleLocked = pair.locked || issuedRuleKeys.has(ruleKey);
                             return (
                               <tr key={ruleKey}>
                                 <td>{pair.evaluatorRoleName}</td>
@@ -276,7 +287,9 @@ export function CampaignDetails() {
                                        id={`campaign-rule-${group.groupId}-${pair.evaluatorRoleId}-${pair.evaluateeRoleId}`}
                                        className="form-control"
                                        aria-label={`${group.groupName}: ${pair.evaluatorRoleName} evaluates ${pair.evaluateeRoleName} form`}
-                                      value={selectedRuleFormIds[ruleKey] ?? ''}
+                                       value={selectedRuleFormIds[ruleKey] ?? ''}
+                                        disabled={ruleLocked || isSavingMatrix}
+                                        title={ruleLocked ? 'Issued evaluations use this form rule. The rule is locked.' : undefined}
                                       onChange={(event) =>
                                         updateRuleForm(
                                           group.groupId,
@@ -293,7 +306,8 @@ export function CampaignDetails() {
                                         </option>
                                       ))}
                                        </select>
-                                    {!validFormIds.has(selectedRuleFormIds[ruleKey] ?? -1) && <small className="campaign-rule-missing">Form required</small>}
+                                     {!validFormIds.has(selectedRuleFormIds[ruleKey] ?? -1) && <small className="campaign-rule-missing">Form required</small>}
+                                      {ruleLocked && <small>Issued evaluations · rule locked</small>}
                                   </div>
                                 </td>
                                 <td>
@@ -352,13 +366,13 @@ export function CampaignDetails() {
                     <th scope="row"><strong>{person.name}</strong><small>{person.roleName}</small></th>
                     <td>{person.groupNames.join(', ')}</td>
                     <td>
-                      <select className="form-control" aria-label={`Self-evaluation form for ${person.name}`} value={selectedSelfForms[person.employeeId] ?? ''} disabled={person.locked || isSavingSelf} onChange={(event) => updateSelfForm(person.employeeId, event.target.value === '' ? null : Number(event.target.value))}>
+                       <select className="form-control" aria-label={`Self-evaluation form for ${person.name}`} value={selectedSelfForms[person.employeeId] ?? ''} disabled={person.locked || issuedSelfIds.has(person.employeeId) || isSavingSelf || isSavingMatrix} onChange={(event) => updateSelfForm(person.employeeId, event.target.value === '' ? null : Number(event.target.value))}>
                         <option value="">No form</option>
                         {selfEvaluations.forms.map((form) => <option key={form.id} value={form.id}>{form.name}</option>)}
                       </select>
-                      {person.locked && <small>Issued self-evaluation is protected</small>}
+                       {(person.locked || issuedSelfIds.has(person.employeeId)) && <small>Issued self-evaluation is protected</small>}
                     </td>
-                    <td><button className="campaign-rule-copy-btn" type="button" aria-label={`Copy ${person.name}'s self-evaluation questionnaire to all other employees in the campaign`} title="Copy this employee's self-evaluation questionnaire to all other employees in the campaign." disabled={isSavingSelf || !selfEvaluations.forms.some((form) => form.id === selectedSelfForms[person.employeeId])} onClick={() => setSelfCopySourceId(person.employeeId)}>Copy to all</button></td>
+                     <td><button className="campaign-rule-copy-btn" type="button" aria-label={`Copy ${person.name}'s self-evaluation questionnaire to all other employees in the campaign`} title="Copy this employee's self-evaluation questionnaire to all other employees in the campaign." disabled={isSavingSelf || isSavingMatrix || !selfEvaluations.forms.some((form) => form.id === selectedSelfForms[person.employeeId])} onClick={() => setSelfCopySourceId(person.employeeId)}>Copy to all</button></td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -384,6 +398,13 @@ export function CampaignDetails() {
               {isSavingMatrix ? 'Saving...' : 'Save matrix'}
             </button>
           </div>
+
+          {!!evaluationMatrix.issuanceErrors?.length && (
+            <div className="campaign-matrix-warning" role="alert">
+              <strong>Some planned evaluations could not be issued:</strong>
+              <ul>{evaluationMatrix.issuanceErrors.map((error, index) => <li key={index}>{error}</li>)}</ul>
+            </div>
+          )}
 
           {matrixReadiness !== 'ready' && (
             <div className="campaign-matrix-prerequisite" role="status">
@@ -453,7 +474,8 @@ export function CampaignDetails() {
               <div><dt>Assignments to change</dt><dd>{Object.keys(copyPreview.changes).length}</dd></div>
               <div><dt>New assignments</dt><dd>{copyPreview.assigned}</dd></div>
               <div><dt>Existing assignments replaced</dt><dd>{copyPreview.replaced}</dd></div>
-              <div><dt>Assignments cleared</dt><dd>{copyPreview.cleared}</dd></div>
+                 <div><dt>Assignments cleared</dt><dd>{copyPreview.cleared}</dd></div>
+                 <div><dt>Protected issued rules skipped</dt><dd>{copyPreview.protectedCount}</dd></div>
             </dl>
             {Object.keys(copyPreview.changes).length === 0 ? <p>All matching assignments are already up to date.</p> : <p>Only matching directed role pairs will be updated. Changes remain local until Save form rules is clicked.</p>}
             <div className="campaign-modal-actions">

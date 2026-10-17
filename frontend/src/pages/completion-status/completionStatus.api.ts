@@ -22,10 +22,10 @@ export type CompletionStatusRow = {
   id: number;
   evaluator_id: number;
   evaluator_name: string;
-  evaluator_email: string;
+  evaluator_email: string | null;
   evaluatee_id: number;
   evaluatee_name: string;
-  evaluatee_email: string;
+  evaluatee_email: string | null;
   questionnaire_id: number;
   questionnaire_name: string;
   status_name: string;

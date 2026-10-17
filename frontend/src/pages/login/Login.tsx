@@ -1,26 +1,20 @@
-import { useRef, useState, type ChangeEvent, type SubmitEvent } from 'react';
+import { useRef, useState, type SubmitEvent } from 'react';
 import { useNavigate } from 'react-router';
-import { Compass, Eye, EyeOff } from 'lucide-react';
+import { Compass } from 'lucide-react';
 import { isHrOrManagerRole } from '../layout/sidebar-user';
 import { API_BASE_URL } from '../../config';
 import './Login.css';
 
 function Login() {
-  const [username, setUsername] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const pending = useRef(false);
   const navigate = useNavigate();
 
-  function setUsernameHandler(event: ChangeEvent<HTMLInputElement>) {
-    setUsername(event.target.value);
-    setErrorMessage('');
-  }
-
   async function submitHandler(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending.current) return;
+    if (pending.current || !name.trim()) return;
     pending.current = true;
     setIsSubmitting(true);
     setErrorMessage('');
@@ -29,10 +23,12 @@ function Login() {
       const response = await fetch(`${API_BASE_URL}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username }),
+        body: JSON.stringify({ name: name.trim() }),
       });
       if (!response.ok) {
-        setErrorMessage('Sign in failed. Check your username and try again.');
+        const body: unknown = await response.json().catch(() => null);
+        const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null;
+        setErrorMessage(typeof detail === 'string' ? detail : 'Sign in failed. Please try again.');
         return;
       }
 
@@ -56,52 +52,26 @@ function Login() {
 
           <form className="login-form" onSubmit={submitHandler} aria-busy={isSubmitting}>
             <div className="form-field">
-              <label className="form-label" htmlFor="username">Username</label>
+              <label className="form-label" htmlFor="name">Your name</label>
               <input
                 className="form-control"
-                id="username"
-                name="username"
+                id="name"
+                name="name"
                 type="text"
-                value={username}
+                value={name}
                 required
                 autoComplete="username"
-                placeholder="Enter your username"
+                placeholder="Enter your full name or username"
                 disabled={isSubmitting}
                 aria-invalid={errorMessage ? true : undefined}
                 aria-describedby={errorMessage ? 'login-error' : undefined}
-                onChange={setUsernameHandler}
+                onChange={(event) => { setName(event.target.value); setErrorMessage(''); }}
               />
             </div>
             <div className="form-field">
-              <label className="form-label" htmlFor="password">Password</label>
-              <div className="login-password-field">
-                <input
-                  className="form-control"
-                  id="password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  placeholder="Enter your password"
-                  disabled={isSubmitting}
-                />
-                <button
-                  className="login-password-toggle"
-                  type="button"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  aria-pressed={showPassword}
-                  disabled={isSubmitting}
-                  onClick={() => setShowPassword((current) => !current)}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="login-options">
-              <label className="login-remember" title="Remember me is not available yet">
-                <input type="checkbox" disabled /> Remember me
-              </label>
-              <span className="login-unavailable">Password recovery unavailable</span>
+              <label className="form-label" htmlFor="password">Password <span className="login-optional">(optional for development)</span></label>
+              <input className="form-control" id="password" type="password" autoComplete="off"
+                placeholder="Enter your password" disabled={isSubmitting} />
             </div>
 
             {errorMessage && <p className="login-error" id="login-error" role="alert">{errorMessage}</p>}
@@ -111,7 +81,7 @@ function Login() {
             </button>
           </form>
 
-          <p className="login-support">Need access? Contact your HR administrator.</p>
+          <p className="login-support">This identity switcher is for local development, not production authentication.</p>
         </div>
       </section>
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 
 from database import Base
 
@@ -68,14 +69,14 @@ class CampaignEvaluationRule(Base):
         ),
     )
 
-user_company_groups = Table(
-    "user_company_groups",
+employee_company_groups = Table(
+    "employee_company_groups",
     Base.metadata,
 
     Column(
-        "user_id",
+        "employee_id",
         Integer,
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("employees.id", ondelete="CASCADE"),
         primary_key=True,
     ),
 
@@ -132,13 +133,13 @@ class FilledForm(Base):
 
     evaluator_id = Column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("employees.id"),
         nullable=False,
     )
 
     evaluatee_id = Column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("employees.id"),
         nullable=False,
     )
 
@@ -165,7 +166,7 @@ class FilledForm(Base):
     )
 
     form_snapshot = Column(
-        JSONB,
+        JSONB(none_as_null=True),
         nullable=True,
     )
 
@@ -185,7 +186,7 @@ class CampaignEmployeeSelfEvaluation(Base):
     __tablename__ = "campaign_employee_self_evaluations"
 
     campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), primary_key=True)
-    employee_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), primary_key=True)
     form_id = Column(Integer, ForeignKey("forms.id"), nullable=False)
 
 
@@ -207,20 +208,21 @@ class FormTemplate(Base):
     questions = Column(JSONB, nullable=False)
 
 
-class PerformanceDimension(Base):
-    __tablename__ = "performance_dimensions"
+class Section(Base):
+    __tablename__ = "sections"
 
     id = Column(Integer, primary_key=True, index=True)
+    # The current application has no Company entity; retain an explicit scope key
+    # until company tenancy is introduced rather than implying a nonexistent FK.
     scope_key = Column(String, nullable=False, default="default")
-    name = Column(String, nullable=False)
-    normalized_name = Column(String, nullable=False)
-    description = Column(String, nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
+    name = Column(String(120), nullable=False)
+    normalized_name = Column(String(120), nullable=False)
+    is_archived = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("scope_key", "normalized_name", name="uq_performance_dimension_scope_name"),
+        UniqueConstraint("scope_key", "normalized_name", name="uq_section_scope_name"),
     )
 
 system_role_permissions = Table(
@@ -274,19 +276,11 @@ class User(Base):
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
 
-    company_role_id = Column(
-        Integer,
-        ForeignKey("company_roles.id"),
-        nullable=False,
-    )
-
     system_role_id = Column(
         Integer,
         ForeignKey("system_roles.id"),
         nullable=False,
     )
-
-    profile_image_url = Column(String, nullable=True)
 
     is_active = Column(Boolean, default=True, nullable=False)
 
@@ -307,6 +301,23 @@ class User(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    employee = relationship("Employee", back_populates="user", uselist=False)
+
+
+class Employee(Base):
+    __tablename__ = "employees"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), unique=True, nullable=True)
+    full_name = Column(String, nullable=False)
+    company_role_id = Column(Integer, ForeignKey("company_roles.id"), nullable=False)
+    profile_image_url = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="employee")
 
 class Campaign(Base):
     __tablename__ = "campaigns"

@@ -531,6 +531,10 @@ body.modal-open {
   display: block;
 }
 
+.campaign-matrix-table .campaign-matrix-assignment-status { font-weight: 700; }
+.campaign-matrix-table .campaign-matrix-assignment-status.issued { color: var(--color-primary); }
+.campaign-matrix-table .campaign-matrix-assignment-status.planned { color: var(--color-text-muted); }
+
 .campaign-matrix-table small {
   color: var(--color-text-secondary);
   font-size: 11px;

@@ -10,8 +10,9 @@ export type SettingsGroup = {
 export type AccountSettingsProfile = {
   id: number;
   username: string;
+  full_name: string | null;
   email: string;
-  company_role: string;
+  company_role: string | null;
   system_role: string | null;
   groups: SettingsGroup[];
   is_active: boolean;

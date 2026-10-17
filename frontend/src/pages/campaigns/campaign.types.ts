@@ -6,7 +6,7 @@ export type Campaign = {
   name: string;
   status: CampaignStatus;
   isActive: boolean;
-  currentDate?: string;
+  currentDate: string;
   start: string;
   end: string;
   startDate: string;
@@ -32,6 +32,7 @@ export type CampaignResponse = {
   issued_forms_count: number;
   submitted_forms_count: number;
   current_date: string;
+  lifecycle_status: CampaignLifecycleStatus;
 };
 
 export type CampaignGroup = {
@@ -62,6 +63,7 @@ export type CampaignRolePairRule = {
   evaluateeRoleName: string;
   formId: number | null;
   ruleId: number | null;
+  locked?: boolean;
 };
 
 export type CampaignGroupRuleMatrix = {
@@ -87,6 +89,7 @@ export type CampaignEvaluationRulesResponse = {
       evaluatee_role_name: string;
       form_id: number | null;
       rule_id: number | null;
+      locked?: boolean;
     }>;
   }>;
 };
@@ -96,13 +99,15 @@ export type CampaignEvaluationMatrixEmployee = {
   name: string;
   roleId: number;
   roleName: string;
+  active?: boolean;
 };
 
 export type CampaignEvaluationMatrixAssignment = {
   evaluatorId: number;
   evaluateeId: number;
   formId: number;
-  filledFormId: number;
+  filledFormId: number | null;
+  issued: boolean;
   isCompleted: boolean;
   statusName: string;
   hasAnswers: boolean;
@@ -117,9 +122,11 @@ export type CampaignGroupEvaluationMatrix = {
 
 export type CampaignEvaluationMatrix = {
   groups: CampaignGroupEvaluationMatrix[];
+  issuanceErrors?: string[];
 };
 
 export type CampaignEvaluationMatrixResponse = {
+  issuance_errors: string[];
   groups: Array<{
     group_id: number;
     group_name: string;
@@ -128,12 +135,14 @@ export type CampaignEvaluationMatrixResponse = {
       name: string;
       role_id: number;
       role_name: string;
+      active?: boolean;
     }>;
     assignments: Array<{
       evaluator_id: number;
       evaluatee_id: number;
       form_id: number;
-      filled_form_id: number;
+      filled_form_id: number | null;
+      issued: boolean;
       is_completed: boolean;
       status_name: string;
       has_answers: boolean;

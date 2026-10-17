@@ -12,7 +12,7 @@ export default function ProfileSettings({ profile }: { profile: AccountSettingsP
       <p>Your account information is managed by your organization.</p>
     </div>
     <div className="settings-field-grid">
-      <Field label="Full name" value={formatUserName(profile.username)} />
+       <Field label="Full name" value={profile.full_name || formatUserName(profile.username)} />
       <Field label="Email address" value={profile.email} />
       <Field label="Company role" value={profile.company_role || 'Not assigned'} />
       <Field label="System role" value={profile.system_role || 'Not assigned'} />

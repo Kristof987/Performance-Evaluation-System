@@ -39,6 +39,7 @@ export function previewRuleCopy(
   let replaced = 0;
   let cleared = 0;
   let assigned = 0;
+  let protectedCount = 0;
   for (const group of rules.groups) {
     if (group.groupId === request.sourceGroupId) continue;
     let matches = 0;
@@ -50,6 +51,10 @@ export function previewRuleCopy(
       );
       if (!matching) continue;
       matches++;
+      if (pair.locked) {
+        protectedCount++;
+        continue;
+      }
       const sourceValue = values[`${request.sourceGroupId}:${pair.evaluatorRoleId}:${pair.evaluateeRoleId}`] ?? null;
       const key = `${group.groupId}:${pair.evaluatorRoleId}:${pair.evaluateeRoleId}`;
       const previous = values[key] ?? null;
@@ -63,5 +68,5 @@ export function previewRuleCopy(
     if (matches) matchingGroups++;
     if (changed) affectedGroups++;
   }
-  return { source, sourcePairs, matchingGroups, affectedGroups, changes, replaced, cleared, assigned };
+  return { source, sourcePairs, matchingGroups, affectedGroups, changes, replaced, cleared, assigned, protectedCount };
 }

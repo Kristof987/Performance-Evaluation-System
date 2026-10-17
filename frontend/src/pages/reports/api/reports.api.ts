@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../../../config';
-import type { CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, GroupReportDetail, GroupsReport, ReportCampaignOption, RolePerspective, RoleReportDetail, RolesReport } from '../types/reports.types';
+import type { CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, RolePerspective, RoleReportDetail, RolesReport } from '../types/reports.types';
 
 async function requestReports<T>(path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}/reports${path}`, { signal });
@@ -25,6 +25,14 @@ export function fetchCampaignReportOverview(campaignId: number, requesterUserId:
     signal,
     'Campaign report could not be loaded.',
   );
+}
+
+export function fetchReportQuestions(campaignId: number, requesterUserId: number, scope: { group_id?: number; role_id?: number; employee_id?: number; perspective?: RolePerspective }, signal: AbortSignal) {
+  const params = new URLSearchParams({ requester_user_id: String(requesterUserId) });
+  for (const [key, value] of Object.entries(scope)) {
+    if (value !== undefined) params.set(key, String(value));
+  }
+  return requestReports<ReportQuestions>(`/campaigns/${encodeURIComponent(campaignId)}/questions?${params}`, signal, 'Question analytics could not be loaded.');
 }
 
 export function fetchGroupsReport(campaignId: number, requesterUserId: number, signal: AbortSignal) {

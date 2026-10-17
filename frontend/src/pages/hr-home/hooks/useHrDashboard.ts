@@ -10,6 +10,7 @@ import type {
 
 export function useHrDashboard() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(
     null,
   );
@@ -34,6 +35,7 @@ export function useHrDashboard() {
     try {
       const dashboard = await fetchDashboard(campaignId);
       setCampaigns(dashboard.campaigns);
+      setCurrentDate(dashboard.current_date);
       setSelectedCampaignId(dashboard.selected_campaign_id);
       setMetrics(dashboard.metrics);
       setParticipants(dashboard.participants ?? []);
@@ -53,6 +55,7 @@ export function useHrDashboard() {
 
   return {
     campaigns,
+    currentDate,
     selectedCampaign,
     metrics,
     participants,
