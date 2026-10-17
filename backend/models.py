@@ -275,6 +275,11 @@ class User(Base):
     username = Column(String, unique=True, nullable=False)
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
+    auth0_user_id = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("auth0_user_id", name="uq_users_auth0_user_id"),
+    )
 
     system_role_id = Column(
         Integer,
