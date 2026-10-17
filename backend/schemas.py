@@ -177,6 +177,26 @@ class UserResponse(BaseModel):
     }
 
 
+class AuthEmployeeResponse(BaseModel):
+    id: int
+    full_name: str
+    company_role_id: int
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class AuthMeResponse(BaseModel):
+    id: int
+    username: str
+    email: EmailStr
+    system_role_id: int
+    is_active: bool
+    employee: AuthEmployeeResponse | None
+
+    model_config = {"from_attributes": True}
+
+
 class AssignedEvaluationResponse(BaseModel):
     id: int
     evaluator_id: int

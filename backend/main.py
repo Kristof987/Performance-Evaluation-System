@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, aliased
 
 from database import engine, Base, SessionLocal
+from auth0 import get_verified_auth0_sub
 from business_calendar import business_today as campaign_today, campaign_status
 import models
 import form_snapshot_service
@@ -59,6 +60,25 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_current_user(sub: str = Depends(get_verified_auth0_sub), db: Session = Depends(get_db)) -> models.User:
+    user = db.query(models.User).filter(models.User.auth0_user_id == sub).first()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid bearer credentials", headers={"WWW-Authenticate": "Bearer"})
+    return user
+
+
+def get_current_employee(user: models.User = Depends(get_current_user)) -> models.Employee:
+    employee = user.employee
+    if employee is None or not employee.is_active:
+        raise HTTPException(status_code=403, detail="No active employee profile is linked to this account")
+    return employee
+
+
+@app.get("/auth/me", response_model=schemas.AuthMeResponse)
+def get_auth_me(user: models.User = Depends(get_current_user)) -> models.User:
+    return user
 
 
 @app.post("/users", response_model=schemas.UserResponse)
