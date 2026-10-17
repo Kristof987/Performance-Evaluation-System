@@ -5,6 +5,7 @@ import {
   ChartNoAxesCombined,
   ChevronDown,
   ClipboardPen,
+  ClipboardCheck,
   Compass,
   Files,
   LayoutDashboard,
@@ -22,6 +23,7 @@ import {
 
 export type SidebarPage =
   | 'hr-home'
+  | 'my-evaluations'
   | 'employee-home'
   | 'employee-review-preview'
   | 'people'
@@ -171,6 +173,15 @@ export default function Sidebar({
         </Link>
         {isHrOrManager ? (
           <>
+            <Link
+              className={activePage === 'my-evaluations' ? 'nav-item active' : 'nav-item'}
+              aria-current={activePage === 'my-evaluations' ? 'page' : undefined}
+              to="/my-evaluations"
+              style={{ textDecoration: 'none' }}
+            >
+              <ClipboardCheck size={17} />
+              <span className="nav-item-label">My Evaluations</span>
+            </Link>
             <Link
               className={activePage === 'people' ? 'nav-item active' : 'nav-item'}
               aria-current={activePage === 'people' ? 'page' : undefined}

@@ -1,0 +1,43 @@
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.pager button {
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font: 650 13px var(--font-sans);
+  cursor: pointer;
+  padding: 6px 0;
+}
+
+.pager button:disabled {
+  color: #b2b7c8;
+  cursor: not-allowed;
+}
+
+.pager button:not(:disabled):hover { text-decoration: underline; }
+
+.pager span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .table-footer { align-items: flex-start; flex-direction: column; }
+  .pager { justify-content: space-between; width: 100%; }
+}

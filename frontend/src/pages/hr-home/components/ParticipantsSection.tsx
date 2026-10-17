@@ -1,7 +1,7 @@
 import './ParticipantsSection.css';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
+import Pagination from '../../../components/Pagination';
 import { getUserInitials } from '../../layout/sidebar-user';
 import type { DashboardParticipant } from '../hrHome.types';
 
@@ -60,14 +60,6 @@ function ParticipantsSection({ participants, onViewCompletionStatus }: Participa
   const emptyRowsCount = PARTICIPANTS_PER_PAGE - visibleParticipants.length;
   const hasPagination = totalPages > 1;
 
-  const previousPageHandler = () => {
-    setCurrentPage((page) => Math.max(0, page - 1));
-  };
-
-  const nextPageHandler = () => {
-    setCurrentPage((page) => Math.min(totalPages - 1, page + 1));
-  };
-
   return (
     <div className="forms-section">
       <div className="section-header">
@@ -106,31 +98,12 @@ function ParticipantsSection({ participants, onViewCompletionStatus }: Participa
         </div>
 
         {hasPagination && (
-          <div className="participants-pagination">
-            <span className="participants-page-label">
-              {boundedPage + 1} / {totalPages}
-            </span>
-            <div className="participants-page-actions">
-              <button
-                className="participants-page-button"
-                type="button"
-                onClick={previousPageHandler}
-                  disabled={boundedPage === 0}
-                aria-label="Previous participants page"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <button
-                className="participants-page-button"
-                type="button"
-                onClick={nextPageHandler}
-                  disabled={boundedPage === totalPages - 1}
-                aria-label="Next participants page"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            pagination={{ page: boundedPage + 1, pages: totalPages, from: pageStart + 1, to: Math.min(pageStart + PARTICIPANTS_PER_PAGE, participants.length) }}
+            total={participants.length}
+            noun="participants"
+            onPageChange={(page) => setCurrentPage(page - 1)}
+          />
         )}
       </div>
     </div>

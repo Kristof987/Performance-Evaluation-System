@@ -101,47 +101,6 @@
   text-align: center;
   width: 100%;
 }
-.participants-pagination {
-  align-items: center;
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  justify-content: space-between;
-  margin-top: auto;
-  padding: 8px 14px;
-  width: 100%;
-}
-.participants-page-label {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-}
-.participants-page-actions {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-}
-.participants-page-button {
-  align-items: center;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  display: flex;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
-  width: 28px;
-}
-.participants-page-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-.participants-page-button:not(:disabled):hover {
-  background: var(--color-surface-muted);
-  color: var(--color-primary);
-}
-
 @media (max-width: 640px) {
   .participant-name,
   .participant-email,

@@ -91,7 +91,7 @@ export default function EmployeeQuestionnaire() {
   const confirmRef = useRef<HTMLDialogElement>(null);
   const questions = questionnaire ? issuedQuestions(questionnaire.blocks) : [];
   const fromHr = searchParams.get('from') === 'hr';
-  const backPath = fromHr ? '/hr-home' : '/employee-home';
+  const backPath = fromHr ? '/my-evaluations' : '/employee-home';
 
   useEffect(() => {
     if (userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0) return;
@@ -162,7 +162,7 @@ export default function EmployeeQuestionnaire() {
   const progress = questionCount === 0 ? 0 : Math.round((answeredCount / questionCount) * 100);
   const saveLabel = saving ? 'Saving...' : dirty ? 'Unsaved changes' : saveState === 'saved' ? 'All changes saved' : saveState === 'failed' ? 'Save failed' : 'No unsaved changes';
 
-  return <AppLayout activePage={fromHr ? 'hr-home' : 'employee-home'} pageClassName="employee-home-page">
+  return <AppLayout activePage={fromHr ? 'my-evaluations' : 'employee-home'} pageClassName="employee-home-page">
     <main className="main-content employee-home-main employee-questionnaire-page">
       <div className="employee-questionnaire-shell">
         <Link className="campaign-details-link" to={backPath}>← Back to your tasks</Link>

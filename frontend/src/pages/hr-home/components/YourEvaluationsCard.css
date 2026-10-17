@@ -1,0 +1,28 @@
+.your-evaluations-card {
+  align-items: center;
+  display: grid;
+  gap: 14px 24px;
+  grid-template-columns: minmax(170px, 1fr) auto minmax(140px, auto) auto;
+  padding: 18px 22px;
+}
+
+.your-evaluations-summary h2 { font-size: 17px; margin: 0 0 4px; }
+.your-evaluations-summary p,
+.your-evaluations-count span,
+.your-evaluations-due span { color: var(--color-text-secondary); font-size: 12px; margin: 0; }
+.your-evaluations-count,
+.your-evaluations-due { display: flex; flex-direction: column; gap: 3px; }
+.your-evaluations-count strong { color: var(--color-primary); font-size: 30px; line-height: 1; }
+.your-evaluations-due strong { font-size: 14px; }
+.your-evaluations-card .btn { justify-self: end; text-decoration: none; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .your-evaluations-card { grid-template-columns: minmax(0, 1fr) auto; }
+  .your-evaluations-card .btn { grid-column: 2; }
+}
+
+@media (max-width: 600px) {
+  .your-evaluations-card { grid-template-columns: minmax(0, 1fr) auto; padding: 16px; }
+  .your-evaluations-summary { grid-column: 1 / -1; }
+  .your-evaluations-card .btn { grid-column: 1 / -1; justify-self: stretch; text-align: center; }
+}

@@ -1151,7 +1151,7 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
                 "date": campaign.start_date,
             }
             for campaign in campaigns
-            if campaign.start_date >= today
+            if campaign.start_date > today
         ]
         + [
             {
@@ -1161,7 +1161,7 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
                 "date": campaign.end_date,
             }
             for campaign in campaigns
-            if campaign.end_date is not None and campaign.end_date >= today
+            if campaign.end_date is not None and campaign.end_date > today
         ],
         key=lambda item: (item["date"], item["deadline_type"], item["name"], item["campaign_id"]),
     )[:8]

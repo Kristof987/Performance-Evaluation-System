@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import './styles/index.css'
 import Login from './pages/login/Login'
 import HrHome from './pages/hr-home/HrHome'
+import MyEvaluationsPage from './pages/hr-home/MyEvaluationsPage'
 import EmployeeHome from './pages/employee-home/EmployeeHome'
 import EmployeeQuestionnaire from './pages/employee-home/EmployeeQuestionnaire'
 import EmployeeReviewPreview from './pages/employee-home/EmployeeReviewPreview'
@@ -17,7 +18,7 @@ import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/report
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import './styles/shared.css'
-import { getDashboardPath } from './pages/layout/sidebar-user'
+import { getDashboardPath, getSidebarUser, isHrOrManagerRole } from './pages/layout/sidebar-user'
 
 function RequireLoggedInUser({ children }: { children: React.ReactNode }) {
   const loggedInUser = sessionStorage.getItem('loggedInUser')
@@ -33,12 +34,19 @@ function RoleHome() {
   return getDashboardPath() === '/hr-home' ? <HrHome /> : <EmployeeHome />
 }
 
+function RequireHrManager({ children }: { children: React.ReactNode }) {
+  const user = getSidebarUser()
+  if (!user) return <Navigate to="/" replace />
+  return isHrOrManagerRole(user.role_name) ? children : <Navigate to={getDashboardPath()} replace />
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/hr-home" element={<RequireLoggedInUser><RoleHome /></RequireLoggedInUser>} />
+        <Route path="/my-evaluations" element={<RequireHrManager><MyEvaluationsPage /></RequireHrManager>} />
         <Route path="/employee-home" element={<RequireLoggedInUser><EmployeeHome /></RequireLoggedInUser>} />
         <Route path="/employee-home/evaluations/:id" element={<RequireLoggedInUser><EmployeeQuestionnaire /></RequireLoggedInUser>} />
         <Route path="/evaluations/:id" element={<RequireLoggedInUser><EmployeeQuestionnaire /></RequireLoggedInUser>} />

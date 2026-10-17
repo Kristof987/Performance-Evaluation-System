@@ -1,5 +1,6 @@
 import { getSidebarUser, getUserInitials } from '../layout/sidebar-user';
 import AppLayout from '../layout/AppLayout';
+import Pagination from '../../components/Pagination';
 import {
   useEffect,
   useLayoutEffect,
@@ -104,45 +105,6 @@ function paginate<T>(items: T[], requestedPage: number, size: number): Page<T> {
     from: items.length ? start + 1 : 0,
     to: start + visible.length,
   };
-}
-
-function Pagination({
-  pagination,
-  total,
-  noun,
-  onPageChange,
-}: {
-  pagination: Pick<Page<unknown>, 'page' | 'pages' | 'from' | 'to'>;
-  total: number;
-  noun: string;
-  onPageChange: (page: number) => void;
-}) {
-  return (
-    <div className="table-footer">
-      <span>
-        Showing {pagination.from}–{pagination.to} of {total} {noun}
-      </span>
-      <div className="pager">
-        <button
-          type="button"
-          disabled={pagination.page === 1}
-          onClick={() => onPageChange(pagination.page - 1)}
-        >
-          ← Previous
-        </button>
-        <span>
-          Page {pagination.page} / {pagination.pages}
-        </span>
-        <button
-          type="button"
-          disabled={pagination.page === pagination.pages}
-          onClick={() => onPageChange(pagination.page + 1)}
-        >
-          Next →
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function PeopleHeader({
