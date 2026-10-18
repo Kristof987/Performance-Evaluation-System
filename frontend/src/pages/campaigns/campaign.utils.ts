@@ -65,6 +65,7 @@ export function mapCampaignFromResponse(campaign: CampaignResponse): Campaign {
     id: campaign.id.toString(),
     name: campaign.name,
     status: campaign.campaign_status,
+    pausedFromStatus: campaign.paused_from_status ?? null,
     isArchived: campaign.is_archived,
     isActive: campaign.is_active,
     currentDate: campaign.current_date,

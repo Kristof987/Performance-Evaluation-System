@@ -6,8 +6,8 @@ import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import type { FormQuestion } from '../forms/forms.api';
 import { ChoiceRows, RatingChoices } from '../forms/QuestionnaireChoices';
-import { fetchAssignedQuestionnaire, issuedQuestions, saveAssignedQuestionnaire, type AssignedQuestionnaire, type QuestionnaireAnswer } from './employee-home.api';
-import { campaignStatus } from './employee-home.utils';
+import { EmployeeEvaluationNotFoundError, fetchAssignedQuestionnaire, issuedQuestions, saveAssignedQuestionnaire, type AssignedQuestionnaire, type QuestionnaireAnswer } from './employee-home.api';
+import { evaluationAvailable, evaluationOverdue } from './employee-home.utils';
 import './employee-home.css';
 import './employee-questionnaire.css';
 
@@ -94,20 +94,31 @@ export default function EmployeeQuestionnaire() {
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const confirmRef = useRef<HTMLDialogElement>(null);
-  const questions = questionnaire ? issuedQuestions(questionnaire.blocks) : [];
+  const requestVersion = useRef(0);
+  const visibleQuestionnaire = questionnaire?.evaluation.id === evaluationId && evaluationAvailable(questionnaire.evaluation) ? questionnaire : null;
+  const questions = visibleQuestionnaire ? issuedQuestions(visibleQuestionnaire.blocks) : [];
   const fromHr = searchParams.get('from') === 'hr';
   const backPath = fromHr ? '/my-evaluations' : '/employee-home';
 
   useEffect(() => {
+    const version = ++requestVersion.current;
+    setQuestionnaire(null);
+    setAnswers([]);
+    setError('');
+    setSaving(false);
+    setDirty(false);
+    setSaveState('idle');
+    setSubmitAttempted(false);
+    setConfirmOpen(false);
     if (userId === undefined || !getAccessToken || !Number.isSafeInteger(evaluationId) || evaluationId <= 0) return;
     const controller = new AbortController();
     fetchAssignedQuestionnaire(getAccessToken, userId, evaluationId, controller.signal)
-      .then((result) => { if (!controller.signal.aborted) { setQuestionnaire(result); setAnswers(result.answers); } })
+      .then((result) => { if (!controller.signal.aborted && requestVersion.current === version) { setQuestionnaire(result); setAnswers(evaluationAvailable(result.evaluation) ? result.answers : []); } })
       .catch((cause: unknown) => {
         if (cause instanceof ApiAccessError && cause.status === 401) retryAuth0();
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Questionnaire could not be loaded.');
+        if (!controller.signal.aborted && requestVersion.current === version) setError(cause instanceof Error ? cause.message : 'Questionnaire could not be loaded.');
       });
-    return () => controller.abort();
+    return () => { controller.abort(); requestVersion.current++; };
   }, [userId, evaluationId, getAccessToken]);
 
   useEffect(() => {
@@ -139,7 +150,8 @@ export default function EmployeeQuestionnaire() {
   }
 
   async function save(submit: boolean) {
-    if (!questionnaire || userId === undefined || !getAccessToken || !canSubmit || saving) return;
+    if (!visibleQuestionnaire || userId === undefined || !getAccessToken || !canSubmit || saving || readOnly) return;
+    const version = requestVersion.current;
     setSubmitAttempted(submit);
     if (submit && (!questions.length || questions.some((question) => question.required && !isQuestionAnswered(question, answers.find((answer) => answer.question_id === question.id)?.value)))) {
       setError('Answer all required questions before submitting.');
@@ -149,23 +161,30 @@ export default function EmployeeQuestionnaire() {
     setError('');
     try {
       const saved = await saveAssignedQuestionnaire(getAccessToken, userId, evaluationId, answers, submit);
+      if (requestVersion.current !== version) return;
       setQuestionnaire(saved);
-      setAnswers(saved.answers);
+      setAnswers(evaluationAvailable(saved.evaluation) ? saved.answers : []);
       setDirty(false);
       setSaveState('saved');
       if (submit) setConfirmOpen(false);
       if (submit) navigate(backPath);
     } catch (cause) {
+      if (requestVersion.current !== version) return;
       if (cause instanceof ApiAccessError && cause.status === 401) retryAuth0();
+      if (cause instanceof EmployeeEvaluationNotFoundError || cause instanceof ApiAccessError && cause.status === 403) {
+        setQuestionnaire(null);
+        setAnswers([]);
+        setConfirmOpen(false);
+        setDirty(false);
+      }
       setSaveState('failed');
       setError(cause instanceof Error ? cause.message : 'Questionnaire could not be saved.');
     } finally {
-      setSaving(false);
+      if (requestVersion.current === version) setSaving(false);
     }
   }
 
-  const available = questionnaire !== null && campaignStatus(questionnaire.evaluation) === 'Ongoing';
-  const readOnly = !canSubmit || questionnaire?.evaluation.finishDate !== null || !available;
+  const readOnly = !canSubmit || visibleQuestionnaire?.evaluation.finishDate !== null || !visibleQuestionnaire;
   const answeredCount = questions.filter((question) => isQuestionAnswered(question, answers.find((answer) => answer.question_id === question.id)?.value)).length;
   const questionCount = questions.length;
   const progress = questionCount === 0 ? 0 : Math.round((answeredCount / questionCount) * 100);
@@ -175,22 +194,23 @@ export default function EmployeeQuestionnaire() {
     <main className="main-content employee-home-main employee-questionnaire-page">
       <div className="employee-questionnaire-shell">
         <Link className="campaign-details-link" to={backPath}>← Back to your tasks</Link>
-        {!questionnaire ? <p className="card card-padded employee-questionnaire-state" role={error ? 'alert' : 'status'}>{error || (userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0 ? 'Questionnaire not found.' : 'Loading questionnaire...')}</p> : <>
+         {!visibleQuestionnaire ? <p className="card card-padded employee-questionnaire-state" role={error ? 'alert' : 'status'}>{error || (questionnaire?.evaluation.id === evaluationId ? 'This questionnaire is not currently available.' : userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0 ? 'Questionnaire not found.' : 'Loading questionnaire...')}</p> : <>
           <header className="employee-questionnaire-header">
-            <p className="employee-questionnaire-context">{questionnaire.evaluation.campaignName} · {questionnaire.evaluation.evaluatorId === questionnaire.evaluation.evaluateeId ? 'Self-evaluation' : 'Evaluation'}</p>
-            <h1>{questionnaire.evaluation.formName}</h1>
-            <p>Evaluating {formatUserName(questionnaire.evaluation.evaluateeName)}</p>
-            {questionnaire.evaluation.formDescription && <p>{questionnaire.evaluation.formDescription}</p>}
-          </header>
-          {questionnaire.evaluation.finishDate !== null && <p className="card card-padded employee-questionnaire-state" role="status">This questionnaire has already been submitted.</p>}
-          {!available && questionnaire.evaluation.finishDate === null && <p className="card card-padded employee-questionnaire-state" role="status">This questionnaire is not currently available.</p>}
+             <p className="employee-questionnaire-context">{visibleQuestionnaire.evaluation.campaignName} · {visibleQuestionnaire.evaluation.evaluatorId === visibleQuestionnaire.evaluation.evaluateeId ? 'Self-evaluation' : 'Evaluation'}</p>
+             <h1>{visibleQuestionnaire.evaluation.formName}</h1>
+             <p>Evaluating {formatUserName(visibleQuestionnaire.evaluation.evaluateeName)}</p>
+             {visibleQuestionnaire.evaluation.formDescription && <p>{visibleQuestionnaire.evaluation.formDescription}</p>}
+           </header>
+           {visibleQuestionnaire.evaluation.finishDate !== null && <p className="card card-padded employee-questionnaire-state" role="status">This questionnaire has already been submitted.</p>}
+           {visibleQuestionnaire.evaluation.campaignStatus === 'review' && visibleQuestionnaire.evaluation.finishDate === null && <p className="card card-padded employee-questionnaire-state" role="status">This campaign is in review. You can still save and submit your issued evaluation{evaluationOverdue(visibleQuestionnaire.evaluation) ? ' after the deadline (overdue).' : '.'}</p>}
+           {visibleQuestionnaire.evaluation.campaignStatus === 'active' && evaluationOverdue(visibleQuestionnaire.evaluation) && <p className="card card-padded employee-questionnaire-state" role="status">Overdue: the deadline has passed, but you can still save and submit this evaluation.</p>}
           <section className="card employee-questionnaire-progress" aria-label="Questionnaire completion progress">
             <div><strong>{answeredCount} of {questionCount} questions answered</strong><span>{progress}% complete</span></div>
             <div className="employee-questionnaire-progress-bar" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Questionnaire completion"><span style={{ width: `${progress}%` }} /></div>
           </section>
           <section className="card employee-questionnaire-panel" aria-label="Questionnaire questions">
-            {questions.length === 0 ? <div className="employee-questionnaire-empty">This questionnaire has no questions yet.</div> : questionnaire.blocks.map((block, blockIndex) => {
-              const offset = issuedQuestions(questionnaire.blocks.slice(0, blockIndex)).length;
+             {questions.length === 0 ? <div className="employee-questionnaire-empty">This questionnaire has no questions yet.</div> : visibleQuestionnaire.blocks.map((block, blockIndex) => {
+               const offset = issuedQuestions(visibleQuestionnaire.blocks.slice(0, blockIndex)).length;
               if (block.type === 'section') return <div className="employee-questionnaire-section" key={`section-${block.section_id}`}>
                 <h2 className="questionnaire-section-heading">{block.section?.name ?? `Section ${block.section_id}`}</h2>
                 {block.questions.map((question, index) => <QuestionItem key={question.id} question={question} index={offset + index + 1} value={answers.find((answer) => answer.question_id === question.id)?.value} readOnly={readOnly} submitAttempted={submitAttempted} onChange={(value) => updateAnswer(question.id, value)} />)}

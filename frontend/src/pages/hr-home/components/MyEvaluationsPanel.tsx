@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import type { AssignedEvaluation } from '../../employee-home/employee-home.api';
-import { dashboardWork, evaluationStatus, evaluationTitle } from '../../employee-home/employee-home.utils';
+import { dashboardWork, evaluationAvailable, evaluationOverdue, evaluationStatus, evaluationTitle } from '../../employee-home/employee-home.utils';
 import { useMyEvaluations } from '../hooks/useMyEvaluations';
 import './MyEvaluationsPanel.css';
 
@@ -13,14 +13,14 @@ function formatDate(value: string | null) {
 function TaskRow({ evaluation }: { evaluation: AssignedEvaluation }) {
   const submitted = evaluation.finishDate !== null || evaluationStatus(evaluation) === 'Completed';
   const status = submitted ? 'Submitted' : evaluationStatus(evaluation);
-  const available = evaluation.campaignLifecycleStatus === 'Ongoing';
+  const available = evaluationAvailable(evaluation);
   const action = submitted ? 'View' : status === 'In progress' ? 'Continue' : 'Start';
   return <div className="my-evaluation-row" role="row" data-assignment-id={evaluation.id}>
     <div className="my-evaluation-title" role="cell"><strong title={evaluationTitle(evaluation)}>{evaluationTitle(evaluation)}</strong></div>
     <div className="my-evaluation-context" role="cell" title={`${evaluation.formName} · ${evaluation.campaignName}`}><span>{evaluation.formName}</span><small>{evaluation.campaignName}</small></div>
     <div className="my-evaluation-due" role="cell">{formatDate(evaluation.dueDate)}</div>
-    <div className="my-evaluation-status" role="cell"><span className="badge badge-neutral">{status}</span></div>
-    <div className="my-evaluation-action" role="cell">{submitted || available ? <Link className="btn btn-secondary btn-small" to={`/evaluations/${evaluation.id}?from=hr`}>{action}</Link> : <span className="my-evaluation-muted">{evaluation.campaignLifecycleStatus === 'Scheduled' ? `Available ${formatDate(evaluation.campaignStartDate)}` : 'Not available'}</span>}</div>
+    <div className="my-evaluation-status" role="cell"><span className="badge badge-neutral">{status}{evaluationOverdue(evaluation) ? ' · Overdue' : ''}{evaluation.campaignStatus === 'review' ? ' · Review' : ''}</span></div>
+    <div className="my-evaluation-action" role="cell">{available ? <Link className="btn btn-secondary btn-small" to={`/evaluations/${evaluation.id}?from=hr`}>{action}</Link> : <span className="my-evaluation-muted">{evaluation.campaignStatus === 'scheduled' ? `Available ${formatDate(evaluation.campaignStartDate)}` : 'Not available'}</span>}</div>
   </div>;
 }
 

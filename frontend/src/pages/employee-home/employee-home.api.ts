@@ -8,6 +8,8 @@ type AssignedEvaluationResponse = {
   campaign_name: string;
   campaign_start_date: string;
   campaign_is_active: boolean;
+  campaign_status: 'draft' | 'scheduled' | 'active' | 'paused' | 'review' | 'closed';
+  campaign_end_at: string | null;
   campaign_lifecycle_status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
   current_date: string;
   form_id: number;
@@ -34,6 +36,7 @@ type EmployeeDashboardHistoryItemResponse = {
 type EmployeeDashboardResponse = {
   current_date: string;
   evaluations: AssignedEvaluationResponse[];
+  restricted_campaigns: Array<{ campaign_id: number; campaign_name: string; campaign_status: 'paused' | 'closed' }>;
   open_count: number;
   completed_count: number;
   next_review_date: string | null;
@@ -51,6 +54,8 @@ export type AssignedEvaluation = {
   campaignName: string;
   campaignStartDate: string;
   campaignIsActive: boolean;
+  campaignStatus: AssignedEvaluationResponse['campaign_status'];
+  campaignEndAt: string | null;
   campaignLifecycleStatus: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
   currentDate: string;
   formId: number;
@@ -73,6 +78,8 @@ export type IssuedBlock =
 export type AssignedQuestionnaire = { evaluation: AssignedEvaluation; blocks: IssuedBlock[]; answers: QuestionnaireAnswer[] };
 export const issuedQuestions = (blocks: IssuedBlock[]) => blocks.flatMap((block) => block.type === 'section' ? block.questions : [block.question]);
 
+export class EmployeeEvaluationNotFoundError extends Error {}
+
 function mapIssuedBlocks(questions: Array<IssuedBlock | FormQuestion>): IssuedBlock[] {
   return questions.map((item) => item.type === 'section' || item.type === 'question'
     ? item as IssuedBlock
@@ -90,6 +97,7 @@ export type EmployeeDashboardHistoryItem = {
 export type EmployeeDashboard = {
   currentDate: string;
   evaluations: AssignedEvaluation[];
+  restrictedCampaigns: Array<{ campaignId: number; campaignName: string; status: 'paused' | 'closed' }>;
   openCount: number;
   completedCount: number;
   nextReviewDate: string | null;
@@ -108,6 +116,8 @@ function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): Assigned
     campaignName: evaluation.campaign_name,
     campaignStartDate: evaluation.campaign_start_date,
     campaignIsActive: evaluation.campaign_is_active,
+    campaignStatus: evaluation.campaign_status,
+    campaignEndAt: evaluation.campaign_end_at,
     campaignLifecycleStatus: evaluation.campaign_lifecycle_status,
     currentDate: evaluation.current_date,
     formId: evaluation.form_id,
@@ -128,6 +138,9 @@ function mapEmployeeDashboard(dashboard: EmployeeDashboardResponse): EmployeeDas
   return {
     currentDate: dashboard.current_date,
     evaluations: dashboard.evaluations.map(mapAssignedEvaluation),
+    restrictedCampaigns: (dashboard.restricted_campaigns ?? []).map((item) => ({
+      campaignId: item.campaign_id, campaignName: item.campaign_name, status: item.campaign_status,
+    })),
     openCount: dashboard.open_count,
     completedCount: dashboard.completed_count,
     nextReviewDate: dashboard.next_review_date,
@@ -151,7 +164,8 @@ async function requestApi<T>(getAccessToken: AccessTokenGetter, path: string, op
     const body: unknown = await response.json().catch(() => null);
     const detail =
       body && typeof body === 'object' && 'detail' in body ? body.detail : null;
-    throw new Error(typeof detail === 'string' ? detail : fallback);
+    const message = typeof detail === 'string' ? detail : fallback;
+    throw response.status === 404 ? new EmployeeEvaluationNotFoundError(message) : new Error(message);
   }
   return response.json() as Promise<T>;
 }

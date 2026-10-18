@@ -5,6 +5,7 @@ export type Campaign = {
   id: string;
   name: string;
   status: CampaignStatus;
+  pausedFromStatus: 'active' | 'review' | null;
   isArchived: boolean;
   isActive: boolean;
   currentDate: string;
@@ -45,6 +46,7 @@ export type CampaignResponse = {
   current_date: string;
   lifecycle_status: CampaignLifecycleStatus;
   campaign_status: CampaignStatus;
+  paused_from_status: 'active' | 'review' | null;
   is_archived: boolean;
   activation_error: string | null;
   activation_retry_at: string | null;
@@ -52,6 +54,16 @@ export type CampaignResponse = {
   last_transition_at: string | null;
   lifecycle_error: string | null;
   lifecycle_retry_at: string | null;
+};
+
+export type CampaignOperationalMetrics = {
+  campaign_id: number;
+  campaign_status: CampaignStatus;
+  total: number;
+  submitted: number;
+  incomplete: number;
+  completion_rate: number;
+  overdue: number;
 };
 
 export type CampaignGroup = {

@@ -32,6 +32,14 @@ export function CampaignDetails() {
     successMessage,
     actionMessage,
     isChangingSchedule,
+    confirmationAction,
+    operationalMetrics,
+    confirmationError,
+    isLoadingMetrics,
+    isChangingLifecycle,
+    openLifecycleConfirmation,
+    closeLifecycleConfirmation,
+    handleLifecycleAction,
     isSavingSetup,
     isSetupPreviewLoading,
     setupPreviewError,
@@ -85,6 +93,7 @@ export function CampaignDetails() {
     handleUpdateMatrix,
     handleUpdateCampaign,
   } = useCampaignDetails(id);
+  const canEdit = canManageCampaigns && campaign?.status !== 'closed';
   const activeMatrixGroup = evaluationMatrix.groups.find(
     (group) => group.groupId === activeMatrixGroupId,
   );
@@ -181,7 +190,23 @@ export function CampaignDetails() {
                 {isChangingSchedule ? 'Updating...' : campaign.status === 'draft' ? 'Schedule campaign' : 'Return to draft'}
               </button>
             )}
-            {canManageCampaigns && <button
+            {canManageCampaigns && !campaign.isArchived && (campaign.status === 'active' || campaign.status === 'review') && (
+              <button className="btn btn-secondary" type="button" disabled={isChangingLifecycle} onClick={() => handleLifecycleAction('pause')}>
+                {isChangingLifecycle ? 'Updating...' : 'Pause campaign'}
+              </button>
+            )}
+            {canManageCampaigns && !campaign.isArchived && campaign.status === 'active' && (
+              <button className="btn btn-secondary" type="button" disabled={isChangingLifecycle || isLoadingMetrics} onClick={() => openLifecycleConfirmation('review')}>Move to review</button>
+            )}
+            {canManageCampaigns && !campaign.isArchived && campaign.status === 'review' && (
+              <button className="btn btn-secondary" type="button" disabled={isChangingLifecycle || isLoadingMetrics} onClick={() => openLifecycleConfirmation('close')}>Close campaign</button>
+            )}
+            {canManageCampaigns && !campaign.isArchived && campaign.status === 'paused' && (
+              <button className="btn btn-secondary" type="button" disabled={isChangingLifecycle} onClick={() => handleLifecycleAction('resume')}>
+                {isChangingLifecycle ? 'Updating...' : 'Resume campaign'}
+              </button>
+            )}
+            {canEdit && <button
               className="btn btn-primary"
               type="button"
               onClick={openEdit}
@@ -200,6 +225,9 @@ export function CampaignDetails() {
           <h2 id="campaign-lifecycle-title">Lifecycle</h2>
           <dl className="campaign-lifecycle-facts">
             <div><dt>Persisted status</dt><dd><CampaignStatusBadge status={campaign.status} /></dd></div>
+            {campaign.status === 'paused' && (
+              <div><dt>Paused from</dt><dd>{campaign.pausedFromStatus ? <CampaignStatusBadge status={campaign.pausedFromStatus} /> : 'Not recorded'}</dd></div>
+            )}
             <div><dt>Configured start</dt><dd>{campaign.start} (Budapest)</dd></div>
             <div><dt>Configured end</dt><dd>{campaign.endAt ? `${campaign.end} (Budapest)` : 'No deadline'}</dd></div>
             <div><dt>Activation</dt><dd className={campaign.activationError ? 'campaign-activation-failed' : undefined}>
@@ -238,7 +266,7 @@ export function CampaignDetails() {
           <div className="campaign-heading-actions">
             <span role="status">{isSetupPreviewLoading ? 'Loading selected group setup...' :
               hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges ? 'Unsaved setup changes' : 'Setup saved'}</span>
-            {canManageCampaigns && <button className="btn btn-primary" type="button" onClick={requestSetupSave}
+            {canEdit && <button className="btn btn-primary" type="button" onClick={requestSetupSave}
               disabled={isSavingSetup || isSetupPreviewLoading || !!setupPreviewError || !(hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges)}>
               {isSavingSetup ? 'Saving setup...' : 'Save setup changes'}
             </button>}
@@ -254,7 +282,7 @@ export function CampaignDetails() {
               <h2>Campaign groups</h2>
               <p>Select which company groups are included in this campaign.</p>
             </div>
-            {canManageCampaigns && campaign.status !== 'scheduled' && <button
+            {canEdit && campaign.status !== 'scheduled' && <button
               className={hasGroupChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingGroups || !hasGroupChanges}
@@ -279,7 +307,7 @@ export function CampaignDetails() {
                   <input
                     type="checkbox"
                     checked={selectedGroupIds.includes(group.id)}
-                     disabled={!canManageCampaigns || (selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id))}
+                      disabled={!canEdit || (selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id))}
                     title={groupsWithIssuedAssignments.has(group.id) ? 'This group has issued evaluations and cannot be removed.' : undefined}
                     onChange={() => toggleGroup(group.id)}
                   />
@@ -307,8 +335,8 @@ export function CampaignDetails() {
               <p>Choose which questionnaire is used for each evaluator–evaluatee role relationship.</p>
             </div>
             {hasRuleChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
-            {hasRuleChanges && <button className="btn btn-secondary" type="button" onClick={discardRules}>Discard changes</button>}
-             {canManageCampaigns && campaign.status !== 'scheduled' && <button
+            {canEdit && hasRuleChanges && <button className="btn btn-secondary" type="button" onClick={discardRules}>Discard changes</button>}
+             {canEdit && campaign.status !== 'scheduled' && <button
               className={hasRuleChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingRules || !hasRuleChanges}
@@ -336,7 +364,7 @@ export function CampaignDetails() {
                       <span>{progress?.required === 0 ? 'No role relationships' : `${progress?.configured ?? 0} / ${progress?.required ?? 0} forms configured ${progress?.missing ? ` · ${countLabel(progress.missing, 'missing assignment')}` : ''}`}</span>
                     </div>
                     <div className="campaign-rule-group-actions">
-                       {canManageCampaigns && <button className="campaign-rule-copy-btn" type="button" onClick={() => setCopyRequest({ sourceGroupId: group.groupId })}>
+                       {canEdit && <button className="campaign-rule-copy-btn" type="button" onClick={() => setCopyRequest({ sourceGroupId: group.groupId })}>
                          Copy group rules to other groups
                        </button>}
                       <button
@@ -387,7 +415,7 @@ export function CampaignDetails() {
                                        className="form-control"
                                        aria-label={`${group.groupName}: ${pair.evaluatorRoleName} evaluates ${pair.evaluateeRoleName} form`}
                                        value={selectedRuleFormIds[ruleKey] ?? ''}
-                                         disabled={!canManageCampaigns || ruleLocked || isSavingMatrix}
+                                          disabled={!canEdit || ruleLocked || isSavingMatrix}
                                         title={ruleLocked ? 'Issued evaluations use this form rule. The rule is locked.' : undefined}
                                       onChange={(event) =>
                                         updateRuleForm(
@@ -410,7 +438,7 @@ export function CampaignDetails() {
                                   </div>
                                 </td>
                                 <td>
-                                   {canManageCampaigns && <button
+                                    {canEdit && <button
                                      className="campaign-rule-copy-btn campaign-rule-copy-inline"
                                     type="button"
                                     title="Copy this role pair's form assignment to matching role pairs in other campaign groups."
@@ -448,8 +476,8 @@ export function CampaignDetails() {
               <p>Assign a self-evaluation questionnaire to each employee in this campaign.</p>
             </div>
             {hasSelfChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
-            {hasSelfChanges && <button className="btn btn-secondary" type="button" disabled={isSavingSelf} onClick={discardSelfForms}>Discard changes</button>}
-             {canManageCampaigns && campaign.status !== 'scheduled' && <button className={hasSelfChanges ? 'btn btn-primary' : 'btn btn-secondary'} type="button" disabled={isSavingSelf || !hasSelfChanges || hasMatrixChanges} onClick={handleUpdateSelfForms}>
+            {canEdit && hasSelfChanges && <button className="btn btn-secondary" type="button" disabled={isSavingSelf} onClick={discardSelfForms}>Discard changes</button>}
+             {canEdit && campaign.status !== 'scheduled' && <button className={hasSelfChanges ? 'btn btn-primary' : 'btn btn-secondary'} type="button" disabled={isSavingSelf || !hasSelfChanges || hasMatrixChanges} onClick={handleUpdateSelfForms}>
                {isSavingSelf ? 'Saving...' : 'Save self-evaluations'}
              </button>}
           </div>
@@ -467,13 +495,13 @@ export function CampaignDetails() {
                     <th scope="row"><strong>{person.name}</strong><small>{person.roleName}</small></th>
                     <td>{person.groupNames.join(', ')}</td>
                     <td>
-                       <select className="form-control" aria-label={`Self-evaluation form for ${person.name}`} value={selectedSelfForms[person.employeeId] ?? ''} disabled={!canManageCampaigns || person.locked || issuedSelfIds.has(person.employeeId) || isSavingSelf || isSavingMatrix} onChange={(event) => updateSelfForm(person.employeeId, event.target.value === '' ? null : Number(event.target.value))}>
+                       <select className="form-control" aria-label={`Self-evaluation form for ${person.name}`} value={selectedSelfForms[person.employeeId] ?? ''} disabled={!canEdit || person.locked || issuedSelfIds.has(person.employeeId) || isSavingSelf || isSavingMatrix} onChange={(event) => updateSelfForm(person.employeeId, event.target.value === '' ? null : Number(event.target.value))}>
                         <option value="">No form</option>
                         {selfEvaluations.forms.map((form) => <option key={form.id} value={form.id}>{form.name}</option>)}
                       </select>
                        {(person.locked || issuedSelfIds.has(person.employeeId)) && <small>Issued self-evaluation is protected</small>}
                     </td>
-                      <td>{canManageCampaigns && <button className="campaign-rule-copy-btn" type="button" aria-label={`Copy ${person.name}'s self-evaluation questionnaire to all other employees in the campaign`} title="Copy this employee's self-evaluation questionnaire to all other employees in the campaign." disabled={isSavingSelf || isSavingMatrix || !selfEvaluations.forms.some((form) => form.id === selectedSelfForms[person.employeeId])} onClick={() => setSelfCopySourceId(person.employeeId)}>Copy to all</button>}</td>
+                      <td>{canEdit && <button className="campaign-rule-copy-btn" type="button" aria-label={`Copy ${person.name}'s self-evaluation questionnaire to all other employees in the campaign`} title="Copy this employee's self-evaluation questionnaire to all other employees in the campaign." disabled={isSavingSelf || isSavingMatrix || !selfEvaluations.forms.some((form) => form.id === selectedSelfForms[person.employeeId])} onClick={() => setSelfCopySourceId(person.employeeId)}>Copy to all</button>}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -489,8 +517,8 @@ export function CampaignDetails() {
               <p>Select which employees should evaluate each other in every selected group.</p>
             </div>
             {hasMatrixChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
-            {hasMatrixChanges && <button className="btn btn-secondary" type="button" disabled={isSavingMatrix} onClick={discardMatrix}>Discard changes</button>}
-             {canManageCampaigns && campaign.status !== 'scheduled' && <button
+            {canEdit && hasMatrixChanges && <button className="btn btn-secondary" type="button" disabled={isSavingMatrix} onClick={discardMatrix}>Discard changes</button>}
+             {canEdit && campaign.status !== 'scheduled' && <button
                className={hasMatrixChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingMatrix || !hasMatrixChanges || matrixReadiness !== 'ready'}
@@ -537,14 +565,14 @@ export function CampaignDetails() {
                       {countLabel(group.employees.length, 'employee')} · {countLabel(getSelectedMatrixCount(group.groupId), 'pair')} selected
                     </p>
                   </div>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                     disabled={!canManageCampaigns || group.employees.length === 0 || matrixReadiness !== 'ready'}
-                    onClick={() => setActiveMatrixGroupId(group.groupId)}
-                  >
-                    Open matrix
-                  </button>
+                  {canEdit && <button
+                     className="btn btn-secondary"
+                     type="button"
+                      disabled={group.employees.length === 0 || matrixReadiness !== 'ready'}
+                     onClick={() => setActiveMatrixGroupId(group.groupId)}
+                   >
+                     Open matrix
+                   </button>}
                 </article>
               ))}
             </div>
@@ -560,7 +588,35 @@ export function CampaignDetails() {
 
       </div>
 
-      {confirmGroupRemoval && (
+       {confirmationAction && (
+         <CampaignModal mode={confirmationAction} onClose={closeLifecycleConfirmation}>
+           <div className="campaign-copy-preview">
+              <p>{confirmationAction === 'review' ? 'Move this active campaign to review?' : 'Close this review campaign?'} Completion is based on issued evaluations, not planned assignments.</p>
+              <p>{confirmationAction === 'review'
+                ? 'Incomplete assigned evaluations remain fillable during Review, including after the configured deadline. The campaign end timestamp will not change.'
+                : 'Closing blocks employee questionnaire access. Incomplete assignments remain incomplete historical records; submitted answers and snapshots are preserved.'}</p>
+             {isLoadingMetrics && <p role="status">Loading current completion metrics...</p>}
+             {operationalMetrics && !isLoadingMetrics && (
+               <dl className="campaign-copy-counts">
+                 <div><dt>Total issued</dt><dd>{operationalMetrics.total}</dd></div>
+                 <div><dt>Submitted</dt><dd>{operationalMetrics.submitted}</dd></div>
+                 <div><dt>Incomplete</dt><dd>{operationalMetrics.incomplete}</dd></div>
+                 <div><dt>Completion</dt><dd>{operationalMetrics.completion_rate}%</dd></div>
+               </dl>
+             )}
+             {confirmationError && <div className="campaign-save-message" role="alert">{confirmationError}</div>}
+             <div className="campaign-modal-actions">
+               <button className="btn btn-secondary" type="button" disabled={isChangingLifecycle} onClick={closeLifecycleConfirmation}>Cancel</button>
+               <button className="btn btn-primary" type="button" disabled={isLoadingMetrics || isChangingLifecycle || !operationalMetrics || !!confirmationError}
+                 onClick={() => handleLifecycleAction(confirmationAction)}>
+                 {isChangingLifecycle ? 'Updating...' : confirmationAction === 'review' ? 'Confirm move to review' : 'Confirm close'}
+               </button>
+             </div>
+           </div>
+         </CampaignModal>
+       )}
+
+       {confirmGroupRemoval && (
         <CampaignModal mode="remove-group" onClose={() => { if (!isSavingSetup) setConfirmGroupRemoval(false); }}>
           <div className="campaign-copy-preview">
             <p>Remove <strong>{removedGroupNames.join(', ')}</strong> from this campaign? The group records, Forms, Templates and Sections remain available.</p>
@@ -632,7 +688,7 @@ export function CampaignDetails() {
         </CampaignModal>
       )}
 
-      {isEditOpen && (
+       {isEditOpen && canEdit && (
         <CampaignModal
           mode="edit"
           onClose={closeEdit}

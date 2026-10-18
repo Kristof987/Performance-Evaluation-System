@@ -8,6 +8,7 @@ import type {
   CampaignEvaluationRules,
   CampaignFormValues,
   CampaignGroups,
+  CampaignOperationalMetrics,
   CampaignSelfEvaluations,
   UpdateCampaignField,
 } from '../campaign.types';
@@ -29,6 +30,9 @@ import {
   fetchCampaignSelfEvaluations,
   fetchCampaignSetupPreview,
   changeCampaignSchedule,
+  changeCampaignLifecycle,
+  fetchCampaignOperationalMetrics,
+  type CampaignLifecycleAction,
   updateCampaign,
   updateCampaignEvaluationMatrix,
   updateCampaignEvaluationRules,
@@ -133,6 +137,11 @@ export function useCampaignDetails(id: string | undefined) {
   const [successMessage, setSuccessMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [isChangingSchedule, setIsChangingSchedule] = useState(false);
+  const [confirmationAction, setConfirmationAction] = useState<'review' | 'close' | null>(null);
+  const [operationalMetrics, setOperationalMetrics] = useState<CampaignOperationalMetrics | null>(null);
+  const [confirmationError, setConfirmationError] = useState('');
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
+  const [isChangingLifecycle, setIsChangingLifecycle] = useState(false);
   const [isSavingSetup, setIsSavingSetup] = useState(false);
   const [isSetupPreviewLoading, setIsSetupPreviewLoading] = useState(false);
   const [setupPreviewError, setSetupPreviewError] = useState('');
@@ -171,6 +180,11 @@ export function useCampaignDetails(id: string | undefined) {
     setSuccessMessage('');
     setActionMessage('');
     setIsChangingSchedule(false);
+    setConfirmationAction(null);
+    setOperationalMetrics(null);
+    setConfirmationError('');
+    setIsLoadingMetrics(false);
+    setIsChangingLifecycle(false);
     saving.current = false;
     setIsSavingCampaign(false);
     setIsCampaignLoading(true);
@@ -251,7 +265,7 @@ export function useCampaignDetails(id: string | undefined) {
     setSuccessMessage('');
   };
   function openEdit() {
-    if (!campaign || !canManageCampaigns) return;
+    if (!campaign || !canManageCampaigns || campaign.status === 'closed') return;
     setForm(getCampaignForm(campaign));
     setSaveMessage('');
     setSuccessMessage('');
@@ -283,6 +297,85 @@ export function useCampaignDetails(id: string | undefined) {
       if (routeVersion.current === version) setActionMessage(error instanceof Error ? error.message : 'Campaign status could not be updated.');
     } finally {
       if (routeVersion.current === version) setIsChangingSchedule(false);
+    }
+  }
+  function closeLifecycleConfirmation() {
+    if (isChangingLifecycle) return;
+    setConfirmationAction(null);
+    setOperationalMetrics(null);
+    setConfirmationError('');
+  }
+  async function openLifecycleConfirmation(action: 'review' | 'close') {
+    if (!campaign || !canManageCampaigns || isChangingLifecycle || isLoadingMetrics ||
+        (action === 'review' ? campaign.status !== 'active' : campaign.status !== 'review')) return;
+    setConfirmationAction(action);
+    setOperationalMetrics(null);
+    setConfirmationError('');
+    setIsLoadingMetrics(true);
+    const version = routeVersion.current;
+    try {
+      const metrics = await fetchCampaignOperationalMetrics(getAccessTokenSilently, campaign.id);
+      if (routeVersion.current !== version) return;
+      if (metrics.campaign_status !== campaign.status) {
+        setConfirmationError('Campaign status changed. Refresh the page before trying again.');
+        const refreshed = await fetchCampaign(getAccessTokenSilently, campaign.id, new AbortController().signal);
+        if (routeVersion.current === version) {
+          setCampaign(refreshed);
+          setForm(getCampaignForm(refreshed));
+        }
+      } else setOperationalMetrics(metrics);
+    } catch (error) {
+      handleAuthError(error);
+      if (routeVersion.current === version) setConfirmationError(error instanceof Error ? error.message : 'Campaign completion metrics could not be loaded.');
+    } finally {
+      if (routeVersion.current === version) setIsLoadingMetrics(false);
+    }
+  }
+  async function handleLifecycleAction(action: CampaignLifecycleAction) {
+    if (!campaign || !canManageCampaigns || isChangingLifecycle || isLoadingMetrics || campaign.isArchived ||
+        (action === 'pause' && campaign.status !== 'active' && campaign.status !== 'review') ||
+        (action === 'resume' && campaign.status !== 'paused') ||
+        (action === 'review' && campaign.status !== 'active') ||
+        (action === 'close' && campaign.status !== 'review') ||
+        ((action === 'review' || action === 'close') && (confirmationAction !== action || !operationalMetrics || confirmationError))) return;
+    const version = routeVersion.current;
+    setIsChangingLifecycle(true);
+    setActionMessage('');
+    try {
+      const updated = await changeCampaignLifecycle(getAccessTokenSilently, campaign.id, action);
+      if (routeVersion.current !== version) return;
+      setCampaign(updated);
+      setForm(getCampaignForm(updated));
+      setConfirmationAction(null);
+      setOperationalMetrics(null);
+      setConfirmationError('');
+      setIsEditOpen(false);
+      setSuccessMessage(action === 'pause' ? 'Campaign paused.' : action === 'resume' ? 'Campaign resumed.' : action === 'review' ? 'Campaign moved to review.' : 'Campaign closed.');
+    } catch (error) {
+      handleAuthError(error);
+      if (routeVersion.current === version) {
+        const message = error instanceof Error ? error.message : 'Campaign status could not be updated.';
+        if (confirmationAction) setConfirmationError(message);
+        else setActionMessage(message);
+      }
+    } finally {
+      if (routeVersion.current === version) {
+        try {
+          const refreshed = await fetchCampaign(getAccessTokenSilently, campaign.id, new AbortController().signal);
+          if (routeVersion.current === version) {
+            setCampaign(refreshed);
+            setForm(getCampaignForm(refreshed));
+            if (refreshed.status !== campaign.status) {
+              setConfirmationAction(null);
+              setOperationalMetrics(null);
+            }
+          }
+        } catch (error) {
+          handleAuthError(error);
+          if (routeVersion.current === version) setActionMessage('Campaign status could not be refreshed. Reload for the latest status.');
+        }
+        if (routeVersion.current === version) setIsChangingLifecycle(false);
+      }
     }
   }
   const hasEditChanges =
@@ -497,7 +590,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateSelfForms() {
-    if (id === undefined || isSavingSelf || !hasSelfChanges || !canManageCampaigns) return;
+    if (id === undefined || isSavingSelf || !hasSelfChanges || !canManageCampaigns || campaign?.status === 'closed') return;
     if (hasMatrixChanges) {
       setSelfMessage('Save or discard matrix selections before changing self-evaluation forms.');
       return;
@@ -559,7 +652,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateGroups() {
-    if (id === undefined || isSavingGroups || !hasGroupChanges || !canManageCampaigns) return;
+    if (id === undefined || isSavingGroups || !hasGroupChanges || !canManageCampaigns || campaign?.status === 'closed') return;
     if (hasRuleChanges || hasMatrixChanges || hasSelfChanges) {
       setGroupsMessage('Save or discard form-rule, self-evaluation and matrix changes before saving groups.');
       return;
@@ -599,7 +692,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateRules() {
-    if (id === undefined || isSavingRules || !hasRuleChanges || !canManageCampaigns) return;
+    if (id === undefined || isSavingRules || !hasRuleChanges || !canManageCampaigns || campaign?.status === 'closed') return;
     if (hasMatrixChanges) {
       setRulesMessage('Save or discard matrix selections before saving form rules.');
       return;
@@ -647,7 +740,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateMatrix() {
-    if (id === undefined || isSavingMatrix || !hasMatrixChanges || matrixReadiness !== 'ready' || !canManageCampaigns) return;
+    if (id === undefined || isSavingMatrix || !hasMatrixChanges || matrixReadiness !== 'ready' || !canManageCampaigns || campaign?.status === 'closed') return;
     if (hasSelfChanges) {
       setMatrixMessage('Save or discard self-evaluation form changes before saving the matrix.');
       return;
@@ -717,7 +810,7 @@ export function useCampaignDetails(id: string | undefined) {
 
   async function handleUpdateCampaign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!campaign || saving.current || !hasEditChanges || !canManageCampaigns) return;
+    if (!campaign || saving.current || !hasEditChanges || !canManageCampaigns || campaign.status === 'closed') return;
     const validation = getCampaignValidationError(form, campaign);
     if (validation) {
       setSaveMessage(validation);
@@ -802,6 +895,14 @@ export function useCampaignDetails(id: string | undefined) {
     successMessage,
     actionMessage,
     isChangingSchedule,
+    confirmationAction,
+    operationalMetrics,
+    confirmationError,
+    isLoadingMetrics,
+    isChangingLifecycle,
+    openLifecycleConfirmation,
+    closeLifecycleConfirmation,
+    handleLifecycleAction,
     isSavingSetup,
     isSetupPreviewLoading,
     setupPreviewError,

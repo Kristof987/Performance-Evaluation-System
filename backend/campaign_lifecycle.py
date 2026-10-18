@@ -71,7 +71,7 @@ def is_overdue(form: FilledForm, campaign: Campaign, *, now: datetime) -> bool:
     return (
         form.finish_date is None
         and campaign.end_date is not None
-        and _instant(now) > _instant(campaign.end_date)
+        and _instant(now) >= _instant(campaign.end_date)
         and CampaignStatus(campaign.status) in {
             CampaignStatus.ACTIVE, CampaignStatus.PAUSED, CampaignStatus.REVIEW, CampaignStatus.CLOSED,
         }
@@ -137,6 +137,8 @@ def transition_campaign(
         campaign.end_date is None or now < _instant(campaign.end_date)
     ):
         raise CampaignLifecycleError("Automatic review requires a passed deadline")
+    if current == CampaignStatus.PAUSED and campaign.is_archived:
+        raise CampaignLifecycleError("Archived campaigns cannot resume")
     if current == CampaignStatus.PAUSED:
         expected = CampaignStatus.REVIEW if campaign.paused_from_status == CampaignStatus.REVIEW.value or (
             campaign.end_date is not None and now >= _instant(campaign.end_date)
@@ -174,6 +176,10 @@ def transition_campaign(
             campaign.is_active = True
         elif (current, target) == (CampaignStatus.SCHEDULED, CampaignStatus.DRAFT):
             campaign.is_active = False
+        elif target in {CampaignStatus.PAUSED, CampaignStatus.REVIEW, CampaignStatus.CLOSED}:
+            campaign.is_active = False
+        elif current == CampaignStatus.PAUSED and target == CampaignStatus.ACTIVE:
+            campaign.is_active = True
         db.add(CampaignLifecycleHistory(
             campaign_id=campaign.id, previous_status=current.value, new_status=target.value,
             transitioned_at=now, actor_user_id=actor_user_id, is_automatic=automatic,

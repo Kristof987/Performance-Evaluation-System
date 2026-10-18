@@ -210,6 +210,10 @@ class AssignedEvaluationResponse(BaseModel):
     campaign_name: str
     campaign_start_date: date
     campaign_start_at: datetime
+    campaign_status: CampaignStatus
+    campaign_end_at: datetime | None
+    is_overdue: bool = False
+    can_edit: bool = False
     campaign_is_active: bool
     campaign_lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
     current_date: date
@@ -245,9 +249,16 @@ class EmployeeDashboardHistoryItem(BaseModel):
     occurred_at: date | datetime | None = None
 
 
+class EmployeeCampaignNotice(BaseModel):
+    campaign_id: int
+    campaign_name: str
+    campaign_status: Literal["paused", "closed"]
+
+
 class EmployeeDashboardResponse(BaseModel):
     current_date: date
     evaluations: list[AssignedEvaluationResponse]
+    restricted_campaigns: list[EmployeeCampaignNotice] = Field(default_factory=list)
     open_count: int
     completed_count: int
     next_review_date: date | None = None
@@ -366,6 +377,7 @@ class CampaignResponse(BaseModel):
     current_date: date
     lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
     campaign_status: CampaignStatus
+    paused_from_status: CampaignStatus | None = None
     start_at: datetime
     end_at: datetime | None
     is_archived: bool
@@ -379,6 +391,16 @@ class CampaignResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+
+class CampaignOperationalMetrics(BaseModel):
+    campaign_id: int
+    campaign_status: CampaignStatus
+    total: int
+    submitted: int
+    incomplete: int
+    completion_rate: int
+    overdue: int
 
 
 class CampaignGroupsUpdate(BaseModel):

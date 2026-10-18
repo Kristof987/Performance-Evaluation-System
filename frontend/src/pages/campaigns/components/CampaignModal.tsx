@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 type Props = {
-  mode: 'create' | 'edit' | 'copy-role' | 'copy-group' | 'copy-self' | 'remove-group';
+  mode: 'create' | 'edit' | 'copy-role' | 'copy-group' | 'copy-self' | 'remove-group' | 'review' | 'close';
   onClose: () => void;
   children: ReactNode;
 };
@@ -50,10 +50,10 @@ export default function CampaignModal({
         <div className="campaign-modal-header">
           <div>
             <h2 id={titleId}>
-              {isCreate ? 'Create campaign' : mode === 'copy-role' ? 'Copy role pair' : mode === 'copy-group' ? 'Copy group rules' : mode === 'copy-self' ? 'Copy self-evaluation form' : mode === 'remove-group' ? 'Remove campaign groups' : 'Edit campaign'}
+               {isCreate ? 'Create campaign' : mode === 'review' ? 'Move to review' : mode === 'close' ? 'Close campaign' : mode === 'copy-role' ? 'Copy role pair' : mode === 'copy-group' ? 'Copy group rules' : mode === 'copy-self' ? 'Copy self-evaluation form' : mode === 'remove-group' ? 'Remove campaign groups' : 'Edit campaign'}
             </h2>
             <p>
-              {isCreate ? 'Set up a new performance review campaign.' : mode === 'copy-role' ? "Apply this role pair's form assignment to matching groups." : mode === 'copy-group' ? "Apply this group's matching role-to-form rules to other selected groups." : mode === 'copy-self' ? 'Apply this questionnaire to other employees in the campaign.' : mode === 'remove-group' ? 'Review the configuration affected by this change.' : 'Update the campaign details and schedule.'}
+               {isCreate ? 'Set up a new performance review campaign.' : mode === 'review' || mode === 'close' ? 'Review the latest operational completion before confirming.' : mode === 'copy-role' ? "Apply this role pair's form assignment to matching groups." : mode === 'copy-group' ? "Apply this group's matching role-to-form rules to other selected groups." : mode === 'copy-self' ? 'Apply this questionnaire to other employees in the campaign.' : mode === 'remove-group' ? 'Review the configuration affected by this change.' : 'Update the campaign details and schedule.'}
             </p>
           </div>
           <button

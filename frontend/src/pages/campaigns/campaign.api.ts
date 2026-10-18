@@ -8,6 +8,7 @@ import type {
   CampaignFormValues,
   CampaignGroups,
   CampaignGroupsResponse,
+  CampaignOperationalMetrics,
   CampaignResponse,
   CampaignSelfEvaluations,
   CampaignSelfEvaluationsResponse,
@@ -136,6 +137,22 @@ export async function changeCampaignSchedule(getAccessToken: AccessTokenGetter, 
     getAccessToken, `/${encodeURIComponent(id)}/${action}`, { method: 'POST' },
     `Campaign could not be ${action === 'schedule' ? 'scheduled' : 'returned to draft'}.`,
   ));
+}
+
+export type CampaignLifecycleAction = 'pause' | 'resume' | 'review' | 'close';
+
+export async function changeCampaignLifecycle(getAccessToken: AccessTokenGetter, id: string, action: CampaignLifecycleAction): Promise<Campaign> {
+  return mapCampaignFromResponse(await requestCampaigns<CampaignResponse>(
+    getAccessToken, `/${encodeURIComponent(id)}/${action}`, { method: 'POST' },
+    'Campaign status could not be updated.',
+  ));
+}
+
+export async function fetchCampaignOperationalMetrics(getAccessToken: AccessTokenGetter, id: string): Promise<CampaignOperationalMetrics> {
+  return requestCampaigns<CampaignOperationalMetrics>(
+    getAccessToken, `/${encodeURIComponent(id)}/operational-metrics`, {},
+    'Campaign completion metrics could not be loaded.',
+  );
 }
 
 export async function fetchCampaigns(getAccessToken: AccessTokenGetter, signal: AbortSignal): Promise<Campaign[]> {
