@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { Compass } from 'lucide-react';
-import { getSystemDashboardPath, isHrOrManagerRole } from '../layout/sidebar-user';
+import { getAuthenticatedDashboardPath, isHrOrManagerRole } from '../layout/sidebar-user';
 import { API_BASE_URL, AUTH0_CONFIGURED } from '../../config';
 import Auth0SignIn from './Auth0SignIn';
 import { useAppAuth } from '../../auth/AppAuth';
@@ -14,7 +14,7 @@ function LoginWithAuth0() {
     if (state.status !== 'authenticated' || state.mode !== 'auth0') return;
     const saved = sessionStorage.getItem('auth0ReturnTo');
     sessionStorage.removeItem('auth0ReturnTo');
-    const dashboard = getSystemDashboardPath(state.user.system_role_name);
+    const dashboard = getAuthenticatedDashboardPath(state.user.permissions);
     const target = saved?.startsWith('/') && !saved.startsWith('//') && !saved.startsWith('/\\') && saved !== '/'
       ? saved : dashboard;
     navigate(target, { replace: true });

@@ -19,6 +19,7 @@ export function CampaignDetails() {
   const [selfCopySourceId, setSelfCopySourceId] = useState<number | null>(null);
   const [expandedRuleGroups, setExpandedRuleGroups] = useState<Set<number>>(() => new Set());
   const {
+    canManageCampaigns,
     campaign,
     form,
     isEditOpen,
@@ -135,13 +136,13 @@ export function CampaignDetails() {
             </p>
           </div>
           <div className="campaign-heading-actions">
-            <button
+            {canManageCampaigns && <button
               className="btn btn-primary"
               type="button"
               onClick={openEdit}
             >
               Edit campaign
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -157,14 +158,14 @@ export function CampaignDetails() {
               <h2>Campaign groups</h2>
               <p>Select which company groups are included in this campaign.</p>
             </div>
-            <button
+            {canManageCampaigns && <button
               className={hasGroupChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingGroups || !hasGroupChanges}
               onClick={handleUpdateGroups}
             >
               {isSavingGroups ? 'Saving...' : 'Save groups'}
-            </button>
+            </button>}
           </div>
 
           {campaignGroups.availableGroups.length === 0 ? (
@@ -182,7 +183,7 @@ export function CampaignDetails() {
                   <input
                     type="checkbox"
                     checked={selectedGroupIds.includes(group.id)}
-                    disabled={selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id)}
+                     disabled={!canManageCampaigns || (selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id))}
                     title={groupsWithIssuedAssignments.has(group.id) ? 'This group has issued evaluations and cannot be removed.' : undefined}
                     onChange={() => toggleGroup(group.id)}
                   />
@@ -211,14 +212,14 @@ export function CampaignDetails() {
             </div>
             {hasRuleChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
             {hasRuleChanges && <button className="btn btn-secondary" type="button" onClick={discardRules}>Discard changes</button>}
-            <button
+            {canManageCampaigns && <button
               className={hasRuleChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingRules || !hasRuleChanges}
               onClick={handleUpdateRules}
             >
               {isSavingRules ? 'Saving...' : 'Save form rules'}
-            </button>
+            </button>}
           </div>
 
           {evaluationRules.groups.length === 0 ? (
@@ -237,9 +238,9 @@ export function CampaignDetails() {
                       <span>{progress?.required === 0 ? 'No role relationships' : `${progress?.configured ?? 0} / ${progress?.required ?? 0} forms configured ${progress?.missing ? ` · ${countLabel(progress.missing, 'missing assignment')}` : ''}`}</span>
                     </div>
                     <div className="campaign-rule-group-actions">
-                      <button className="campaign-rule-copy-btn" type="button" onClick={() => setCopyRequest({ sourceGroupId: group.groupId })}>
-                        Copy group rules to other groups
-                      </button>
+                       {canManageCampaigns && <button className="campaign-rule-copy-btn" type="button" onClick={() => setCopyRequest({ sourceGroupId: group.groupId })}>
+                         Copy group rules to other groups
+                       </button>}
                       <button
                         className="campaign-rule-expand-btn"
                         type="button"
@@ -288,7 +289,7 @@ export function CampaignDetails() {
                                        className="form-control"
                                        aria-label={`${group.groupName}: ${pair.evaluatorRoleName} evaluates ${pair.evaluateeRoleName} form`}
                                        value={selectedRuleFormIds[ruleKey] ?? ''}
-                                        disabled={ruleLocked || isSavingMatrix}
+                                         disabled={!canManageCampaigns || ruleLocked || isSavingMatrix}
                                         title={ruleLocked ? 'Issued evaluations use this form rule. The rule is locked.' : undefined}
                                       onChange={(event) =>
                                         updateRuleForm(
@@ -311,15 +312,15 @@ export function CampaignDetails() {
                                   </div>
                                 </td>
                                 <td>
-                                  <button
-                                    className="campaign-rule-copy-btn campaign-rule-copy-inline"
+                                   {canManageCampaigns && <button
+                                     className="campaign-rule-copy-btn campaign-rule-copy-inline"
                                     type="button"
                                     title="Copy this role pair's form assignment to matching role pairs in other campaign groups."
                                     aria-label={`Copy ${pair.evaluatorRoleName} to ${pair.evaluateeRoleName} form assignment to matching groups`}
                                     onClick={() => setCopyRequest({ sourceGroupId: group.groupId, evaluatorRoleId: pair.evaluatorRoleId, evaluateeRoleId: pair.evaluateeRoleId })}
                                   >
                                     Copy to groups
-                                  </button>
+                                   </button>}
                                 </td>
                               </tr>
                             );
@@ -350,9 +351,9 @@ export function CampaignDetails() {
             </div>
             {hasSelfChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
             {hasSelfChanges && <button className="btn btn-secondary" type="button" disabled={isSavingSelf} onClick={discardSelfForms}>Discard changes</button>}
-            <button className={hasSelfChanges ? 'btn btn-primary' : 'btn btn-secondary'} type="button" disabled={isSavingSelf || !hasSelfChanges || hasMatrixChanges} onClick={handleUpdateSelfForms}>
-              {isSavingSelf ? 'Saving...' : 'Save self-evaluations'}
-            </button>
+             {canManageCampaigns && <button className={hasSelfChanges ? 'btn btn-primary' : 'btn btn-secondary'} type="button" disabled={isSavingSelf || !hasSelfChanges || hasMatrixChanges} onClick={handleUpdateSelfForms}>
+               {isSavingSelf ? 'Saving...' : 'Save self-evaluations'}
+             </button>}
           </div>
           {hasMatrixChanges && hasSelfChanges && <p role="status">Save or discard matrix selections before changing self-evaluation forms.</p>}
           {selfEvaluations.participants.length === 0 ? (
@@ -366,13 +367,13 @@ export function CampaignDetails() {
                     <th scope="row"><strong>{person.name}</strong><small>{person.roleName}</small></th>
                     <td>{person.groupNames.join(', ')}</td>
                     <td>
-                       <select className="form-control" aria-label={`Self-evaluation form for ${person.name}`} value={selectedSelfForms[person.employeeId] ?? ''} disabled={person.locked || issuedSelfIds.has(person.employeeId) || isSavingSelf || isSavingMatrix} onChange={(event) => updateSelfForm(person.employeeId, event.target.value === '' ? null : Number(event.target.value))}>
+                       <select className="form-control" aria-label={`Self-evaluation form for ${person.name}`} value={selectedSelfForms[person.employeeId] ?? ''} disabled={!canManageCampaigns || person.locked || issuedSelfIds.has(person.employeeId) || isSavingSelf || isSavingMatrix} onChange={(event) => updateSelfForm(person.employeeId, event.target.value === '' ? null : Number(event.target.value))}>
                         <option value="">No form</option>
                         {selfEvaluations.forms.map((form) => <option key={form.id} value={form.id}>{form.name}</option>)}
                       </select>
                        {(person.locked || issuedSelfIds.has(person.employeeId)) && <small>Issued self-evaluation is protected</small>}
                     </td>
-                     <td><button className="campaign-rule-copy-btn" type="button" aria-label={`Copy ${person.name}'s self-evaluation questionnaire to all other employees in the campaign`} title="Copy this employee's self-evaluation questionnaire to all other employees in the campaign." disabled={isSavingSelf || isSavingMatrix || !selfEvaluations.forms.some((form) => form.id === selectedSelfForms[person.employeeId])} onClick={() => setSelfCopySourceId(person.employeeId)}>Copy to all</button></td>
+                      <td>{canManageCampaigns && <button className="campaign-rule-copy-btn" type="button" aria-label={`Copy ${person.name}'s self-evaluation questionnaire to all other employees in the campaign`} title="Copy this employee's self-evaluation questionnaire to all other employees in the campaign." disabled={isSavingSelf || isSavingMatrix || !selfEvaluations.forms.some((form) => form.id === selectedSelfForms[person.employeeId])} onClick={() => setSelfCopySourceId(person.employeeId)}>Copy to all</button>}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -389,14 +390,14 @@ export function CampaignDetails() {
             </div>
             {hasMatrixChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
             {hasMatrixChanges && <button className="btn btn-secondary" type="button" disabled={isSavingMatrix} onClick={discardMatrix}>Discard changes</button>}
-            <button
-              className={hasMatrixChanges ? 'btn btn-primary' : 'btn btn-secondary'}
+             {canManageCampaigns && <button
+               className={hasMatrixChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingMatrix || !hasMatrixChanges || matrixReadiness !== 'ready'}
               onClick={handleUpdateMatrix}
             >
               {isSavingMatrix ? 'Saving...' : 'Save matrix'}
-            </button>
+             </button>}
           </div>
 
           {!!evaluationMatrix.issuanceErrors?.length && (
@@ -437,7 +438,7 @@ export function CampaignDetails() {
                   <button
                     className="btn btn-secondary"
                     type="button"
-                    disabled={group.employees.length === 0 || matrixReadiness !== 'ready'}
+                     disabled={!canManageCampaigns || group.employees.length === 0 || matrixReadiness !== 'ready'}
                     onClick={() => setActiveMatrixGroupId(group.groupId)}
                   >
                     Open matrix

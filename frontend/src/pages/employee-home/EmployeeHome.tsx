@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import AppLayout from '../layout/AppLayout';
-import { getSidebarUser, getUserDisplayName } from '../layout/sidebar-user';
+import { useAppAuth } from '../../auth/AppAuth';
+import { ApiAccessError } from '../../auth/authenticated-api';
 import { fetchEmployeeDashboard, type AssignedEvaluation } from './employee-home.api';
 import { dashboardWork, evaluationStatus, evaluationTitle } from './employee-home.utils';
 import '../hr-home/components/MetricsGrid.css';
@@ -41,7 +42,8 @@ function EvaluationRow({ evaluation, upcoming = false }: { evaluation: AssignedE
 type EmployeeHomeProps = { forceEmptyState?: boolean };
 
 export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomeProps) {
-  const user = getSidebarUser();
+  const { state, getAccessToken, retryAuth0 } = useAppAuth();
+  const user = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
   const userId = user?.id;
   const [evaluations, setEvaluations] = useState<AssignedEvaluation[]>([]);
   const [currentDate, setCurrentDate] = useState<string | null>(null);
@@ -50,19 +52,20 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
   const [historyLimit, setHistoryLimit] = useState(5);
 
   useEffect(() => {
-    if (forceEmptyState || userId === undefined) return;
+    if (forceEmptyState || userId === undefined || !getAccessToken) return;
     const controller = new AbortController();
-    fetchEmployeeDashboard(userId, controller.signal)
+    fetchEmployeeDashboard(getAccessToken, userId, controller.signal)
       .then((dashboard) => { setEvaluations(dashboard.evaluations); setCurrentDate(dashboard.currentDate); })
       .catch((cause: unknown) => {
+        if (cause instanceof ApiAccessError && cause.status === 401) retryAuth0();
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Evaluations could not be loaded.');
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [forceEmptyState, userId]);
+  }, [forceEmptyState, userId, getAccessToken]);
 
   const { actionable, completed, nextDeadline, upcoming, history } = dashboardWork(forceEmptyState ? [] : evaluations);
-  const firstName = user ? getUserDisplayName(user).split(' ')[0] || 'Employee' : 'Employee';
+  const firstName = user?.employee.full_name.split(' ')[0] || 'Employee';
   const visibleHistory = history.slice(0, historyLimit);
 
   return (

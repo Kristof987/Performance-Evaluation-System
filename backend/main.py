@@ -115,9 +115,18 @@ def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Dep
     )
     if roles is None:
         raise HTTPException(status_code=500, detail="Account role configuration is unavailable")
+    permissions = (
+        db.query(models.SystemPermission.name)
+        .join(models.system_role_permissions,
+              models.system_role_permissions.c.permission_id == models.SystemPermission.id)
+        .filter(models.system_role_permissions.c.system_role_id == user.system_role_id)
+        .order_by(models.SystemPermission.name)
+        .all()
+    )
     employee = user.employee
     return {"id": user.id, "username": user.username, "email": user.email,
             "system_role_id": user.system_role_id, "system_role_name": roles.system_role_name,
+            "permissions": [name for (name,) in permissions],
             "is_active": user.is_active,
             "employee": {"id": employee.id, "full_name": employee.full_name,
                          "company_role_id": employee.company_role_id,
@@ -126,13 +135,17 @@ def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Dep
 
 
 @app.post("/users", response_model=schemas.UserResponse)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+def create_user(user: schemas.UserCreate, db: Session = Depends(get_db),
+                _employee_manager: models.User = Depends(require_permission("employees.manage")),
+                _role_assigner: models.User = Depends(require_permission("roles.assign"))):
     if user.company_role_id is not None and db.query(models.CompanyRole.id).filter(models.CompanyRole.id == user.company_role_id).first() is None:
         raise HTTPException(status_code=400, detail="Company role not found")
+    if db.query(models.SystemRole.id).filter(models.SystemRole.id == user.system_role_id).first() is None:
+        raise HTTPException(status_code=400, detail="System role not found")
     new_user = models.User(
         username=user.username,
         email=user.email,
-        password_hash=user.password,  # ezt mindjárt javítjuk hashelésre
+        password_hash="",
         system_role_id=user.system_role_id,
     )
 
@@ -200,7 +213,9 @@ def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
 
 
 @app.get("/people", response_model=schemas.PeopleResponse)
-def get_people(db: Session = Depends(get_db)):
+def get_people(db: Session = Depends(get_db),
+               _employee_reader: models.User = Depends(require_permission("employees.read")),
+               _group_reader: models.User = Depends(require_permission("groups.read"))):
     employees = (
         db.query(models.Employee)
         .order_by(models.Employee.is_active.desc(), models.Employee.full_name.asc())
@@ -343,7 +358,9 @@ def employee_username(name: str, email: str, used: set[str]) -> str:
 
 
 @app.post("/people/employees", response_model=schemas.PeopleEmployeeResponse)
-def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session = Depends(get_db)):
+def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session = Depends(get_db),
+                           _employee_manager: models.User = Depends(require_permission("employees.manage")),
+                           _group_manager: models.User = Depends(require_permission("groups.manage"))):
     name = " ".join(employee.name.split())
     role_name = employee.role.strip()
     if name == "" or role_name == "":
@@ -368,7 +385,9 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
     used = {username for (username,) in db.query(models.User.username).all()}
     try:
         company_role = get_or_create_company_role(role_name, db)
-        system_role = get_or_create_system_role("Employee", db)
+        system_role = db.query(models.SystemRole).filter(models.SystemRole.name == "Employee").first()
+        if system_role is None:
+            raise HTTPException(status_code=500, detail="Employee system role is unavailable")
         new_user = models.User(
             username=employee_username(name, employee.email, used),
             email=employee.email,
@@ -419,7 +438,9 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
 
 
 @app.put("/people/employees/{employee_id}", response_model=schemas.PeopleEmployeeResponse)
-def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpdate, db: Session = Depends(get_db)):
+def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpdate, db: Session = Depends(get_db),
+                           _employee_manager: models.User = Depends(require_permission("employees.manage")),
+                           _group_manager: models.User = Depends(require_permission("groups.manage"))):
     person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -503,7 +524,8 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
 
 
 @app.post("/people/groups", response_model=schemas.PeopleGroupResponse)
-def create_people_group(group: schemas.PeopleGroupCreate, db: Session = Depends(get_db)):
+def create_people_group(group: schemas.PeopleGroupCreate, db: Session = Depends(get_db),
+                        _group_manager: models.User = Depends(require_permission("groups.manage"))):
     name = group.name.strip()
     description = group.description.strip() if group.description is not None else None
     if name == "":
@@ -530,7 +552,8 @@ def create_people_group(group: schemas.PeopleGroupCreate, db: Session = Depends(
 
 
 @app.put("/people/groups/{group_id}", response_model=schemas.PeopleGroupResponse)
-def update_people_group(group_id: int, group: schemas.PeopleGroupUpdate, db: Session = Depends(get_db)):
+def update_people_group(group_id: int, group: schemas.PeopleGroupUpdate, db: Session = Depends(get_db),
+                        _group_manager: models.User = Depends(require_permission("groups.manage"))):
     existing_group = db.query(models.CompanyGroup).filter(models.CompanyGroup.id == group_id).first()
     if existing_group is None:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -568,7 +591,8 @@ def update_people_group(group_id: int, group: schemas.PeopleGroupUpdate, db: Ses
 
 
 @app.post("/people/groups/{group_id}/members", response_model=schemas.PeopleGroupResponse)
-def add_people_group_member(group_id: int, member: schemas.PeopleGroupMemberCreate, db: Session = Depends(get_db)):
+def add_people_group_member(group_id: int, member: schemas.PeopleGroupMemberCreate, db: Session = Depends(get_db),
+                            _group_manager: models.User = Depends(require_permission("groups.manage"))):
     group = db.query(models.CompanyGroup).filter(models.CompanyGroup.id == group_id).first()
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -615,6 +639,7 @@ def remove_people_group_member(
     group_id: int,
     employee_id: int,
     db: Session = Depends(get_db),
+    _group_manager: models.User = Depends(require_permission("groups.manage")),
 ):
     group = db.query(models.CompanyGroup).filter(models.CompanyGroup.id == group_id).first()
     if group is None:
@@ -650,7 +675,8 @@ def remove_people_group_member(
 
 
 @app.post("/people/groups/import", response_model=schemas.PeopleGroupImportResponse)
-def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get_db),
+                         _group_manager: models.User = Depends(require_permission("groups.manage"))):
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Please upload the provided .xlsx group template.")
 
@@ -714,7 +740,9 @@ def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get
 
 
 @app.post("/people/employees/import", response_model=schemas.PeopleEmployeeImportResponse)
-def import_people_employees(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def import_people_employees(file: UploadFile = File(...), db: Session = Depends(get_db),
+                            _employee_manager: models.User = Depends(require_permission("employees.manage")),
+                            _role_assigner: models.User = Depends(require_permission("roles.assign"))):
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Please upload the provided .xlsx employee template.")
 
@@ -739,6 +767,7 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
         email.lower()
         for (email,) in db.query(models.User.email).all()
     }
+    system_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()}
 
     for row_number in range(2, worksheet.max_row + 1):
         values = [worksheet.cell(row_number, column).value for column in range(1, 5)]
@@ -763,6 +792,8 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
             errors.append(f"Row {row_number}: Employee Company Role is required.")
         if system_role_name == "":
             errors.append(f"Row {row_number}: Employee System Role is required.")
+        elif system_role_name.casefold() not in system_roles:
+            errors.append(f"Row {row_number}: Employee System Role must be an existing system role.")
 
         email_key = email.lower()
         if email_key != "" and email_key in seen_emails:
@@ -782,7 +813,7 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
     try:
         for name, email, company_role_name, system_role_name in rows:
             company_role = get_or_create_company_role(company_role_name, db)
-            system_role = get_or_create_system_role(system_role_name, db)
+            system_role = system_roles[system_role_name.casefold()]
             new_user = models.User(
                     username=employee_username(" ".join(name.split()), email, used_usernames),
                     email=email,
@@ -955,18 +986,23 @@ def ensure_group_membership_mutable(group_id: int | None, employee_id: int, db: 
 
 
 @app.get("/users/{user_id}/assigned-evaluations", response_model=list[schemas.AssignedEvaluationResponse])
-def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
-    user = (
-        db.query(models.User)
-        .filter(models.User.id == user_id)
-        .filter(models.User.is_active.is_(True))
-        .first()
-    )
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    employee = user.employee
-    if employee is None:
-        return []
+def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db),
+                             actor: models.User = Depends(require_permission("evaluations.read_assigned")),
+                             employee: models.Employee = Depends(get_current_employee)):
+    if user_id != actor.id:
+        raise HTTPException(status_code=404, detail="Assigned evaluations not found")
+    return list_employee_evaluations(employee, db)
+
+
+def issued_employee_questions(filled_form: models.FilledForm) -> list[dict]:
+    snapshot = filled_form.form_snapshot
+    if isinstance(snapshot, dict) and isinstance(snapshot.get("questions"), list):
+        return snapshot["questions"]
+    # Historical issued snapshots may contain the question list directly.
+    return snapshot if isinstance(snapshot, list) else []
+
+
+def list_employee_evaluations(employee: models.Employee, db: Session) -> list[dict]:
 
     campaign_ids = sorted(campaign_id for (campaign_id,) in db.query(models.FilledForm.campaign_id).filter(
         models.FilledForm.evaluator_id == employee.id,
@@ -999,7 +1035,7 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
     today = campaign_today()
     evaluations = []
     for filled_form, campaign, form, status, evaluatee in rows:
-        questions = form_snapshot_service.snapshot_questions(filled_form, form) if filled_form.form_snapshot is not None else []
+        questions = issued_employee_questions(filled_form)
         answers = filled_form.answers if isinstance(filled_form.answers, list) else []
         issued_questions = list(form_snapshot_service.iter_snapshot_questions(questions))
         question_ids = {question.get("id") for question in issued_questions if isinstance(question.get("id"), str)}
@@ -1031,22 +1067,42 @@ def get_assigned_evaluations(user_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/users/{user_id}/assigned-evaluations/{evaluation_id}", response_model=schemas.AssignedQuestionnaireResponse)
-def get_assigned_questionnaire(user_id: int, evaluation_id: int, db: Session = Depends(get_db)):
-    evaluation = next((item for item in get_assigned_evaluations(user_id, db) if item["id"] == evaluation_id), None)
+def get_assigned_questionnaire(user_id: int, evaluation_id: int, db: Session = Depends(get_db),
+                               actor: models.User = Depends(require_permission("evaluations.read_assigned")),
+                               employee: models.Employee = Depends(get_current_employee)):
+    if user_id != actor.id:
+        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
+    return employee_questionnaire(employee, evaluation_id, db)
+
+
+def employee_questionnaire(employee: models.Employee, evaluation_id: int, db: Session) -> dict:
+    if db.query(models.FilledForm.id).filter(
+        models.FilledForm.id == evaluation_id, models.FilledForm.evaluator_id == employee.id,
+    ).first() is None:
+        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
+    evaluation = next((item for item in list_employee_evaluations(employee, db) if item["id"] == evaluation_id), None)
     if evaluation is None:
         raise HTTPException(status_code=404, detail="Assigned evaluation not found")
     if evaluation["campaign_start_date"] > campaign_today() and evaluation["finish_date"] is None:
         raise HTTPException(status_code=403, detail="This questionnaire is not available before the campaign starts")
-    filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).first()
-    if filled_form.form_snapshot is None:
+    filled_form = db.query(models.FilledForm).filter(
+        models.FilledForm.id == evaluation_id, models.FilledForm.evaluator_id == employee.id,
+    ).first()
+    if filled_form is None:
+        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
+    if not isinstance(filled_form.form_snapshot, (dict, list)):
         raise HTTPException(status_code=403, detail="This questionnaire has not been issued")
-    form = db.query(models.Form).filter(models.Form.id == filled_form.form_id).first()
-    return {"evaluation": evaluation, "questions": form_snapshot_service.snapshot_questions(filled_form, form), "answers": filled_form.answers}
+    return {"evaluation": evaluation, "questions": issued_employee_questions(filled_form), "answers": filled_form.answers}
 
 
 @app.put("/users/{user_id}/assigned-evaluations/{evaluation_id}", response_model=schemas.AssignedQuestionnaireResponse)
-def update_assigned_questionnaire(user_id: int, evaluation_id: int, payload: schemas.AssignedQuestionnaireUpdate, db: Session = Depends(get_db)):
-    questionnaire = get_assigned_questionnaire(user_id, evaluation_id, db)
+def update_assigned_questionnaire(user_id: int, evaluation_id: int, payload: schemas.AssignedQuestionnaireUpdate,
+                                  db: Session = Depends(get_db),
+                                  actor: models.User = Depends(require_permission("evaluations.submit")),
+                                  employee: models.Employee = Depends(get_current_employee)):
+    if user_id != actor.id:
+        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
+    questionnaire = employee_questionnaire(employee, evaluation_id, db)
     evaluation = questionnaire["evaluation"]
     today = campaign_today()
     if not evaluation["campaign_is_active"] or evaluation["campaign_start_date"] > today or (evaluation["due_date"] is not None and evaluation["due_date"] < today):
@@ -1097,7 +1153,11 @@ def update_assigned_questionnaire(user_id: int, evaluation_id: int, payload: sch
     if payload.submit and (not questions or any(question.get("required") and question.get("id") not in seen for question in questions)):
         raise HTTPException(status_code=400, detail="Answer all required questions before submitting")
 
-    filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).with_for_update().first()
+    filled_form = db.query(models.FilledForm).filter(
+        models.FilledForm.id == evaluation_id, models.FilledForm.evaluator_id == employee.id,
+    ).with_for_update().first()
+    if filled_form is None:
+        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
     if filled_form.finish_date is not None or filled_form.form_snapshot is None:
         raise HTTPException(status_code=409, detail="This questionnaire is no longer available for editing")
     filled_form.answers = payload.answers
@@ -1111,19 +1171,22 @@ def update_assigned_questionnaire(user_id: int, evaluation_id: int, payload: sch
     if payload.submit:
         filled_form.finish_date = today
     db.commit()
-    return get_assigned_questionnaire(user_id, evaluation_id, db)
+    return employee_questionnaire(employee, evaluation_id, db)
 
 
 @app.get("/users/{user_id}/employee-dashboard", response_model=schemas.EmployeeDashboardResponse)
-def get_employee_dashboard(user_id: int, db: Session = Depends(get_db)):
-    evaluations = get_assigned_evaluations(user_id, db)
-    employee = db.query(models.Employee).filter(models.Employee.user_id == user_id).first()
+def get_employee_dashboard(user_id: int, db: Session = Depends(get_db),
+                           actor: models.User = Depends(require_permission("evaluations.read_assigned")),
+                           employee: models.Employee = Depends(get_current_employee)):
+    if user_id != actor.id:
+        raise HTTPException(status_code=404, detail="Assigned evaluations not found")
+    evaluations = list_employee_evaluations(employee, db)
     open_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is None]
     completed_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is not None]
     active_campaign = (
         db.query(models.Campaign)
         .join(models.FilledForm, models.FilledForm.campaign_id == models.Campaign.id)
-        .filter(models.FilledForm.evaluator_id == employee.id if employee else False)
+        .filter(models.FilledForm.evaluator_id == employee.id)
         .filter(models.Campaign.is_active.is_(True))
         .order_by(models.Campaign.end_date.asc().nullslast(), models.Campaign.start_date.asc())
         .first()
@@ -1132,6 +1195,8 @@ def get_employee_dashboard(user_id: int, db: Session = Depends(get_db)):
     if active_campaign is None:
         next_campaign = (
             db.query(models.Campaign)
+            .join(models.FilledForm, models.FilledForm.campaign_id == models.Campaign.id)
+            .filter(models.FilledForm.evaluator_id == employee.id)
             .filter(models.Campaign.start_date >= campaign_today())
             .filter(models.Campaign.is_active.is_(True))
             .order_by(models.Campaign.start_date.asc())
@@ -1171,7 +1236,8 @@ def get_employee_dashboard(user_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/dashboard", response_model=schemas.DashboardResponse)
-def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = Depends(get_db)):
+def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = Depends(get_db),
+                  _reader: models.User = Depends(require_permission("campaigns.read"))):
     campaigns = (
         db.query(models.Campaign)
         .order_by(models.Campaign.is_active.desc(), models.Campaign.start_date.desc())
@@ -1185,6 +1251,8 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
     selected_campaign = None
     if campaign_id is not None:
         selected_campaign = next((campaign for campaign in campaigns if campaign.id == campaign_id), None)
+        if selected_campaign is None:
+            raise HTTPException(status_code=404, detail="Campaign not found")
 
     if selected_campaign is None and len(campaigns) > 0:
         selected_campaign = campaigns[0]
@@ -1340,31 +1408,10 @@ def normalize_form_status(status_name: str | None, finish_date: date | None) -> 
     return "not_started", "Not started"
 
 
-def require_completion_status_access(campaign_id: int, requester_user_id: int, db: Session) -> models.Campaign:
-    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
-    if campaign is None:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-    user_role = (
-        db.query(models.User, models.CompanyRole.name.label("role_name"), models.SystemRole.name.label("system_role_name"))
-        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
-        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
-        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
-        .filter(models.User.id == requester_user_id)
-        .filter(models.User.is_active.is_(True))
-        .first()
-    )
-    if user_role is None:
-        raise HTTPException(status_code=403, detail="User is not authorized to view completion status")
-    _, role_name, system_role_name = user_role
-    if not any(role and (role.strip().lower() == "hr" or "manager" in role.strip().lower()) for role in (role_name, system_role_name)):
-        raise HTTPException(status_code=403, detail="User is not authorized to view completion status")
-    return campaign
-
-
 @app.get("/campaigns/{campaign_id}/completion-status", response_model=schemas.CompletionStatusResponse)
 def get_campaign_completion_status(
     campaign_id: int,
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     search: str | None = Query(default=None),
     status: str | None = Query(default=None),
     questionnaire_id: int | None = Query(default=None),
@@ -1374,8 +1421,12 @@ def get_campaign_completion_status(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("campaigns.read")),
 ):
-    campaign = require_completion_status_access(campaign_id, requester_user_id, db)
+    reject_conflicting_requester(requester_user_id, actor)
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     today = campaign_today()
     evaluator = aliased(models.Employee)
     evaluatee = aliased(models.Employee)
@@ -1498,36 +1549,42 @@ def get_campaign_completion_status(
 
 
 @app.get("/reports/campaigns", response_model=list[schemas.ReportCampaignOption])
-def get_report_campaigns(requester_user_id: int = Query(...), db: Session = Depends(get_db)):
-    return reporting_service.list_report_campaigns(requester_user_id, db)
+def get_report_campaigns(requester_user_id: int | None = Query(default=None), db: Session = Depends(get_db),
+                         actor: models.User = Depends(require_permission("reports.read"))):
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.list_report_campaigns(actor, db)
 
 
 @app.get("/reports/campaigns/{campaign_id}/overview", response_model=schemas.CampaignReportOverviewResponse)
 def get_campaign_report_overview(
     campaign_id: int,
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
 ):
-    return reporting_service.build_campaign_report_overview(campaign_id, requester_user_id, db)
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_campaign_report_overview(campaign_id, actor, db)
 
 
 @app.get("/reports/campaigns/{campaign_id}/questions", response_model=schemas.ReportQuestionsResponse)
 def get_campaign_report_questions(
     campaign_id: int,
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     group_id: int | None = Query(default=None),
     role_id: int | None = Query(default=None),
     employee_id: int | None = Query(default=None),
     perspective: str = Query(default="evaluatee"),
     evaluation_type: Literal["peer", "self"] = Query(default="peer"),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
 ):
+    reject_conflicting_requester(requester_user_id, actor)
     if sum(value is not None for value in (group_id, role_id, employee_id)) > 1:
         raise HTTPException(status_code=400, detail="Select one Reports scope at a time")
     if perspective not in {"evaluatee", "evaluator"} or (perspective == "evaluator" and role_id is None):
         raise HTTPException(status_code=400, detail="Invalid question analytics perspective")
     return question_analytics_service.build_question_report(
-        campaign_id, requester_user_id, db, group_id=group_id, role_id=role_id, employee_id=employee_id,
+        campaign_id, actor, db, group_id=group_id, role_id=role_id, employee_id=employee_id,
         perspective=perspective, evaluation_type=evaluation_type,
     )
 
@@ -1535,30 +1592,36 @@ def get_campaign_report_questions(
 @app.get("/reports/campaigns/{campaign_id}/groups")
 def get_campaign_report_groups(
     campaign_id: int,
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
 ):
-    return reporting_service.build_groups_overview(campaign_id, requester_user_id, db)
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_groups_overview(campaign_id, actor, db)
 
 
 @app.get("/reports/campaigns/{campaign_id}/groups/{group_id}")
 def get_campaign_report_group_detail(
     campaign_id: int,
     group_id: int,
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
 ):
-    return reporting_service.build_group_detail(campaign_id, group_id, requester_user_id, db)
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_group_detail(campaign_id, group_id, actor, db)
 
 
 @app.get("/reports/campaigns/{campaign_id}/roles")
 def get_campaign_report_roles(
     campaign_id: int,
     perspective: str = Query(default="evaluatee"),
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
 ):
-    return reporting_service.build_roles_overview(campaign_id, requester_user_id, db, perspective)
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_roles_overview(campaign_id, actor, db, perspective)
 
 
 @app.get("/reports/campaigns/{campaign_id}/roles/{role_id}")
@@ -1566,47 +1629,40 @@ def get_campaign_report_role_detail(
     campaign_id: int,
     role_id: int,
     perspective: str = Query(default="evaluatee"),
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
 ):
-    return reporting_service.build_role_detail(campaign_id, role_id, requester_user_id, db, perspective)
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_role_detail(campaign_id, role_id, actor, db, perspective)
 
 
 @app.get("/reports/campaigns/{campaign_id}/employees")
 def get_campaign_report_employees(
     campaign_id: int,
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
 ):
-    return reporting_service.build_employee_reports_overview(campaign_id, requester_user_id, db)
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_employee_reports_overview(campaign_id, actor, db)
 
 
 @app.get("/reports/campaigns/{campaign_id}/employees/{employee_id}")
 def get_campaign_report_employee_detail(
     campaign_id: int,
     employee_id: int,
-    requester_user_id: int = Query(...),
+    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
 ):
-    return reporting_service.build_employee_report_detail(campaign_id, employee_id, requester_user_id, db)
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_employee_report_detail(campaign_id, employee_id, actor, db)
 
 
-def require_section_access(requester_user_id: int, db: Session) -> models.User:
-    user_role = (
-        db.query(models.User, models.CompanyRole.name.label("role_name"), models.SystemRole.name.label("system_role_name"))
-        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
-        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
-        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
-        .filter(models.User.id == requester_user_id)
-        .filter(models.User.is_active.is_(True))
-        .first()
-    )
-    if user_role is None:
-        raise HTTPException(status_code=403, detail="User is not authorized to manage sections")
-    user, role_name, system_role_name = user_role
-    if not any(role and (role.strip().lower() == "hr" or "manager" in role.strip().lower()) for role in (role_name, system_role_name)):
-        raise HTTPException(status_code=403, detail="User is not authorized to manage sections")
-    return user
+def reject_conflicting_requester(requester_user_id: int | None, actor: models.User):
+    if requester_user_id is not None and requester_user_id != actor.id:
+        raise HTTPException(status_code=403, detail="Requester does not match authenticated user")
 
 
 def normalize_section_name(name: str) -> tuple[str, str]:
@@ -1620,8 +1676,9 @@ def normalize_section_name(name: str) -> tuple[str, str]:
 
 
 @app.get("/sections", response_model=list[schemas.SectionResponse])
-def get_sections(requester_user_id: int = Query(...), include_archived: bool = Query(default=True), db: Session = Depends(get_db)):
-    require_section_access(requester_user_id, db)
+def get_sections(include_archived: bool = Query(default=True), requester_user_id: int | None = Query(default=None),
+                 db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.read"))):
+    reject_conflicting_requester(requester_user_id, actor)
     query = db.query(models.Section).filter(models.Section.scope_key == "default")
     if not include_archived:
         query = query.filter(models.Section.is_archived.is_(False))
@@ -1629,8 +1686,9 @@ def get_sections(requester_user_id: int = Query(...), include_archived: bool = Q
 
 
 @app.post("/sections", response_model=schemas.SectionResponse, status_code=201)
-def create_section(payload: schemas.SectionCreate, requester_user_id: int = Query(...), db: Session = Depends(get_db)):
-    require_section_access(requester_user_id, db)
+def create_section(payload: schemas.SectionCreate, requester_user_id: int | None = Query(default=None),
+                   db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.manage"))):
+    reject_conflicting_requester(requester_user_id, actor)
     name, normalized = normalize_section_name(payload.name)
     section = models.Section(scope_key="default", name=name, normalized_name=normalized)
     db.add(section)
@@ -1646,8 +1704,9 @@ def create_section(payload: schemas.SectionCreate, requester_user_id: int = Quer
 
 
 @app.put("/sections/{section_id}", response_model=schemas.SectionResponse)
-def update_section(section_id: int, payload: schemas.SectionUpdate, requester_user_id: int = Query(...), db: Session = Depends(get_db)):
-    require_section_access(requester_user_id, db)
+def update_section(section_id: int, payload: schemas.SectionUpdate, requester_user_id: int | None = Query(default=None),
+                   db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.manage"))):
+    reject_conflicting_requester(requester_user_id, actor)
     section = db.query(models.Section).filter(models.Section.id == section_id, models.Section.scope_key == "default").first()
     if section is None:
         raise HTTPException(status_code=404, detail="Section not found")
@@ -1664,17 +1723,20 @@ def update_section(section_id: int, payload: schemas.SectionUpdate, requester_us
 
 
 @app.post("/sections/{section_id}/archive", response_model=schemas.SectionResponse)
-def archive_section(section_id: int, requester_user_id: int = Query(...), db: Session = Depends(get_db)):
-    return set_section_archived(section_id, True, requester_user_id, db)
+def archive_section(section_id: int, requester_user_id: int | None = Query(default=None),
+                    db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.manage"))):
+    reject_conflicting_requester(requester_user_id, actor)
+    return set_section_archived(section_id, True, db)
 
 
 @app.post("/sections/{section_id}/restore", response_model=schemas.SectionResponse)
-def restore_section(section_id: int, requester_user_id: int = Query(...), db: Session = Depends(get_db)):
-    return set_section_archived(section_id, False, requester_user_id, db)
+def restore_section(section_id: int, requester_user_id: int | None = Query(default=None),
+                    db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.manage"))):
+    reject_conflicting_requester(requester_user_id, actor)
+    return set_section_archived(section_id, False, db)
 
 
-def set_section_archived(section_id: int, archived: bool, requester_user_id: int, db: Session):
-    require_section_access(requester_user_id, db)
+def set_section_archived(section_id: int, archived: bool, db: Session):
     section = db.query(models.Section).filter(models.Section.id == section_id, models.Section.scope_key == "default").first()
     if section is None:
         raise HTTPException(status_code=404, detail="Section not found")
@@ -1685,7 +1747,8 @@ def set_section_archived(section_id: int, archived: bool, requester_user_id: int
 
 
 @app.get("/campaigns", response_model=list[schemas.CampaignResponse])
-def get_campaigns(db: Session = Depends(get_db)):
+def get_campaigns(db: Session = Depends(get_db),
+                  _reader: models.User = Depends(require_permission("campaigns.read"))):
     campaigns = (
         db.query(models.Campaign)
         .order_by(models.Campaign.is_active.desc(), models.Campaign.start_date.desc())
@@ -1716,7 +1779,8 @@ def get_campaigns(db: Session = Depends(get_db)):
 
 
 @app.get("/campaigns/{campaign_id}", response_model=schemas.CampaignResponse)
-def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
+def get_campaign(campaign_id: int, db: Session = Depends(get_db),
+                 _reader: models.User = Depends(require_permission("campaigns.read"))):
     campaign = (
         db.query(models.Campaign)
         .filter(models.Campaign.id == campaign_id)
@@ -1756,21 +1820,15 @@ def duplicate_campaign_name(db: Session, name: str, exclude_id: int | None = Non
 
 
 @app.post("/campaigns", response_model=schemas.CampaignResponse)
-def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_db)):
+def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_db),
+                    actor: models.User = Depends(require_permission("campaigns.manage"))):
     if not campaign.name.strip():
         raise HTTPException(status_code=400, detail="Campaign name is required")
     if campaign.end_date is not None and campaign.end_date < campaign.start_date:
         raise HTTPException(status_code=400, detail="End date cannot be earlier than start date")
 
-    creator = (
-        db.query(models.User)
-        .filter(models.User.id == campaign.created_by)
-        .filter(models.User.is_active.is_(True))
-        .first()
-    )
-
-    if creator is None:
-        raise HTTPException(status_code=400, detail="Invalid campaign creator")
+    if campaign.created_by is not None and campaign.created_by != actor.id:
+        raise HTTPException(status_code=403, detail="Campaign creator does not match authenticated user")
 
     if duplicate_campaign_name(db, campaign.name):
         raise HTTPException(status_code=409, detail="A campaign with this name already exists.")
@@ -1782,7 +1840,7 @@ def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_
         end_date=campaign.end_date,
         is_active=campaign.is_active,
         comment=campaign.comment,
-        created_by=campaign.created_by,
+        created_by=actor.id,
     )
 
     db.add(new_campaign)
@@ -1799,7 +1857,8 @@ def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_
 
 
 @app.put("/campaigns/{campaign_id}", response_model=schemas.CampaignResponse)
-def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, db: Session = Depends(get_db)):
+def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, db: Session = Depends(get_db),
+                    _manager: models.User = Depends(require_permission("campaigns.manage"))):
     ensure_campaign_issued(campaign_id, db)
     if not campaign_update.name.strip():
         raise HTTPException(status_code=400, detail="Campaign name is required")
@@ -1869,7 +1928,8 @@ def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, d
 
 
 @app.get("/campaigns/{campaign_id}/groups", response_model=schemas.CampaignGroupsResponse)
-def get_campaign_groups(campaign_id: int, db: Session = Depends(get_db)):
+def get_campaign_groups(campaign_id: int, db: Session = Depends(get_db),
+                        _reader: models.User = Depends(require_permission("campaigns.read"))):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -1891,7 +1951,8 @@ def get_campaign_groups(campaign_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/campaigns/{campaign_id}/groups", response_model=schemas.CampaignGroupsResponse)
-def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpdate, db: Session = Depends(get_db)):
+def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpdate, db: Session = Depends(get_db),
+                           _manager: models.User = Depends(require_permission("campaigns.manage"))):
     ensure_campaign_issued(campaign_id, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
@@ -2027,7 +2088,8 @@ def build_campaign_self_evaluations(campaign_id: int, db: Session):
 
 
 @app.get("/campaigns/{campaign_id}/self-evaluations", response_model=schemas.CampaignSelfEvaluationsResponse)
-def get_campaign_self_evaluations(campaign_id: int, db: Session = Depends(get_db)):
+def get_campaign_self_evaluations(campaign_id: int, db: Session = Depends(get_db),
+                                  _reader: models.User = Depends(require_permission("campaigns.read"))):
     if db.query(models.Campaign.id).filter(models.Campaign.id == campaign_id).first() is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
     ensure_campaign_issued(campaign_id, db)
@@ -2035,7 +2097,8 @@ def get_campaign_self_evaluations(campaign_id: int, db: Session = Depends(get_db
 
 
 @app.put("/campaigns/{campaign_id}/self-evaluations", response_model=schemas.CampaignSelfEvaluationsResponse)
-def update_campaign_self_evaluations(campaign_id: int, payload: schemas.CampaignSelfEvaluationsUpdate, db: Session = Depends(get_db)):
+def update_campaign_self_evaluations(campaign_id: int, payload: schemas.CampaignSelfEvaluationsUpdate, db: Session = Depends(get_db),
+                                     _manager: models.User = Depends(require_permission("campaigns.manage"))):
     ensure_campaign_issued(campaign_id, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
@@ -2263,7 +2326,8 @@ def build_campaign_evaluation_matrix(campaign_id: int, db: Session, issuance_err
 
 
 @app.get("/campaigns/{campaign_id}/evaluation-rules", response_model=schemas.CampaignEvaluationRulesResponse)
-def get_campaign_evaluation_rules(campaign_id: int, db: Session = Depends(get_db)):
+def get_campaign_evaluation_rules(campaign_id: int, db: Session = Depends(get_db),
+                                  _reader: models.User = Depends(require_permission("campaigns.read"))):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -2272,7 +2336,8 @@ def get_campaign_evaluation_rules(campaign_id: int, db: Session = Depends(get_db
 
 
 @app.put("/campaigns/{campaign_id}/evaluation-rules", response_model=schemas.CampaignEvaluationRulesResponse)
-def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.CampaignEvaluationRulesUpdate, db: Session = Depends(get_db)):
+def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.CampaignEvaluationRulesUpdate, db: Session = Depends(get_db),
+                                     _manager: models.User = Depends(require_permission("campaigns.manage"))):
     ensure_campaign_issued(campaign_id, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
@@ -2350,7 +2415,8 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
 
 
 @app.get("/campaigns/{campaign_id}/evaluation-matrix", response_model=schemas.CampaignEvaluationMatrixResponse)
-def get_campaign_evaluation_matrix(campaign_id: int, db: Session = Depends(get_db)):
+def get_campaign_evaluation_matrix(campaign_id: int, db: Session = Depends(get_db),
+                                   _reader: models.User = Depends(require_permission("campaigns.read"))):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -2410,7 +2476,8 @@ def validate_matrix_form_readiness(rule_matrix):
 
 
 @app.put("/campaigns/{campaign_id}/evaluation-matrix", response_model=schemas.CampaignEvaluationMatrixUpdateResponse)
-def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.CampaignEvaluationMatrixUpdate, db: Session = Depends(get_db)):
+def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.CampaignEvaluationMatrixUpdate, db: Session = Depends(get_db),
+                                      _manager: models.User = Depends(require_permission("campaigns.manage"))):
     ensure_campaign_issued(campaign_id, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
@@ -2576,12 +2643,14 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
 
 
 @app.get("/forms", response_model=list[schemas.FormResponse])
-def get_forms(db: Session = Depends(get_db)):
+def get_forms(db: Session = Depends(get_db),
+              _reader: models.User = Depends(require_permission("forms.read"))):
     return db.query(models.Form).order_by(models.Form.id.desc()).all()
 
 
 @app.get("/form-templates", response_model=list[schemas.FormTemplateResponse])
-def get_form_templates(db: Session = Depends(get_db)):
+def get_form_templates(db: Session = Depends(get_db),
+                       _reader: models.User = Depends(require_permission("forms.read"))):
     return db.query(models.FormTemplate).order_by(models.FormTemplate.id.asc()).all()
 
 
@@ -2805,7 +2874,8 @@ def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, 
 
 
 @app.post("/forms", response_model=schemas.FormResponse)
-def create_form(form: schemas.FormCreate, db: Session = Depends(get_db)):
+def create_form(form: schemas.FormCreate, db: Session = Depends(get_db),
+                _manager: models.User = Depends(require_permission("forms.manage"))):
     values = validate_form_like_payload(form, models.Form, db)
     if form.source_template_id is not None:
         template = db.query(models.FormTemplate).filter(models.FormTemplate.id == form.source_template_id).first()
@@ -2820,7 +2890,8 @@ def create_form(form: schemas.FormCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/forms/{form_id}/validation", response_model=schemas.FormValidationResponse)
-def get_form_issuance_validation(form_id: int, db: Session = Depends(get_db)):
+def get_form_issuance_validation(form_id: int, db: Session = Depends(get_db),
+                                 _reader: models.User = Depends(require_permission("forms.read"))):
     form = db.query(models.Form).filter(models.Form.id == form_id).first()
     if form is None:
         raise HTTPException(status_code=404, detail="Form not found")
@@ -2829,7 +2900,8 @@ def get_form_issuance_validation(form_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/form-templates", response_model=schemas.FormTemplateResponse)
-def create_form_template(template: schemas.FormCreate, db: Session = Depends(get_db)):
+def create_form_template(template: schemas.FormCreate, db: Session = Depends(get_db),
+                         _manager: models.User = Depends(require_permission("forms.manage"))):
     new_template = models.FormTemplate(**validate_form_like_payload(template, models.FormTemplate, db))
     db.add(new_template)
     db.commit()
@@ -2838,7 +2910,8 @@ def create_form_template(template: schemas.FormCreate, db: Session = Depends(get
 
 
 @app.put("/forms/{form_id}", response_model=schemas.FormResponse)
-def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Depends(get_db)):
+def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Depends(get_db),
+                _manager: models.User = Depends(require_permission("forms.manage"))):
     # Issue already-started references before the editable source Form changes.
     campaign_ids = sorted(campaign_id for (campaign_id,) in db.query(models.FilledForm.campaign_id).filter(
         models.FilledForm.form_id == form_id,
@@ -2859,7 +2932,8 @@ def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Dep
 
 
 @app.put("/form-templates/{template_id}", response_model=schemas.FormTemplateResponse)
-def update_form_template(template_id: int, template_update: schemas.FormUpdate, db: Session = Depends(get_db)):
+def update_form_template(template_id: int, template_update: schemas.FormUpdate, db: Session = Depends(get_db),
+                         _manager: models.User = Depends(require_permission("forms.manage"))):
     template = db.query(models.FormTemplate).filter(models.FormTemplate.id == template_id).first()
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -2873,7 +2947,8 @@ def update_form_template(template_id: int, template_update: schemas.FormUpdate, 
 
 
 @app.delete("/forms/{form_id}")
-def delete_form(form_id: int, db: Session = Depends(get_db)):
+def delete_form(form_id: int, db: Session = Depends(get_db),
+                _manager: models.User = Depends(require_permission("forms.manage"))):
     form = db.query(models.Form).filter(models.Form.id == form_id).first()
     if form is None:
         raise HTTPException(status_code=404, detail="Form not found")
@@ -2884,7 +2959,8 @@ def delete_form(form_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/form-templates/{template_id}")
-def delete_form_template(template_id: int, db: Session = Depends(get_db)):
+def delete_form_template(template_id: int, db: Session = Depends(get_db),
+                         _manager: models.User = Depends(require_permission("forms.manage"))):
     template = db.query(models.FormTemplate).filter(models.FormTemplate.id == template_id).first()
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")

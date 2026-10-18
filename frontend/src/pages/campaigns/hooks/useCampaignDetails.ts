@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
+import { useAppAuth } from '../../../auth/AppAuth';
+import { ApiAccessError } from '../../../auth/authenticated-api';
 import type {
   Campaign,
   CampaignEvaluationMatrix,
@@ -85,6 +88,13 @@ function getMatrixAssignmentMap(matrix: CampaignEvaluationMatrix) {
 }
 
 export function useCampaignDetails(id: string | undefined) {
+  const { getAccessTokenSilently } = useAuth0();
+  const { state, retryAuth0 } = useAppAuth();
+  const canManageCampaigns = state.status === 'authenticated' && state.mode === 'auth0'
+    && state.user.permissions.includes('campaigns.manage');
+  function handleAuthError(error: unknown) {
+    if (error instanceof ApiAccessError) retryAuth0();
+  }
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [campaignGroups, setCampaignGroups] = useState<CampaignGroups>({
     availableGroups: [],
@@ -151,11 +161,11 @@ export function useCampaignDetails(id: string | undefined) {
       setIsCampaignLoading(false);
     } else {
       Promise.all([
-        fetchCampaign(id, controller.signal),
-        fetchCampaignGroups(id, controller.signal),
-        fetchCampaignEvaluationRules(id, controller.signal),
-        fetchCampaignEvaluationMatrix(id, controller.signal),
-        fetchCampaignSelfEvaluations(id, controller.signal),
+        fetchCampaign(getAccessTokenSilently, id, controller.signal),
+        fetchCampaignGroups(getAccessTokenSilently, id, controller.signal),
+        fetchCampaignEvaluationRules(getAccessTokenSilently, id, controller.signal),
+        fetchCampaignEvaluationMatrix(getAccessTokenSilently, id, controller.signal),
+        fetchCampaignSelfEvaluations(getAccessTokenSilently, id, controller.signal),
       ])
         .then(([loaded, loadedGroups, loadedRules, loadedMatrix, loadedSelf]) => {
           if (!controller.signal.aborted) {
@@ -171,9 +181,10 @@ export function useCampaignDetails(id: string | undefined) {
             setForm(getCampaignForm(loaded));
           }
         })
-        .catch(() => {
+        .catch((error: unknown) => {
+          handleAuthError(error);
           if (!controller.signal.aborted)
-            setCampaignError('Campaign could not be loaded.');
+            setCampaignError(error instanceof ApiAccessError ? error.message : 'Campaign could not be loaded.');
         })
         .finally(() => {
           if (!controller.signal.aborted) setIsCampaignLoading(false);
@@ -183,7 +194,7 @@ export function useCampaignDetails(id: string | undefined) {
       controller.abort();
       if (routeVersion.current === version) routeVersion.current++;
     };
-  }, [id]);
+  }, [id, getAccessTokenSilently]);
 
   const updateForm: UpdateCampaignField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -191,7 +202,7 @@ export function useCampaignDetails(id: string | undefined) {
     setSuccessMessage('');
   };
   function openEdit() {
-    if (!campaign) return;
+    if (!campaign || !canManageCampaigns) return;
     setForm(getCampaignForm(campaign));
     setSaveMessage('');
     setSuccessMessage('');
@@ -350,7 +361,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateSelfForms() {
-    if (id === undefined || isSavingSelf || !hasSelfChanges) return;
+    if (id === undefined || isSavingSelf || !hasSelfChanges || !canManageCampaigns) return;
     if (hasMatrixChanges) {
       setSelfMessage('Save or discard matrix selections before changing self-evaluation forms.');
       return;
@@ -359,7 +370,7 @@ export function useCampaignDetails(id: string | undefined) {
     setIsSavingSelf(true);
     setSelfMessage('');
     try {
-      const saved = await updateCampaignSelfEvaluations(id, selfEvaluations.participants
+      const saved = await updateCampaignSelfEvaluations(getAccessTokenSilently, id, selfEvaluations.participants
         .map((person) => ({ employeeId: person.employeeId, formId: selectedSelfForms[person.employeeId] ?? null })));
       if (routeVersion.current !== version) return;
       setSelfEvaluations(saved);
@@ -368,9 +379,9 @@ export function useCampaignDetails(id: string | undefined) {
       try {
         const controller = new AbortController();
         const [loadedMatrix, loadedCampaign, loadedRules] = await Promise.all([
-          fetchCampaignEvaluationMatrix(id, controller.signal),
-          fetchCampaign(id, controller.signal),
-          fetchCampaignEvaluationRules(id, controller.signal),
+          fetchCampaignEvaluationMatrix(getAccessTokenSilently, id, controller.signal),
+          fetchCampaign(getAccessTokenSilently, id, controller.signal),
+          fetchCampaignEvaluationRules(getAccessTokenSilently, id, controller.signal),
         ]);
         if (routeVersion.current !== version) return;
         setEvaluationMatrix(loadedMatrix);
@@ -378,10 +389,12 @@ export function useCampaignDetails(id: string | undefined) {
         setCampaign(loadedCampaign);
         setEvaluationRules(loadedRules);
         setSelectedRuleFormIds(getRuleFormMap(loadedRules));
-      } catch {
+      } catch (error) {
+        handleAuthError(error);
         if (routeVersion.current === version) setSelfMessage('Self-evaluation forms saved, but assignment status could not be refreshed.');
       }
     } catch (error) {
+      handleAuthError(error);
       if (routeVersion.current === version) setSelfMessage(error instanceof Error ? error.message : 'Self-evaluations could not be saved.');
     } finally {
       if (routeVersion.current === version) setIsSavingSelf(false);
@@ -410,7 +423,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateGroups() {
-    if (id === undefined || isSavingGroups || !hasGroupChanges) return;
+    if (id === undefined || isSavingGroups || !hasGroupChanges || !canManageCampaigns) return;
     if (hasRuleChanges || hasMatrixChanges || hasSelfChanges) {
       setGroupsMessage('Save or discard form-rule, self-evaluation and matrix changes before saving groups.');
       return;
@@ -419,14 +432,14 @@ export function useCampaignDetails(id: string | undefined) {
     setIsSavingGroups(true);
     setGroupsMessage('');
     try {
-      const saved = await updateCampaignGroups(id, selectedGroupIds);
+      const saved = await updateCampaignGroups(getAccessTokenSilently, id, selectedGroupIds);
       if (routeVersion.current !== version) return;
       setCampaignGroups(saved);
       setSelectedGroupIds(saved.assignedGroupIds);
       const controller = new AbortController();
-      const loadedRules = await fetchCampaignEvaluationRules(id, controller.signal);
-      const loadedMatrix = await fetchCampaignEvaluationMatrix(id, controller.signal);
-      const loadedSelf = await fetchCampaignSelfEvaluations(id, controller.signal);
+      const loadedRules = await fetchCampaignEvaluationRules(getAccessTokenSilently, id, controller.signal);
+      const loadedMatrix = await fetchCampaignEvaluationMatrix(getAccessTokenSilently, id, controller.signal);
+      const loadedSelf = await fetchCampaignSelfEvaluations(getAccessTokenSilently, id, controller.signal);
       if (routeVersion.current !== version) return;
       setEvaluationRules(loadedRules);
       setEvaluationMatrix(loadedMatrix);
@@ -436,6 +449,7 @@ export function useCampaignDetails(id: string | undefined) {
       setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setSuccessMessage('Campaign groups updated successfully.');
     } catch (error) {
+      handleAuthError(error);
       if (routeVersion.current === version) {
         setGroupsMessage(
           error instanceof Error
@@ -449,7 +463,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateRules() {
-    if (id === undefined || isSavingRules || !hasRuleChanges) return;
+    if (id === undefined || isSavingRules || !hasRuleChanges || !canManageCampaigns) return;
     if (hasMatrixChanges) {
       setRulesMessage('Save or discard matrix selections before saving form rules.');
       return;
@@ -472,17 +486,18 @@ export function useCampaignDetails(id: string | undefined) {
           }];
         }),
       );
-      const saved = await updateCampaignEvaluationRules(id, rulesToSave);
+      const saved = await updateCampaignEvaluationRules(getAccessTokenSilently, id, rulesToSave);
       if (routeVersion.current !== version) return;
       setEvaluationRules(saved);
       setSelectedRuleFormIds(getRuleFormMap(saved));
       const controller = new AbortController();
-      const loadedMatrix = await fetchCampaignEvaluationMatrix(id, controller.signal);
+      const loadedMatrix = await fetchCampaignEvaluationMatrix(getAccessTokenSilently, id, controller.signal);
       if (routeVersion.current !== version) return;
       setEvaluationMatrix(loadedMatrix);
       setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setSuccessMessage('Campaign form rules updated successfully.');
     } catch (error) {
+      handleAuthError(error);
       if (routeVersion.current === version) {
         setRulesMessage(
           error instanceof Error
@@ -496,7 +511,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateMatrix() {
-    if (id === undefined || isSavingMatrix || !hasMatrixChanges || matrixReadiness !== 'ready') return;
+    if (id === undefined || isSavingMatrix || !hasMatrixChanges || matrixReadiness !== 'ready' || !canManageCampaigns) return;
     if (hasSelfChanges) {
       setMatrixMessage('Save or discard self-evaluation form changes before saving the matrix.');
       return;
@@ -518,17 +533,17 @@ export function useCampaignDetails(id: string | undefined) {
           }),
         ),
       );
-      const saved = await updateCampaignEvaluationMatrix(id, assignmentsToSave);
+      const saved = await updateCampaignEvaluationMatrix(getAccessTokenSilently, id, assignmentsToSave);
       if (routeVersion.current !== version) return;
       setEvaluationMatrix({ groups: saved.groups, issuanceErrors: saved.issuanceErrors });
       setSelectedMatrixAssignments(getMatrixAssignmentMap(saved));
       const controller = new AbortController();
       try {
         const [loadedMatrix, loadedSelf, loadedCampaign, loadedRules] = await Promise.all([
-          fetchCampaignEvaluationMatrix(id, controller.signal),
-          fetchCampaignSelfEvaluations(id, controller.signal),
-          fetchCampaign(id, controller.signal),
-          fetchCampaignEvaluationRules(id, controller.signal),
+          fetchCampaignEvaluationMatrix(getAccessTokenSilently, id, controller.signal),
+          fetchCampaignSelfEvaluations(getAccessTokenSilently, id, controller.signal),
+          fetchCampaign(getAccessTokenSilently, id, controller.signal),
+          fetchCampaignEvaluationRules(getAccessTokenSilently, id, controller.signal),
         ]);
         if (routeVersion.current !== version) return;
         setEvaluationMatrix(loadedMatrix);
@@ -538,7 +553,8 @@ export function useCampaignDetails(id: string | undefined) {
         setCampaign(loadedCampaign);
         setEvaluationRules(loadedRules);
         setSelectedRuleFormIds(getRuleFormMap(loadedRules));
-      } catch {
+      } catch (error) {
+        handleAuthError(error);
         if (routeVersion.current === version) setMatrixMessage('Matrix saved, but the latest assignment details could not be refreshed.');
       }
       if (routeVersion.current !== version) return;
@@ -550,6 +566,7 @@ export function useCampaignDetails(id: string | undefined) {
         }.`,
       );
     } catch (error) {
+      handleAuthError(error);
       if (routeVersion.current === version) {
         setMatrixMessage(
           error instanceof Error
@@ -564,7 +581,7 @@ export function useCampaignDetails(id: string | undefined) {
 
   async function handleUpdateCampaign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!campaign || saving.current || !hasEditChanges) return;
+    if (!campaign || saving.current || !hasEditChanges || !canManageCampaigns) return;
     const validation = getCampaignValidationError(form, campaign);
     if (validation) {
       setSaveMessage(validation);
@@ -575,7 +592,7 @@ export function useCampaignDetails(id: string | undefined) {
     setIsSavingCampaign(true);
     setSaveMessage('');
     try {
-      const saved = await updateCampaign(campaign.id, form);
+      const saved = await updateCampaign(getAccessTokenSilently, campaign.id, form);
       if (routeVersion.current !== version) return;
       if (saved.issuedFormsCount > campaign.issuedFormsCount || saved.status !== campaign.status) {
         setEvaluationMatrix({ groups: [] });
@@ -588,18 +605,20 @@ export function useCampaignDetails(id: string | undefined) {
       try {
         const controller = new AbortController();
         const [loadedMatrix, loadedSelf] = await Promise.all([
-          fetchCampaignEvaluationMatrix(campaign.id, controller.signal),
-          fetchCampaignSelfEvaluations(campaign.id, controller.signal),
+          fetchCampaignEvaluationMatrix(getAccessTokenSilently, campaign.id, controller.signal),
+          fetchCampaignSelfEvaluations(getAccessTokenSilently, campaign.id, controller.signal),
         ]);
         if (routeVersion.current !== version) return;
         setEvaluationMatrix(loadedMatrix);
         setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
         setSelfEvaluations(loadedSelf);
         setSelectedSelfForms(selfFormMap(loadedSelf));
-      } catch {
+      } catch (error) {
+        handleAuthError(error);
         if (routeVersion.current === version) setMatrixMessage('Campaign updated, but assignments could not be refreshed. Reload to see their current status.');
       }
     } catch (error) {
+      handleAuthError(error);
       if (routeVersion.current === version)
         setSaveMessage(
           error instanceof Error
@@ -614,6 +633,7 @@ export function useCampaignDetails(id: string | undefined) {
     }
   }
   return {
+    canManageCampaigns,
     campaign,
     form,
     isEditOpen,

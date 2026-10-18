@@ -20,19 +20,18 @@ import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/report
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import './styles/shared.css'
-import { getDashboardPath, getSystemDashboardPath, isHrOrManagerRole } from './pages/layout/sidebar-user'
+import { getDashboardPath, getAuthenticatedDashboardPath, isHrOrManagerRole } from './pages/layout/sidebar-user'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
 import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './auth/AppAuth'
-import { Auth0Dashboard, Auth0Unavailable } from './pages/layout/Auth0Transition'
+import { Auth0Unavailable, Auth0PersonalResultsUnavailable, DevelopmentPeopleUnavailable, DevelopmentManagementUnavailable, DevelopmentEvaluationUnavailable, DevelopmentDashboardUnavailable, DevelopmentReportsUnavailable, Auth0PermissionDenied } from './pages/layout/Auth0Transition'
 
 function RoleHome() {
   return getDashboardPath() === '/hr-home' ? <HrHome /> : <EmployeeHome />
 }
 
-function ProtectedPage({ children, hrOnly = false, dashboard = false }: {
+function ProtectedPage({ children, hrOnly = false }: {
   children: React.ReactNode;
   hrOnly?: boolean;
-  dashboard?: boolean;
 }) {
   const { state } = useAppAuth()
   const location = useLocation()
@@ -41,11 +40,55 @@ function ProtectedPage({ children, hrOnly = false, dashboard = false }: {
     return <Navigate to="/" state={{ from: location.pathname + location.search + location.hash }} replace />
   }
   if (state.mode === 'auth0') {
-    const isHr = getSystemDashboardPath(state.user.system_role_name) === '/hr-home'
-    if (hrOnly && !isHr) return <Navigate to="/employee-home" replace />
-    if (dashboard && location.pathname === '/hr-home' && !isHr) return <Navigate to="/employee-home" replace />
-    if (dashboard && location.pathname === '/employee-home' && isHr) return <Navigate to="/hr-home" replace />
-    return dashboard ? <Auth0Dashboard /> : <Auth0Unavailable />
+    const canReadCampaigns = state.user.permissions.includes('campaigns.read')
+    if (location.pathname === '/hr-home') {
+      return canReadCampaigns ? <HrHome /> : <Navigate to="/employee-home" replace />
+    }
+    if (location.pathname === '/employee-home' && canReadCampaigns) {
+      return <Navigate to="/hr-home" replace />
+    }
+    if (location.pathname === '/people') {
+      if (!state.user.permissions.includes('employees.read') || !state.user.permissions.includes('groups.read')) {
+        return <Auth0PermissionDenied />
+      }
+      return children
+    }
+    if (location.pathname === '/campaigns' || (location.pathname.startsWith('/campaigns/') && !location.pathname.endsWith('/completion'))) {
+      return state.user.permissions.includes('campaigns.read')
+        ? children : <Auth0PermissionDenied feature="Campaigns" required="campaigns.read" activePage="campaigns" />
+    }
+    if (location.pathname === '/forms') {
+      return state.user.permissions.includes('forms.read') && state.user.permissions.includes('sections.read')
+        ? children : <Auth0PermissionDenied feature="Forms" required="forms.read and sections.read" activePage="forms" />
+    }
+    if (location.pathname.startsWith('/campaigns/') && location.pathname.endsWith('/completion')) {
+      return canReadCampaigns ? children
+        : <Auth0PermissionDenied feature="Completion status" required="campaigns.read" activePage="campaigns" />
+    }
+    if (location.pathname === '/reports' || location.pathname.startsWith('/reports/')) {
+      return state.user.permissions.includes('reports.read') ? children
+        : <Auth0PermissionDenied feature="Reports" required="reports.read" activePage="reports" />
+    }
+    if (location.pathname === '/results' || location.pathname === '/employee-review-preview') {
+      return <Auth0PersonalResultsUnavailable />
+    }
+    if (location.pathname === '/my-evaluations' || location.pathname === '/employee-home'
+      || location.pathname.startsWith('/employee-home/evaluations/') || location.pathname.startsWith('/evaluations/')) {
+      return state.user.permissions.includes('evaluations.read_assigned')
+        ? children : <Auth0PermissionDenied feature="Evaluations" required="evaluations.read_assigned" activePage="my-evaluations" />
+    }
+    if (hrOnly && !canReadCampaigns) return <Navigate to={getAuthenticatedDashboardPath(state.user.permissions)} replace />
+    return <Auth0Unavailable />
+  }
+  if (location.pathname === '/hr-home') return <DevelopmentDashboardUnavailable />
+  if (location.pathname === '/reports' || location.pathname.startsWith('/reports/')) return <DevelopmentReportsUnavailable />
+  if (location.pathname === '/people') return <DevelopmentPeopleUnavailable />
+  if (location.pathname === '/forms' || location.pathname === '/campaigns' || location.pathname.startsWith('/campaigns/')) {
+    return <DevelopmentManagementUnavailable />
+  }
+  if (location.pathname === '/my-evaluations' || location.pathname === '/employee-home'
+    || location.pathname.startsWith('/employee-home/evaluations/') || location.pathname.startsWith('/evaluations/')) {
+    return <DevelopmentEvaluationUnavailable />
   }
   if (location.pathname === '/my-evaluations' && !isHrOrManagerRole(state.user.role_name)) {
     return <Navigate to={getDashboardPath()} replace />
@@ -58,9 +101,9 @@ function AppRoutes() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Login />} />
-        <Route path="/hr-home" element={<ProtectedPage dashboard><RoleHome /></ProtectedPage>} />
+        <Route path="/hr-home" element={<ProtectedPage><RoleHome /></ProtectedPage>} />
         <Route path="/my-evaluations" element={<ProtectedPage hrOnly><MyEvaluationsPage /></ProtectedPage>} />
-        <Route path="/employee-home" element={<ProtectedPage dashboard><EmployeeHome /></ProtectedPage>} />
+        <Route path="/employee-home" element={<ProtectedPage><EmployeeHome /></ProtectedPage>} />
         <Route path="/employee-home/evaluations/:id" element={<ProtectedPage><EmployeeQuestionnaire /></ProtectedPage>} />
         <Route path="/evaluations/:id" element={<ProtectedPage><EmployeeQuestionnaire /></ProtectedPage>} />
         <Route path="/employee-review-preview" element={<ProtectedPage><EmployeeReviewPreview /></ProtectedPage>} />

@@ -177,9 +177,9 @@ def score_evaluation(assignment: models.FilledForm, *, status_name: str | None =
     )
 
 
-def load_submitted_evaluations(campaign_id: int, requester_user_id: int, db: Session) -> list[EvaluationSections]:
+def load_submitted_evaluations(campaign_id: int, actor: models.User, db: Session) -> list[EvaluationSections]:
     """Authorized, campaign-scoped loader; no public scoring endpoint is added."""
-    reporting_service.require_reports_access(campaign_id, requester_user_id, db)
+    reporting_service.require_reports_access(campaign_id, actor, db)
     rows = db.query(models.FilledForm, models.FormStatus.name).join(
         models.FormStatus, models.FormStatus.id == models.FilledForm.status_id,
     ).filter(models.FilledForm.campaign_id == campaign_id).all()

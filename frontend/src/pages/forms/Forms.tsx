@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { GripVertical } from 'lucide-react';
+import { useAuth0 } from '@auth0/auth0-react';
+import { useAppAuth } from '../../auth/AppAuth';
+import { ApiAccessError } from '../../auth/authenticated-api';
 import AppLayout from '../layout/AppLayout';
-import { getSidebarUser } from '../layout/sidebar-user';
 import '../hr-home/hr-home.css';
 import './forms.css';
 import './questionnaire-choices.css';
@@ -26,7 +28,14 @@ const sectionQuestions = (blocks: FormBlock[], id: number) => blocks.find((block
 function isScale(question: FormQuestion) { return ['Scale', 'Scale 1-5', 'Scale 1-10'].includes(question.type); }
 
 export default function Forms() {
-  const requesterId = getSidebarUser()?.id ?? null;
+  const { getAccessTokenSilently } = useAuth0();
+  const { state, retryAuth0 } = useAppAuth();
+  const permissions = state.status === 'authenticated' && state.mode === 'auth0' ? state.user.permissions : [];
+  const canManageForms = permissions.includes('forms.manage');
+  const canManageSections = permissions.includes('sections.manage');
+  function handleAccessError(error: unknown) {
+    if (error instanceof ApiAccessError) retryAuth0();
+  }
   const [mode, setMode] = useState<Mode>('forms');
   const [forms, setForms] = useState<ReviewForm[]>([]);
   const [templates, setTemplates] = useState<ReviewForm[]>([]);
@@ -95,31 +104,35 @@ export default function Forms() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchForms(controller.signal).then((data) => {
+    fetchForms(getAccessTokenSilently, controller.signal).then((data) => {
       if (!controller.signal.aborted) { setForms((current) => [...current.filter((item) => !data.some((loaded) => loaded.id === item.id)), ...data]); setFormsError(''); }
     }).catch((error: unknown) => {
+      handleAccessError(error);
       if (!controller.signal.aborted) setFormsError(error instanceof Error ? error.message : 'Forms could not be loaded.');
     }).finally(() => { if (!controller.signal.aborted) setFormsLoading(false); });
     return () => controller.abort();
-  }, [formLoadAttempt]);
+  }, [formLoadAttempt, getAccessTokenSilently]);
   useEffect(() => {
     const controller = new AbortController();
-    fetchFormTemplates(controller.signal).then((items) => {
+    fetchFormTemplates(getAccessTokenSilently, controller.signal).then((items) => {
       if (!controller.signal.aborted) { setTemplates((current) => [...current.filter((item) => !items.some((loaded) => loaded.id === item.id)), ...items]); setTemplatesError(''); }
     }).catch((error: unknown) => {
+      handleAccessError(error);
       if (!controller.signal.aborted) setTemplatesError(error instanceof Error ? error.message : 'Templates could not be loaded.');
     }).finally(() => { if (!controller.signal.aborted) setTemplatesLoading(false); });
     return () => controller.abort();
-  }, [templateLoadAttempt]);
+  }, [templateLoadAttempt, getAccessTokenSilently]);
   useEffect(() => {
-    if (requesterId === null) return;
     const controller = new AbortController();
-    fetchSections(requesterId, controller.signal).then((items) => {
+    fetchSections(getAccessTokenSilently, controller.signal).then((items) => {
       // Keep confirmed mutations if the initial catalog request finishes later.
       if (!controller.signal.aborted) setSections((current) => [...items.filter((item) => !current.some((section) => section.id === item.id)), ...current].sort((a, b) => a.name.localeCompare(b.name)));
-    }).catch(() => { if (!controller.signal.aborted) setSectionError('Sections could not be loaded.'); });
+    }).catch((error: unknown) => {
+      handleAccessError(error);
+      if (!controller.signal.aborted) setSectionError(error instanceof Error ? error.message : 'Sections could not be loaded.');
+    });
     return () => controller.abort();
-  }, [requesterId]);
+  }, [getAccessTokenSilently]);
 
   function choose(item: ReviewForm) { const next = { name: item.name, description: item.description, questions: copy(item.questions) }; setSelectedId(item.id); setDraft(next); setSaved(copy(next)); setSelected(null); setPreviewOpen(false); setMessage(''); }
   function selectItem(item: ReviewForm) {
@@ -127,27 +140,29 @@ export default function Forms() {
     choose(item);
   }
   function openCreate() {
+    if (!canManageForms) return;
     if (dirty && !window.confirm('Discard unsaved changes before creating a new form?')) return;
     setCreateName('Untitled form'); setCreateSource('scratch'); setCreateTemplateId(null); setCreateError(''); setCreateOpen(true);
   }
   function startTemplate() {
+    if (!canManageForms) return;
     if (dirty && !window.confirm('Discard unsaved changes before creating a new template?')) return;
     const next = initial('Untitled template');
     setSelectedId(null); setDraft(next); setSaved(copy(next)); setSelected(null); setPreviewOpen(false); setMessage('');
   }
   function closeCreate() { if (createRequestPending.current) return; setCreateOpen(false); createTrigger.current?.focus(); }
   async function confirmCreate() {
-    if (createRequestPending.current || !createName.trim() || (createSource === 'template' && !createTemplate)) return;
+    if (!canManageForms || createRequestPending.current || !createName.trim() || (createSource === 'template' && !createTemplate)) return;
     createRequestPending.current = true;
     setCreatePending(true); setCreateError('');
     try {
       const item = createSource === 'template' && createTemplate
-        ? await createFormFromTemplate(createName.trim(), createTemplate.description, createTemplate.id)
-        : await createForm({ ...initial(createName.trim()), questions: [] });
+        ? await createFormFromTemplate(getAccessTokenSilently, createName.trim(), createTemplate.description, createTemplate.id)
+        : await createForm(getAccessTokenSilently, { ...initial(createName.trim()), questions: [] });
       setForms((items) => [item, ...items.filter((form) => form.id !== item.id)]);
       setMode('forms'); choose(item); setMessage(''); setCreateTemplateId(null); setCreateOpen(false);
       requestAnimationFrame(() => editorNameInput.current?.focus());
-    } catch (error) { setCreateError(`${error instanceof Error ? error.message : 'Form creation could not be confirmed.'} Check Your forms before retrying if the request timed out.`); }
+    } catch (error) { handleAccessError(error); setCreateError(`${error instanceof Error ? error.message : 'Form creation could not be confirmed.'} Check Your forms before retrying if the request timed out.`); }
     finally { createRequestPending.current = false; setCreatePending(false); }
   }
   function changeMode(nextMode: Mode) {
@@ -190,42 +205,42 @@ export default function Forms() {
     if (item && position) moveItem(item, position);
   }
   async function save() {
-    if (!draft) return;
+    if (!draft || !canManageForms) return;
     if (!draft.name.trim()) { setMessage('Name is required.'); return; }
     try {
       const payload = { ...draft, name: draft.name.trim(), description: draft.description.trim() };
-      const savedItem = mode === 'forms' ? selectedId === null ? await createForm(payload) : await updateForm(selectedId, payload) : selectedId === null ? await createFormTemplate(payload) : await updateFormTemplate(selectedId, payload);
+      const savedItem = mode === 'forms' ? selectedId === null ? await createForm(getAccessTokenSilently, payload) : await updateForm(getAccessTokenSilently, selectedId, payload) : selectedId === null ? await createFormTemplate(getAccessTokenSilently, payload) : await updateFormTemplate(getAccessTokenSilently, selectedId, payload);
       const setItems = mode === 'forms' ? setForms : setTemplates;
       setItems((items) => items.some((item) => item.id === savedItem.id) ? items.map((item) => item.id === savedItem.id ? savedItem : item) : [savedItem, ...items]);
       choose(savedItem); setMessage('Saved.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Save failed.'); }
+    } catch (error) { handleAccessError(error); setMessage(error instanceof Error ? error.message : 'Save failed.'); }
   }
   async function saveSection() {
-    if (requesterId === null || !sectionName.trim() || sectionRequestPending.current) return;
+    if (!canManageSections || !sectionName.trim() || sectionRequestPending.current) return;
     sectionRequestPending.current = true;
     setSectionPending(true); setSectionError(''); setSectionMessage('');
     try {
-      const item = await saveSectionRequest(requesterId, editingSection?.id ?? null, sectionName);
+      const item = await saveSectionRequest(getAccessTokenSilently, editingSection?.id ?? null, sectionName);
       setSections((items) => [...items.filter((section) => section.id !== item.id), item].sort((a, b) => a.name.localeCompare(b.name)));
       setSectionName(''); setEditingSection(null);
       setSectionMessage(editingSection ? 'Section renamed.' : 'Section created.');
-    } catch (error) { setSectionError(error instanceof Error ? error.message : 'Section save failed.'); }
+    } catch (error) { handleAccessError(error); setSectionError(error instanceof Error ? error.message : 'Section save failed.'); }
     finally { sectionRequestPending.current = false; setSectionPending(false); }
   }
   async function archiveSection(item: Section) {
-    if (requesterId === null || sectionRequestPending.current) return;
+    if (!canManageSections || sectionRequestPending.current) return;
     sectionRequestPending.current = true;
     setSectionPending(true); setSectionError(''); setSectionMessage('');
     try {
-      const updated = await setSectionArchived(requesterId, item.id, !item.is_archived);
+      const updated = await setSectionArchived(getAccessTokenSilently, item.id, !item.is_archived);
       setSections((items) => items.map((section) => section.id === updated.id ? updated : section));
       setEditingSection((current) => current?.id === updated.id ? updated : current);
       setSectionMessage(updated.is_archived ? 'Section archived.' : 'Section restored.');
-    } catch (error) { setSectionError(error instanceof Error ? error.message : 'Section update failed.'); }
+    } catch (error) { handleAccessError(error); setSectionError(error instanceof Error ? error.message : 'Section update failed.'); }
     finally { sectionRequestPending.current = false; setSectionPending(false); }
   }
   return <AppLayout activePage="forms" pageClassName="forms-page"><div className="main-content forms-editor-main">
-    <section className="forms-page-header"><div><h1>Forms</h1><p>Create questionnaires with reusable analytical sections.</p></div><div className="forms-editor-header-actions"><button className="btn btn-secondary" onClick={() => setManageOpen(true)}>Manage sections</button><button className="btn btn-primary" ref={mode === 'forms' ? createTrigger : undefined} onClick={mode === 'forms' ? openCreate : startTemplate}>New {mode === 'forms' ? 'form' : 'template'}</button></div></section>
+    <section className="forms-page-header"><div><h1>Forms</h1><p>Create questionnaires with reusable analytical sections.</p></div><div className="forms-editor-header-actions"><button className="btn btn-secondary" onClick={() => setManageOpen(true)}>Manage sections</button>{canManageForms && <button className="btn btn-primary" ref={mode === 'forms' ? createTrigger : undefined} onClick={mode === 'forms' ? openCreate : startTemplate}>New {mode === 'forms' ? 'form' : 'template'}</button>}</div></section>
     <section className="forms-page-tabs"><button className={mode === 'forms' ? 'forms-page-tab active' : 'forms-page-tab'} onClick={() => changeMode('forms')}>Forms</button><button className={mode === 'templates' ? 'forms-page-tab active' : 'forms-page-tab'} onClick={() => changeMode('templates')}>Templates</button></section>
     <section className="forms-editor-workspace"><aside className="card forms-editor-card forms-list-panel"><div className="forms-editor-card-head"><div><h3>Your {mode}</h3><span>{currentItems.length} total</span></div></div>
       {mode === 'forms' && formsError && <div className="forms-editor-state"><p className="forms-option-error" role="alert">{formsError}</p><button className="btn btn-secondary" disabled={formsLoading} onClick={() => { setFormsError(''); setFormsLoading(true); setFormLoadAttempt((attempt) => attempt + 1); }}>Retry loading forms</button></div>}
@@ -235,7 +250,7 @@ export default function Forms() {
       {mode === 'templates' && templatesLoading && <div className="forms-editor-state" role="status">Loading templates...</div>}
       {mode === 'templates' && !templatesLoading && !templatesError && templates.length === 0 && <div className="forms-editor-state">No templates yet. Create a template to reuse a questionnaire.</div>}
       <div className="forms-editor-list">{currentItems.map((item) => <button key={item.id} className={`forms-editor-form-item${item.id === selectedId ? ' active' : ''}`} onClick={() => selectItem(item)}><strong>{item.name}</strong><span>{allQuestions(item.questions).length} questions</span></button>)}</div></aside>
-      <section className="card forms-editor-card forms-editor-panel">{draft ? <><div className="forms-editor-header"><div className="forms-editor-header-title"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions</p></div><div className="forms-editor-header-actions"><button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview</button><button className="btn btn-secondary" disabled={!dirty} onClick={() => { if (saved) setDraft(copy(saved)); setSelected(null); }}>Discard</button><button className="btn btn-primary" disabled={!dirty} onClick={save}>Save changes</button></div></div>
+      <section className="card forms-editor-card forms-editor-panel">{draft && !canManageForms ? <div className="forms-editor-empty"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions · Read-only access</p><button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview questionnaire</button></div> : draft ? <><div className="forms-editor-header"><div className="forms-editor-header-title"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions</p></div><div className="forms-editor-header-actions"><button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview</button><button className="btn btn-secondary" disabled={!dirty} onClick={() => { if (saved) setDraft(copy(saved)); setSelected(null); }}>Discard</button><button className="btn btn-primary" disabled={!dirty} onClick={save}>Save changes</button></div></div>
         <label className="form-field forms-editor-field"><span className="form-label">Name</span><input className="form-control" aria-label="Name" ref={editorNameInput} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label className="form-field forms-editor-field"><span className="form-label">Description</span><textarea className="form-control" aria-label="Description" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>{message && <p className={`forms-editor-message${successMessage ? ' success' : ''}`} role={successMessage ? 'status' : 'alert'}>{message}</p>}
          <div className="forms-editor-section"><div className="forms-editor-section-head"><h3>Questionnaire structure</h3><div><button className="btn btn-secondary" onClick={() => appendQuestion()}>Add question</button><select className="form-control" defaultValue="" onChange={(event) => { if (event.target.value) { appendSection(Number(event.target.value)); event.target.value = ''; } }}><option value="">Add section</option>{sections.filter((section) => !section.is_archived && !draft.questions.some((block) => block.type === 'section' && block.section_id === section.id)).map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}</select></div></div>
            <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={(event: DragStartEvent) => setDragged(event.active.data.current?.item as MovingItem)} onDragEnd={endDrag} onDragCancel={() => setDragged(null)}>
@@ -248,8 +263,16 @@ export default function Forms() {
              </div>
              <DragOverlay dropAnimation={null}>{dragged && <div className="forms-drag-preview">{dragged.type === 'section' ? sectionNameFor(dragged.id) : allQuestions(draft.questions).find((question) => question.id === dragged.id)?.text ?? 'Question'}</div>}</DragOverlay>
            </DndContext>
-          </div></> : <div className="forms-editor-empty">{(mode === 'forms' ? formsLoading : templatesLoading) ? <p role="status">Loading {mode}...</p> : (mode === 'forms' ? formsError : templatesError) ? <p role="alert">{mode === 'forms' ? formsError : templatesError}</p> : <><h2>{currentItems.length === 0 ? `No ${mode} yet` : mode === 'forms' ? 'No form selected' : 'No template selected'}</h2><p>{currentItems.length === 0 ? mode === 'forms' ? 'Create your first questionnaire to get started.' : 'Create a reusable questionnaire template to get started.' : `Select an existing ${mode === 'forms' ? 'form' : 'template'} from the list, or create a new one.`}</p><button className="btn btn-primary" type="button" onClick={mode === 'forms' ? openCreate : startTemplate}>New {mode === 'forms' ? 'form' : 'template'}</button></>}</div>}</section>
-       <aside className="card forms-editor-card forms-editor-settings-panel"><div className="forms-editor-card-head"><h3>{draft && selected?.type === 'section' ? 'Section settings' : 'Question settings'}</h3></div>{!draft ? <div className="forms-editor-state">Settings will appear when a form or template is open.</div> : selected?.type === 'section' ? <div className="forms-editor-props"><h3>{sectionNameFor(selected.id)}</h3><p>{sectionQuestions(draft.questions, selected.id).length} questions</p><button className="btn btn-secondary" onClick={() => appendQuestion(selected.id)}>Add question</button><button className="forms-editor-delete-link" onClick={() => removeSection(selected.id)}>Remove section from form</button></div> : selectedQuestion ? <QuestionEditor question={selectedQuestion} sections={sections} current={draft.questions.find((block) => block.type === 'section' && block.questions.some((question) => question.id === selectedQuestion.id))?.type === 'section' ? (draft.questions.find((block) => block.type === 'section' && block.questions.some((question) => question.id === selectedQuestion.id)) as Extract<FormBlock, { type: 'section' }>).section_id : null} onUpdate={(patch) => updateQuestion(selectedQuestion.id, patch)} onMove={(id) => moveQuestion(selectedQuestion.id, id)} onDelete={() => deleteQuestion(selectedQuestion.id)} /> : <div className="forms-editor-state">Select a question or section to edit it.</div>}</aside></section>
+            </div></> : <div className="forms-editor-empty">
+              {(mode === 'forms' ? formsLoading : templatesLoading) ? <p role="status">Loading {mode}...</p>
+                : (mode === 'forms' ? formsError : templatesError) ? <p role="alert">{mode === 'forms' ? formsError : templatesError}</p>
+                  : <>
+                    <h2>{currentItems.length === 0 ? `No ${mode} yet` : mode === 'forms' ? 'No form selected' : 'No template selected'}</h2>
+                    <p>{currentItems.length === 0 ? mode === 'forms' ? 'No questionnaires are available.' : 'No templates are available.' : `Select an existing ${mode === 'forms' ? 'form' : 'template'} from the list${canManageForms ? ', or create a new one.' : '.'}`}</p>
+                    {canManageForms && <button className="btn btn-primary" type="button" onClick={mode === 'forms' ? openCreate : startTemplate}>New {mode === 'forms' ? 'form' : 'template'}</button>}
+                  </>}
+            </div>}</section>
+        <aside className="card forms-editor-card forms-editor-settings-panel"><div className="forms-editor-card-head"><h3>{draft && selected?.type === 'section' ? 'Section settings' : 'Question settings'}</h3></div>{!canManageForms ? <div className="forms-editor-state">Read-only access. Use Preview to view the questionnaire.</div> : !draft ? <div className="forms-editor-state">Settings will appear when a form or template is open.</div> : selected?.type === 'section' ? <div className="forms-editor-props"><h3>{sectionNameFor(selected.id)}</h3><p>{sectionQuestions(draft.questions, selected.id).length} questions</p><button className="btn btn-secondary" onClick={() => appendQuestion(selected.id)}>Add question</button><button className="forms-editor-delete-link" onClick={() => removeSection(selected.id)}>Remove section from form</button></div> : selectedQuestion ? <QuestionEditor question={selectedQuestion} sections={sections} current={draft.questions.find((block) => block.type === 'section' && block.questions.some((question) => question.id === selectedQuestion.id))?.type === 'section' ? (draft.questions.find((block) => block.type === 'section' && block.questions.some((question) => question.id === selectedQuestion.id)) as Extract<FormBlock, { type: 'section' }>).section_id : null} onUpdate={(patch) => updateQuestion(selectedQuestion.id, patch)} onMove={(id) => moveQuestion(selectedQuestion.id, id)} onDelete={() => deleteQuestion(selectedQuestion.id)} /> : <div className="forms-editor-state">Select a question or section to edit it.</div>}</aside></section>
     {createOpen && <div className="forms-editor-modal-backdrop" role="presentation"><div className="forms-editor-modal forms-create-modal" id="forms-create-dialog" role="dialog" aria-modal="true" aria-labelledby="forms-create-title" aria-describedby="forms-create-subtitle">
       <div className="forms-editor-modal-head"><div><h3 id="forms-create-title">Create form</h3><p id="forms-create-subtitle">Choose how to start your questionnaire.</p></div><button className="forms-editor-modal-close" type="button" aria-label="Close" disabled={createPending} onClick={closeCreate}>×</button></div>
       <div className="forms-editor-modal-body"><label className="form-field forms-editor-field"><span className="form-label">Form name</span><input className="form-control" aria-label="Form name" autoFocus value={createName} disabled={createPending} onChange={(event) => { setCreateName(event.target.value); setCreateError(''); }} /></label>
@@ -262,7 +285,7 @@ export default function Forms() {
       </div>
       <div className="forms-editor-modal-actions"><button className="btn btn-secondary" type="button" disabled={createPending} onClick={closeCreate}>Cancel</button><button className="btn btn-primary" type="button" disabled={createPending || !createName.trim() || (createSource === 'template' && (!createTemplate || !!templatesError || templatesLoading))} onClick={confirmCreate}>{createPending ? 'Creating...' : 'Create form'}</button></div>
     </div></div>}
-    {manageOpen && <ManageSections sections={sections} name={sectionName} editing={editingSection} pending={sectionPending} message={sectionMessage} error={sectionError} canManage={requesterId !== null} onName={setSectionName} onEdit={(item) => { setEditingSection(item); setSectionName(item?.name ?? ''); setSectionMessage(''); setSectionError(''); }} onSave={saveSection} onArchive={archiveSection} onClose={() => setManageOpen(false)} />}
+    {manageOpen && <ManageSections sections={sections} name={sectionName} editing={editingSection} pending={sectionPending} message={sectionMessage} error={sectionError} canManage={canManageSections} onName={setSectionName} onEdit={(item) => { setEditingSection(item); setSectionName(item?.name ?? ''); setSectionMessage(''); setSectionError(''); }} onSave={saveSection} onArchive={archiveSection} onClose={() => setManageOpen(false)} />}
     {previewOpen && draft && <Preview draft={draft} name={sectionNameFor} onClose={() => setPreviewOpen(false)} />}
   </div></AppLayout>;
 }

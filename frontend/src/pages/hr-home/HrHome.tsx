@@ -1,5 +1,6 @@
 import AppLayout from '../layout/AppLayout';
 import { getSidebarUser, getUserDisplayName } from '../layout/sidebar-user';
+import { useAppAuth } from '../../auth/AppAuth';
 import './hr-home.css';
 import { useNavigate } from 'react-router';
 
@@ -14,6 +15,11 @@ import { useHrDashboard } from './hooks/useHrDashboard';
 
 function HrHome() {
   const navigate = useNavigate();
+  const { state } = useAppAuth();
+  const auth0User = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
+  const canManageCampaigns = auth0User?.permissions.includes('campaigns.manage') ?? false;
+  const canReadAssigned = auth0User?.permissions.includes('evaluations.read_assigned') ?? false;
+  const canReadReports = auth0User?.permissions.includes('reports.read') ?? false;
   const {
     campaigns,
     currentDate,
@@ -27,8 +33,8 @@ function HrHome() {
   } = useHrDashboard();
 
   const sidebarUser = getSidebarUser();
-  const sidebarUserName =
-    sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser);
+  const sidebarUserName = auth0User?.employee.full_name ?? (
+    sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser));
 
   const campaignsButtonHandler = () => {
     navigate('/campaigns');
@@ -67,13 +73,14 @@ function HrHome() {
           selectedCampaign={selectedCampaign}
           onSelectCampaign={selectCampaign}
           onCreateCampaign={campaignsButtonHandler}
+          canManageCampaigns={canManageCampaigns}
           onViewCampaignDetails={selectedCampaignDetailsHandler}
         />
 
         {!isLoading && metrics !== null && campaigns.length > 0 && (
           <>
             <MetricsGrid metrics={metrics} campaigns={campaigns} />
-            <YourEvaluationsCard />
+            {canReadAssigned && <YourEvaluationsCard />}
 
             <div className="workspace">
               <ParticipantsSection participants={participants} onViewCompletionStatus={completionStatusHandler} />
@@ -81,6 +88,8 @@ function HrHome() {
                 metrics={metrics}
                 campaignName={selectedCampaign?.name}
                 onOpenCampaign={selectedCampaignDetailsHandler}
+                onOpenResults={() => selectedCampaign && navigate(`/reports/campaigns/${selectedCampaign.id}`)}
+                includeResults={canReadReports}
               />
             </div>
           </>

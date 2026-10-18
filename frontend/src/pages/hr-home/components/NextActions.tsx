@@ -8,6 +8,8 @@ type NextActionsProps = {
   metrics: DashboardMetrics;
   campaignName: string | undefined;
   onOpenCampaign: () => void;
+  onOpenResults?: () => void;
+  includeResults?: boolean;
 };
 
 type DashboardAction = {
@@ -42,6 +44,7 @@ function NextActionItem({ action, onOpenCampaign }: {
 function getActions(
   metrics: DashboardMetrics,
   campaignName: string,
+  includeResults: boolean,
 ): DashboardAction[] {
   const actions: DashboardAction[] = [];
 
@@ -66,7 +69,7 @@ function getActions(
     });
   }
 
-  if (metrics.submitted_count > 0) {
+  if (includeResults && metrics.submitted_count > 0) {
     actions.push({
       id: 'results',
       title: 'Review campaign results',
@@ -79,9 +82,9 @@ function getActions(
   return actions.slice(0, 4);
 }
 
-function NextActions({ metrics, campaignName, onOpenCampaign }: NextActionsProps) {
+function NextActions({ metrics, campaignName, onOpenCampaign, onOpenResults, includeResults = true }: NextActionsProps) {
   const campaignLabel = campaignName ?? 'Selected campaign';
-  const actions = getActions(metrics, campaignLabel);
+  const actions = getActions(metrics, campaignLabel, includeResults);
 
   return (
     <section className="next-actions" aria-labelledby="next-actions-title">
@@ -110,7 +113,7 @@ function NextActions({ metrics, campaignName, onOpenCampaign }: NextActionsProps
             <NextActionItem
               action={action}
               key={action.id}
-              onOpenCampaign={onOpenCampaign}
+              onOpenCampaign={action.id === 'results' && onOpenResults ? onOpenResults : onOpenCampaign}
             />
           ))
         )}

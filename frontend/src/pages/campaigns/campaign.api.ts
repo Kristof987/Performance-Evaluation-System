@@ -14,14 +14,15 @@ import type {
 } from './campaign.types';
 import { mapCampaignFromResponse } from './campaign.utils';
 
-import { API_BASE_URL } from '../../config';
+import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 
 async function requestCampaigns<T>(
+  getAccessToken: AccessTokenGetter,
   path: string,
   options: RequestInit,
   fallback: string,
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}/campaigns${path}`, options);
+  const response = await authenticatedApiFetch(getAccessToken, `/campaigns${path}`, options);
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const detail =
@@ -46,14 +47,16 @@ function mapSelfEvaluations(response: CampaignSelfEvaluationsResponse): Campaign
   };
 }
 
-export async function fetchCampaignSelfEvaluations(id: string, signal: AbortSignal) {
+export async function fetchCampaignSelfEvaluations(getAccessToken: AccessTokenGetter, id: string, signal: AbortSignal) {
   return mapSelfEvaluations(await requestCampaigns<CampaignSelfEvaluationsResponse>(
+    getAccessToken,
     `/${encodeURIComponent(id)}/self-evaluations`, { signal }, 'Self-evaluations could not be loaded.',
   ));
 }
 
-export async function updateCampaignSelfEvaluations(id: string, assignments: Array<{ employeeId: number; formId: number | null }>) {
+export async function updateCampaignSelfEvaluations(getAccessToken: AccessTokenGetter, id: string, assignments: Array<{ employeeId: number; formId: number | null }>) {
   return mapSelfEvaluations(await requestCampaigns<CampaignSelfEvaluationsResponse>(
+    getAccessToken,
     `/${encodeURIComponent(id)}/self-evaluations`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assignments: assignments.map((item) => ({ employee_id: item.employeeId, form_id: item.formId })) }),
@@ -129,8 +132,9 @@ function getPayload(form: CampaignFormValues) {
   };
 }
 
-export async function fetchCampaigns(signal: AbortSignal): Promise<Campaign[]> {
+export async function fetchCampaigns(getAccessToken: AccessTokenGetter, signal: AbortSignal): Promise<Campaign[]> {
   const campaigns = await requestCampaigns<CampaignResponse[]>(
+    getAccessToken,
     '',
     { signal },
     'Campaigns could not be loaded.',
@@ -139,11 +143,13 @@ export async function fetchCampaigns(signal: AbortSignal): Promise<Campaign[]> {
 }
 
 export async function fetchCampaign(
+  getAccessToken: AccessTokenGetter,
   id: string,
   signal: AbortSignal,
 ): Promise<Campaign> {
   return mapCampaignFromResponse(
     await requestCampaigns<CampaignResponse>(
+      getAccessToken,
       `/${encodeURIComponent(id)}`,
       { signal },
       'Campaign could not be loaded.',
@@ -152,16 +158,17 @@ export async function fetchCampaign(
 }
 
 export async function createCampaign(
+  getAccessToken: AccessTokenGetter,
   form: CampaignFormValues,
-  userId: number,
 ): Promise<Campaign> {
   return mapCampaignFromResponse(
     await requestCampaigns<CampaignResponse>(
+      getAccessToken,
       '',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...getPayload(form), created_by: userId }),
+        body: JSON.stringify(getPayload(form)),
       },
       'Campaign could not be saved.',
     ),
@@ -169,11 +176,13 @@ export async function createCampaign(
 }
 
 export async function updateCampaign(
+  getAccessToken: AccessTokenGetter,
   id: string,
   form: CampaignFormValues,
 ): Promise<Campaign> {
   return mapCampaignFromResponse(
     await requestCampaigns<CampaignResponse>(
+      getAccessToken,
       `/${encodeURIComponent(id)}`,
       {
         method: 'PUT',
@@ -186,11 +195,13 @@ export async function updateCampaign(
 }
 
 export async function fetchCampaignGroups(
+  getAccessToken: AccessTokenGetter,
   id: string,
   signal: AbortSignal,
 ): Promise<CampaignGroups> {
   return mapCampaignGroups(
     await requestCampaigns<CampaignGroupsResponse>(
+      getAccessToken,
       `/${encodeURIComponent(id)}/groups`,
       { signal },
       'Campaign groups could not be loaded.',
@@ -199,11 +210,13 @@ export async function fetchCampaignGroups(
 }
 
 export async function updateCampaignGroups(
+  getAccessToken: AccessTokenGetter,
   id: string,
   groupIds: number[],
 ): Promise<CampaignGroups> {
   return mapCampaignGroups(
     await requestCampaigns<CampaignGroupsResponse>(
+      getAccessToken,
       `/${encodeURIComponent(id)}/groups`,
       {
         method: 'PUT',
@@ -216,11 +229,13 @@ export async function updateCampaignGroups(
 }
 
 export async function fetchCampaignEvaluationRules(
+  getAccessToken: AccessTokenGetter,
   id: string,
   signal: AbortSignal,
 ): Promise<CampaignEvaluationRules> {
   return mapCampaignEvaluationRules(
     await requestCampaigns<CampaignEvaluationRulesResponse>(
+      getAccessToken,
       `/${encodeURIComponent(id)}/evaluation-rules`,
       { signal },
       'Campaign form rules could not be loaded.',
@@ -229,6 +244,7 @@ export async function fetchCampaignEvaluationRules(
 }
 
 export async function updateCampaignEvaluationRules(
+  getAccessToken: AccessTokenGetter,
   id: string,
   rules: Array<{
     companyGroupId: number;
@@ -239,6 +255,7 @@ export async function updateCampaignEvaluationRules(
 ): Promise<CampaignEvaluationRules> {
   return mapCampaignEvaluationRules(
     await requestCampaigns<CampaignEvaluationRulesResponse>(
+      getAccessToken,
       `/${encodeURIComponent(id)}/evaluation-rules`,
       {
         method: 'PUT',
@@ -258,11 +275,13 @@ export async function updateCampaignEvaluationRules(
 }
 
 export async function fetchCampaignEvaluationMatrix(
+  getAccessToken: AccessTokenGetter,
   id: string,
   signal: AbortSignal,
 ): Promise<CampaignEvaluationMatrix> {
   return mapCampaignEvaluationMatrix(
     await requestCampaigns<CampaignEvaluationMatrixResponse>(
+      getAccessToken,
       `/${encodeURIComponent(id)}/evaluation-matrix`,
       { signal },
       'Campaign evaluation matrix could not be loaded.',
@@ -271,6 +290,7 @@ export async function fetchCampaignEvaluationMatrix(
 }
 
 export async function updateCampaignEvaluationMatrix(
+  getAccessToken: AccessTokenGetter,
   id: string,
   assignments: Array<{
     companyGroupId: number;
@@ -283,6 +303,7 @@ export async function updateCampaignEvaluationMatrix(
   keptCompletedCount: number;
 }> {
   const response = await requestCampaigns<CampaignEvaluationMatrixUpdateResponse>(
+    getAccessToken,
     `/${encodeURIComponent(id)}/evaluation-matrix`,
     {
       method: 'PUT',

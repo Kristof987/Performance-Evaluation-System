@@ -5,6 +5,7 @@ import ReportsEmptyState from './components/ReportsEmptyState';
 import SectionScoresChart from './components/SectionScoresChart';
 import ReportsLayout from './ReportsLayout';
 import type { GroupReportDetail, GroupsReport, RolePerspective, RoleReportDetail, RolesReport } from './types/reports.types';
+import type { AccessTokenGetter } from '../../auth/authenticated-api';
 
 function formatPercent(value: number | null) {
   return value === null ? '—' : `${value}%`;
@@ -41,27 +42,27 @@ export function GroupsRolesPage() {
   return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{(layout) => <GroupsRolesContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layout} />}</ReportsLayout>;
 }
 
-function GroupsRolesContent({ selectedCampaignId, validCampaignId, requesterUserId, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; requesterUserId: number | null; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
+function GroupsRolesContent({ selectedCampaignId, validCampaignId, getAccessToken, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; getAccessToken: AccessTokenGetter | undefined; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
   const location = useLocation();
   const view = location.pathname.includes('/roles') ? 'roles' : 'groups';
   const [groupData, setGroupData] = useState<GroupsReport | null>(null);
   const [groupError, setGroupError] = useState('');
   const [reloadGroups, setReloadGroups] = useState(0);
   useEffect(() => {
-    if (!validCampaignId || requesterUserId === null || view !== 'groups') return undefined;
+    if (!validCampaignId || !getAccessToken || view !== 'groups') return undefined;
     const controller = new AbortController();
     setGroupData(null);
     setGroupError('');
-    fetchGroupsReport(selectedCampaignId, requesterUserId, controller.signal)
+    fetchGroupsReport(getAccessToken, selectedCampaignId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setGroupData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setGroupError(cause instanceof Error ? cause.message : 'Group reports could not be loaded.'); });
     return () => controller.abort();
-  }, [selectedCampaignId, requesterUserId, reloadGroups, validCampaignId, view]);
+  }, [selectedCampaignId, getAccessToken, reloadGroups, validCampaignId, view]);
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
   if (campaignsError) return <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={retryCampaigns}>Retry</button></div>;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
-  return <div className="reports-overview"><GroupsRolesTabs campaignId={selectedCampaignId} view={view} />{view === 'groups' ? groupData?.campaign.id === selectedCampaignId ? <GroupsOverview data={groupData} campaignId={selectedCampaignId} /> : <LoadingOrError error={groupError} retry={() => setReloadGroups((value) => value + 1)} /> : <RolesOverview campaignId={selectedCampaignId} requesterUserId={requesterUserId} />}</div>;
+  return <div className="reports-overview"><GroupsRolesTabs campaignId={selectedCampaignId} view={view} />{view === 'groups' ? groupData?.campaign.id === selectedCampaignId ? <GroupsOverview data={groupData} campaignId={selectedCampaignId} /> : <LoadingOrError error={groupError} retry={() => setReloadGroups((value) => value + 1)} /> : <RolesOverview campaignId={selectedCampaignId} getAccessToken={getAccessToken} />}</div>;
 }
 
 function GroupsOverview({ campaignId, data }: { campaignId: number; data: GroupsReport }) {
@@ -89,7 +90,7 @@ function GroupsOverview({ campaignId, data }: { campaignId: number; data: Groups
   </>;
 }
 
-function RolesOverview({ campaignId, requesterUserId }: { campaignId: number; requesterUserId: number | null }) {
+function RolesOverview({ campaignId, getAccessToken }: { campaignId: number; getAccessToken: AccessTokenGetter | undefined }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const perspective = searchParams.get('perspective') === 'evaluator' ? 'evaluator' : 'evaluatee';
@@ -98,15 +99,15 @@ function RolesOverview({ campaignId, requesterUserId }: { campaignId: number; re
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    if (requesterUserId === null) return undefined;
+    if (!getAccessToken) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
-    fetchRolesReport(campaignId, requesterUserId, perspective, controller.signal)
+    fetchRolesReport(getAccessToken, campaignId, perspective, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Role reports could not be loaded.'); });
     return () => controller.abort();
-  }, [campaignId, perspective, requesterUserId, reload]);
+  }, [campaignId, perspective, getAccessToken, reload]);
 
   function changePerspective(value: RolePerspective) {
     navigate(`/reports/campaigns/${campaignId}/roles?perspective=${value}`);
@@ -130,24 +131,24 @@ export function GroupDetailPage() {
   const { campaignId, groupId } = useParams();
   const selectedCampaignId = Number(campaignId);
   const selectedGroupId = Number(groupId);
-  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ requesterUserId }) => <GroupDetailContent campaignId={selectedCampaignId} groupId={selectedGroupId} requesterUserId={requesterUserId} />}</ReportsLayout>;
+  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ getAccessToken }) => <GroupDetailContent campaignId={selectedCampaignId} groupId={selectedGroupId} getAccessToken={getAccessToken} />}</ReportsLayout>;
 }
 
-function GroupDetailContent({ campaignId, groupId, requesterUserId }: { campaignId: number; groupId: number; requesterUserId: number | null }) {
+function GroupDetailContent({ campaignId, groupId, getAccessToken }: { campaignId: number; groupId: number; getAccessToken: AccessTokenGetter | undefined }) {
   const [data, setData] = useState<GroupReportDetail | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    if (requesterUserId === null) return undefined;
+    if (!getAccessToken) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
-    fetchGroupReportDetail(campaignId, groupId, requesterUserId, controller.signal)
+    fetchGroupReportDetail(getAccessToken, campaignId, groupId, controller.signal)
        .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Group report could not be loaded.'); });
     return () => controller.abort();
-  }, [campaignId, groupId, requesterUserId, reload]);
+  }, [campaignId, groupId, getAccessToken, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.group.id !== groupId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
    return <div className="reports-overview"><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/groups`}>← Back to Groups & Roles</Link><header className="reports-detail-heading"><h2>{data.group.name}</h2><p>{data.campaign.name} · Group analysis</p>{data.group.description && <p>{data.group.description}</p>}</header><ReportKpis items={[{ label: 'Employees', value: data.kpis.employees }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Completion rate', value: formatPercent(data.kpis.completion_rate) }, { label: 'Reportable sections', value: data.kpis.reportable_sections, context: `Overall peer score: ${data.kpis.overall_peer_score === null ? 'Unavailable' : `${formatScore(data.kpis.overall_peer_score)} / 5`}` }]} /><div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?group_id=${groupId}`}>Explore group questions →</Link><SimpleTable title="Roles in this group" emptyTitle="No role coverage yet." emptyMessage="No employees with company roles are available for this group." columns={['Company role', 'Employees', 'Completed received', 'Reportable average']} rows={data.roles.map((role) => [role.role_name, role.employee_count, role.completed_evaluations_received, reportableScore(role.average_score, role.score_availability)])} /><SimpleTable title="Group employee coverage" emptyTitle="No employee coverage available." emptyMessage="This group has no campaign participants to summarize." columns={['Employee', 'Role', 'Reviews received', 'Self-evaluation', 'Feedback availability']} rows={data.employees.map((employee) => [employee.employee_name, employee.role_name, employee.reviews_received, employee.completed_self_evaluation ? 'Completed' : 'Not completed', employee.feedback_availability])} /></div>;
@@ -159,25 +160,25 @@ export function RoleDetailPage() {
   const perspective = searchParams.get('perspective') === 'evaluator' ? 'evaluator' : 'evaluatee';
   const selectedCampaignId = Number(campaignId);
   const selectedRoleId = Number(roleId);
-  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ requesterUserId }) => <RoleDetailContent campaignId={selectedCampaignId} roleId={selectedRoleId} requesterUserId={requesterUserId} perspective={perspective} />}</ReportsLayout>;
+  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ getAccessToken }) => <RoleDetailContent campaignId={selectedCampaignId} roleId={selectedRoleId} getAccessToken={getAccessToken} perspective={perspective} />}</ReportsLayout>;
 }
 
-function RoleDetailContent({ campaignId, roleId, requesterUserId, perspective }: { campaignId: number; roleId: number; requesterUserId: number | null; perspective: RolePerspective }) {
+function RoleDetailContent({ campaignId, roleId, getAccessToken, perspective }: { campaignId: number; roleId: number; getAccessToken: AccessTokenGetter | undefined; perspective: RolePerspective }) {
   const navigate = useNavigate();
   const [data, setData] = useState<RoleReportDetail | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    if (requesterUserId === null) return undefined;
+    if (!getAccessToken) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
-    fetchRoleReportDetail(campaignId, roleId, requesterUserId, perspective, controller.signal)
+    fetchRoleReportDetail(getAccessToken, campaignId, roleId, perspective, controller.signal)
        .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Role report could not be loaded.'); });
     return () => controller.abort();
-  }, [campaignId, perspective, requesterUserId, roleId, reload]);
+  }, [campaignId, perspective, getAccessToken, roleId, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.role.id !== roleId || data.perspective !== perspective) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
    return <div className="reports-overview"><button className="campaign-details-link link-button" type="button" onClick={() => navigate(`/reports/campaigns/${campaignId}/roles?perspective=${perspective}`)}>← Back to Roles</button><header className="reports-detail-heading"><h2>{data.role.name}</h2><p>{data.campaign.name} · {perspective === 'evaluator' ? 'Evaluator role' : 'Evaluated role'}</p></header><ReportKpis items={[{ label: perspective === 'evaluator' ? 'Assigned evaluators' : 'Employees to evaluate', value: data.kpis.employees }, { label: perspective === 'evaluator' ? 'Completed reviews submitted' : 'Completed reviews received', value: data.kpis.completed_evaluations }, { label: 'Reportable sections', value: data.kpis.reportable_sections }, { label: perspective === 'evaluator' ? 'Average rating given' : 'Overall section score', value: formatScore(data.kpis.overall_score) }]} /><div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?role_id=${roleId}&perspective=${perspective}`}>Explore role questions →</Link><SimpleTable title="Group breakdown" emptyTitle="No group breakdown available." emptyMessage="This role has no campaign group coverage for the selected perspective." columns={['Group', 'Employees', 'Completed evaluations', 'Reportable average']} rows={data.groups.map((group) => [group.group_name, group.employee_count, group.completed_evaluations, reportableScore(group.average_score, group.score_availability)])} /><section className="reports-card"><div className="reports-section-heading"><h2>Evaluation coverage</h2><p>{data.coverage.completed_evaluations} of {data.coverage.assigned_evaluations} role-scoped evaluations completed.</p></div></section></div>;

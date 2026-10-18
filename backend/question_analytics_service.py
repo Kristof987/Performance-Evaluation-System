@@ -196,10 +196,10 @@ def _released(metadata: dict, items: list[Observation], availability: str) -> di
     return result
 
 
-def build_question_report(campaign_id: int, requester_user_id: int, db: Session, *, group_id: int | None = None,
+def build_question_report(campaign_id: int, actor: models.User, db: Session, *, group_id: int | None = None,
                           role_id: int | None = None, employee_id: int | None = None,
                           perspective: str = "evaluatee", evaluation_type: str = "peer") -> dict:
-    reporting_service.require_reports_access(campaign_id, requester_user_id, db)
+    reporting_service.require_reports_access(campaign_id, actor, db)
     if group_id is not None and group_id not in {group.id for group in reporting_service.assigned_campaign_groups(campaign_id, db)}:
         raise HTTPException(status_code=404, detail="Group report not found")
     if role_id is not None and db.query(models.CompanyRole).filter(models.CompanyRole.id == role_id).first() is None:

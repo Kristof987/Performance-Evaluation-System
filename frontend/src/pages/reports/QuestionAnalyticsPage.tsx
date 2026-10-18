@@ -23,11 +23,11 @@ export default function QuestionAnalyticsPage() {
         : {};
   const scoped = Object.keys(scope).length > 0;
 
-  return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{({ campaigns, requesterUserId, loadingCampaigns, campaignsError, retryCampaigns }) => {
+  return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{({ campaigns, getAccessToken, loadingCampaigns, campaignsError, retryCampaigns }) => {
     if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
     if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
     if (campaignsError) return <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={retryCampaigns}>Retry</button></div>;
     if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
-    return <div className="reports-overview">{scoped && <div className="reports-question-scope"><span>{employeeId !== undefined ? 'Employee' : groupId !== undefined ? 'Group' : 'Company role'} question responses</span><Link to={`/reports/campaigns/${selectedCampaignId}/questions`}>View entire campaign</Link></div>}<QuestionAnalytics campaignId={selectedCampaignId} requesterUserId={requesterUserId} scope={scope} /></div>;
+    return <div className="reports-overview">{scoped && <div className="reports-question-scope"><span>{employeeId !== undefined ? 'Employee' : groupId !== undefined ? 'Group' : 'Company role'} question responses</span><Link to={`/reports/campaigns/${selectedCampaignId}/questions`}>View entire campaign</Link></div>}<QuestionAnalytics campaignId={selectedCampaignId} getAccessToken={getAccessToken} scope={scope} /></div>;
   }}</ReportsLayout>;
 }

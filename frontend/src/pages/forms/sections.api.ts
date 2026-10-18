@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../../config';
+import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 
 export type Section = {
   id: number;
@@ -8,10 +8,10 @@ export type Section = {
   updated_at: string;
 };
 
-async function request<T>(path: string, requesterUserId: number, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}/sections${path}${path.includes('?') ? '&' : '?'}requester_user_id=${requesterUserId}`, {
+async function request<T>(getAccessToken: AccessTokenGetter, path: string, init?: RequestInit): Promise<T> {
+  const response = await authenticatedApiFetch(getAccessToken, `/sections${path}`, {
     ...init,
-    headers: { ...(init?.headers ?? {}), ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
   });
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
@@ -21,17 +21,17 @@ async function request<T>(path: string, requesterUserId: number, init?: RequestI
   return body as T;
 }
 
-export function fetchSections(requesterUserId: number, signal?: AbortSignal) {
-  return request<Section[]>('?include_archived=true', requesterUserId, { signal });
+export function fetchSections(getAccessToken: AccessTokenGetter, signal?: AbortSignal) {
+  return request<Section[]>(getAccessToken, '?include_archived=true', { signal });
 }
 
-export function saveSection(requesterUserId: number, sectionId: number | null, name: string) {
-  return request<Section>(sectionId === null ? '' : `/${sectionId}`, requesterUserId, {
+export function saveSection(getAccessToken: AccessTokenGetter, sectionId: number | null, name: string) {
+  return request<Section>(getAccessToken, sectionId === null ? '' : `/${sectionId}`, {
     method: sectionId === null ? 'POST' : 'PUT',
     body: JSON.stringify({ name }),
   });
 }
 
-export function setSectionArchived(requesterUserId: number, sectionId: number, archived: boolean) {
-  return request<Section>(`/${sectionId}/${archived ? 'archive' : 'restore'}`, requesterUserId, { method: 'POST' });
+export function setSectionArchived(getAccessToken: AccessTokenGetter, sectionId: number, archived: boolean) {
+  return request<Section>(getAccessToken, `/${sectionId}/${archived ? 'archive' : 'restore'}`, { method: 'POST' });
 }

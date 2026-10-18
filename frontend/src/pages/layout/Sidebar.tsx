@@ -16,7 +16,7 @@ import {
 import {
   getUserDisplayName,
   getDashboardPath,
-  getSystemDashboardPath,
+  getAuthenticatedDashboardPath,
   getSidebarUser,
   getUserInitials,
   isHrOrManagerRole,
@@ -72,12 +72,13 @@ export default function Sidebar({
   const sidebarUserName = auth0User?.employee.full_name ?? (
     sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser));
   const dashboardPath = auth0User
-    ? getSystemDashboardPath(auth0User.system_role_name)
+    ? getAuthenticatedDashboardPath(auth0User.permissions)
     : getDashboardPath();
   const isDashboardActive =
     activePage === 'hr-home' || activePage === 'employee-home';
   const isHrOrManager = auth0User
     ? dashboardPath === '/hr-home' : isHrOrManagerRole(sidebarUser?.role_name ?? null);
+  const hasPermission = (permission: string) => auth0User?.permissions.includes(permission) ?? false;
 
   const currentWidth =
     dragWidth ?? (isSidebarCollapsed ? MIN_WIDTH : expandedWidth);
@@ -178,9 +179,9 @@ export default function Sidebar({
           <LayoutDashboard size={17} />
           <span className="nav-item-label">Dashboard</span>
         </Link>
-        {isHrOrManager ? (
+        {auth0User || isHrOrManager ? (
           <>
-            <Link
+            {(!auth0User || hasPermission('evaluations.read_assigned')) && <Link
               className={activePage === 'my-evaluations' ? 'nav-item active' : 'nav-item'}
               aria-current={activePage === 'my-evaluations' ? 'page' : undefined}
               to="/my-evaluations"
@@ -188,8 +189,8 @@ export default function Sidebar({
             >
               <ClipboardCheck size={17} />
               <span className="nav-item-label">My Evaluations</span>
-            </Link>
-            <Link
+            </Link>}
+            {(!auth0User || (hasPermission('employees.read') && hasPermission('groups.read'))) && <Link
               className={activePage === 'people' ? 'nav-item active' : 'nav-item'}
               aria-current={activePage === 'people' ? 'page' : undefined}
               to="/people"
@@ -197,8 +198,8 @@ export default function Sidebar({
             >
               <Users size={17} />
               <span className="nav-item-label">People</span>
-            </Link>
-            <Link
+            </Link>}
+            {(!auth0User || hasPermission('campaigns.read')) && <Link
               className={
                 activePage === 'campaigns' ? 'nav-item active' : 'nav-item'
               }
@@ -208,8 +209,8 @@ export default function Sidebar({
             >
               <ClipboardPen size={17} />
               <span className="nav-item-label">Campaigns</span>
-            </Link>
-            <Link
+            </Link>}
+            {(!auth0User || (hasPermission('forms.read') && hasPermission('sections.read'))) && <Link
               className={activePage === 'forms' ? 'nav-item active' : 'nav-item'}
               aria-current={activePage === 'forms' ? 'page' : undefined}
               to="/forms"
@@ -217,8 +218,8 @@ export default function Sidebar({
             >
               <Files size={17} />
               <span className="nav-item-label">Forms</span>
-            </Link>
-            <Link
+            </Link>}
+            {(!auth0User || hasPermission('reports.read')) && <Link
               className={activePage === 'reports' ? 'nav-item active' : 'nav-item'}
               aria-current={activePage === 'reports' ? 'page' : undefined}
               to="/reports"
@@ -226,8 +227,8 @@ export default function Sidebar({
             >
               <ChartNoAxesCombined size={17} />
               <span className="nav-item-label">Reports</span>
-            </Link>
-            <Link
+            </Link>}
+            {(!auth0User || hasPermission('settings.read')) && <Link
               className={activePage === 'settings' ? 'nav-item active' : 'nav-item'}
               aria-current={activePage === 'settings' ? 'page' : undefined}
               to="/settings/profile"
@@ -235,7 +236,7 @@ export default function Sidebar({
             >
               <Settings size={17} />
               <span className="nav-item-label">Settings</span>
-            </Link>
+            </Link>}
           </>
         ) : (
           <>

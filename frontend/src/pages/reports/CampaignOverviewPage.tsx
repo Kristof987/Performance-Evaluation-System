@@ -6,6 +6,7 @@ import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsKpiPanel from './components/ReportsKpiPanel';
 import ReportsLayout from './ReportsLayout';
 import type { CampaignReportOverview } from './types/reports.types';
+import type { AccessTokenGetter } from '../../auth/authenticated-api';
 
 export function ReportsIndexPage() {
   return <ReportsLayout selectedCampaignId={null}>{({ loadingCampaigns, campaignsError, campaigns, retryCampaigns }) => {
@@ -27,7 +28,7 @@ export default function CampaignOverviewPage() {
 function OverviewContent({
   selectedCampaignId,
   validCampaignId,
-  requesterUserId,
+  getAccessToken,
   loadingCampaigns,
   campaignsError,
   campaigns,
@@ -36,7 +37,7 @@ function OverviewContent({
   selectedCampaignId: number;
   validCampaignId: boolean;
   campaigns: Array<{ id: number }>;
-  requesterUserId: number | null;
+  getAccessToken: AccessTokenGetter | undefined;
   loadingCampaigns: boolean;
   campaignsError: string;
   retryCampaigns: () => void;
@@ -46,11 +47,11 @@ function OverviewContent({
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    if (!validCampaignId || requesterUserId === null) return undefined;
+    if (!validCampaignId || !getAccessToken) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
-    fetchCampaignReportOverview(selectedCampaignId, requesterUserId, controller.signal)
+    fetchCampaignReportOverview(getAccessToken, selectedCampaignId, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
         setData(result);
@@ -59,7 +60,7 @@ function OverviewContent({
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Campaign report could not be loaded.');
       });
     return () => controller.abort();
-  }, [requesterUserId, reloadKey, selectedCampaignId, validCampaignId]);
+  }, [getAccessToken, reloadKey, selectedCampaignId, validCampaignId]);
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;

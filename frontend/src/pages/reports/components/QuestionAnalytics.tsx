@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchReportQuestions } from '../api/reports.api';
 import type { QuestionResult, ReportQuestion, ReportQuestions, RolePerspective } from '../types/reports.types';
+import type { AccessTokenGetter } from '../../../auth/authenticated-api';
 
 function Distribution({ question, result, label }: { question: ReportQuestion; result: QuestionResult; label: string }) {
   if (result.availability === 'suppressed') return <p className="reports-question-status">{label} results are hidden for confidentiality. Counts and values are withheld.</p>;
@@ -21,9 +22,9 @@ function Distribution({ question, result, label }: { question: ReportQuestion; r
   </div>;
 }
 
-export default function QuestionAnalytics({ campaignId, requesterUserId, scope = {} }: {
+export default function QuestionAnalytics({ campaignId, getAccessToken, scope = {} }: {
   campaignId: number;
-  requesterUserId: number | null;
+  getAccessToken: AccessTokenGetter | undefined;
   scope?: { group_id?: number; role_id?: number; employee_id?: number; perspective?: RolePerspective };
 }) {
   const [evaluationType, setEvaluationType] = useState<'peer' | 'self'>('peer');
@@ -39,16 +40,16 @@ export default function QuestionAnalytics({ campaignId, requesterUserId, scope =
   const perspective = scope.perspective;
 
   useEffect(() => {
-    if (requesterUserId === null) return undefined;
+    if (!getAccessToken) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
     setSelected(null);
-    fetchReportQuestions(campaignId, requesterUserId, { group_id: groupId, role_id: roleId, employee_id: employeeId, perspective }, evaluationType, controller.signal)
+    fetchReportQuestions(getAccessToken, campaignId, { group_id: groupId, role_id: roleId, employee_id: employeeId, perspective }, evaluationType, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Question analytics could not be loaded.'); });
     return () => controller.abort();
-  }, [campaignId, requesterUserId, groupId, roleId, employeeId, perspective, evaluationType, reload]);
+  }, [campaignId, getAccessToken, groupId, roleId, employeeId, perspective, evaluationType, reload]);
 
   const questions = data?.evaluation_type === evaluationType ? data.questions : null;
   const sections = new Map<string, string>();

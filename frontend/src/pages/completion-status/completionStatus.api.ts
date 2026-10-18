@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../../config';
+import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 
 export type CompletionStatusSummary = {
   total_evaluations: number;
@@ -46,7 +46,6 @@ export type CompletionStatusResponse = {
 };
 
 export type CompletionStatusQuery = {
-  requesterUserId: number;
   search: string;
   status: string;
   questionnaireId: string;
@@ -57,9 +56,8 @@ export type CompletionStatusQuery = {
   pageSize: number;
 };
 
-export async function fetchCompletionStatus(campaignId: number, query: CompletionStatusQuery, signal: AbortSignal): Promise<CompletionStatusResponse> {
+export async function fetchCompletionStatus(getAccessToken: AccessTokenGetter, campaignId: number, query: CompletionStatusQuery, signal: AbortSignal): Promise<CompletionStatusResponse> {
   const params = new URLSearchParams({
-    requester_user_id: String(query.requesterUserId),
     sort: query.sort,
     order: query.order,
     page: String(query.page),
@@ -70,7 +68,7 @@ export async function fetchCompletionStatus(campaignId: number, query: Completio
   if (query.questionnaireId !== '') params.set('questionnaire_id', query.questionnaireId);
   if (query.overdueOnly) params.set('overdue_only', 'true');
 
-  const response = await fetch(`${API_BASE_URL}/campaigns/${campaignId}/completion-status?${params.toString()}`, { signal });
+  const response = await authenticatedApiFetch(getAccessToken, `/campaigns/${campaignId}/completion-status?${params.toString()}`, { signal });
   if (!response.ok) {
     const fallback = response.status === 403 ? 'You are not authorized to view this campaign.' : response.status === 404 ? 'Campaign not found.' : 'Completion status could not be loaded.';
     throw new Error(fallback);

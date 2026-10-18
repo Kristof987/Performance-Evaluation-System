@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../../config';
+import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 
 export type ChoiceOption = {
   id: string;
@@ -91,8 +91,8 @@ function mapForm(form: FormResponse): ReviewForm {
   };
 }
 
-async function requestApi<T>(path: string, options: RequestInit, fallback: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
+async function requestApi<T>(getAccessToken: AccessTokenGetter, path: string, options: RequestInit, fallback: string): Promise<T> {
+  const response = await authenticatedApiFetch(getAccessToken, path, options);
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const detail =
@@ -102,13 +102,14 @@ async function requestApi<T>(path: string, options: RequestInit, fallback: strin
   return response.json() as Promise<T>;
 }
 
-export async function fetchForms(signal: AbortSignal): Promise<ReviewForm[]> {
-  const forms = await requestApi<FormResponse[]>('/forms', { signal }, 'Forms could not be loaded.');
+export async function fetchForms(getAccessToken: AccessTokenGetter, signal: AbortSignal): Promise<ReviewForm[]> {
+  const forms = await requestApi<FormResponse[]>(getAccessToken, '/forms', { signal }, 'Forms could not be loaded.');
   return forms.map(mapForm);
 }
 
-export async function fetchFormTemplates(signal: AbortSignal): Promise<ReviewForm[]> {
+export async function fetchFormTemplates(getAccessToken: AccessTokenGetter, signal: AbortSignal): Promise<ReviewForm[]> {
   const templates = await requestApi<FormResponse[]>(
+    getAccessToken,
     '/form-templates',
     { signal },
     'Templates could not be loaded.',
@@ -116,9 +117,10 @@ export async function fetchFormTemplates(signal: AbortSignal): Promise<ReviewFor
   return templates.map(mapForm);
 }
 
-export async function createFormTemplate(form: ReviewFormValues): Promise<ReviewForm> {
+export async function createFormTemplate(getAccessToken: AccessTokenGetter, form: ReviewFormValues): Promise<ReviewForm> {
   return mapForm(
     await requestApi<FormResponse>(
+      getAccessToken,
       '/form-templates',
       {
         method: 'POST',
@@ -130,9 +132,10 @@ export async function createFormTemplate(form: ReviewFormValues): Promise<Review
   );
 }
 
-export async function updateFormTemplate(id: number, form: ReviewFormValues): Promise<ReviewForm> {
+export async function updateFormTemplate(getAccessToken: AccessTokenGetter, id: number, form: ReviewFormValues): Promise<ReviewForm> {
   return mapForm(
     await requestApi<FormResponse>(
+      getAccessToken,
       `/form-templates/${id}`,
       {
         method: 'PUT',
@@ -144,13 +147,14 @@ export async function updateFormTemplate(id: number, form: ReviewFormValues): Pr
   );
 }
 
-export async function deleteFormTemplate(id: number): Promise<void> {
-  await requestApi(`/form-templates/${id}`, { method: 'DELETE' }, 'Template could not be deleted.');
+export async function deleteFormTemplate(getAccessToken: AccessTokenGetter, id: number): Promise<void> {
+  await requestApi(getAccessToken, `/form-templates/${id}`, { method: 'DELETE' }, 'Template could not be deleted.');
 }
 
-export async function createForm(form: ReviewFormValues): Promise<ReviewForm> {
+export async function createForm(getAccessToken: AccessTokenGetter, form: ReviewFormValues): Promise<ReviewForm> {
   return mapForm(
     await requestApi<FormResponse>(
+      getAccessToken,
       '/forms',
       {
         method: 'POST',
@@ -163,12 +167,14 @@ export async function createForm(form: ReviewFormValues): Promise<ReviewForm> {
 }
 
 export async function createFormFromTemplate(
+  getAccessToken: AccessTokenGetter,
   name: string,
   description: string,
   templateId: number,
 ): Promise<ReviewForm> {
   return mapForm(
     await requestApi<FormResponse>(
+      getAccessToken,
       '/forms',
       {
         method: 'POST',
@@ -184,9 +190,10 @@ export async function createFormFromTemplate(
   );
 }
 
-export async function updateForm(id: number, form: ReviewFormValues): Promise<ReviewForm> {
+export async function updateForm(getAccessToken: AccessTokenGetter, id: number, form: ReviewFormValues): Promise<ReviewForm> {
   return mapForm(
     await requestApi<FormResponse>(
+      getAccessToken,
       `/forms/${id}`,
       {
         method: 'PUT',
@@ -198,6 +205,6 @@ export async function updateForm(id: number, form: ReviewFormValues): Promise<Re
   );
 }
 
-export async function deleteForm(id: number): Promise<void> {
-  await requestApi(`/forms/${id}`, { method: 'DELETE' }, 'Form could not be deleted.');
+export async function deleteForm(getAccessToken: AccessTokenGetter, id: number): Promise<void> {
+  await requestApi(getAccessToken, `/forms/${id}`, { method: 'DELETE' }, 'Form could not be deleted.');
 }

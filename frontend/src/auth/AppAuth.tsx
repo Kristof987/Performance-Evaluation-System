@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { useAuth0 } from '@auth0/auth0-react';
 import { fetchAuthMe, type AuthMe } from '../pages/login/auth-me';
 import { getSidebarUser, type SidebarUser } from '../pages/layout/sidebar-user';
+import type { AccessTokenGetter } from './authenticated-api';
 
 type LinkedUser = AuthMe & { employee: NonNullable<AuthMe['employee']> };
 
@@ -19,6 +20,7 @@ type AppAuthContextValue = {
   clearDevelopmentUser: () => void;
   signOut: () => void;
   retryAuth0: () => void;
+  getAccessToken?: AccessTokenGetter;
 };
 
 const AppAuthContext = createContext<AppAuthContextValue | null>(null);
@@ -90,7 +92,8 @@ export function Auth0AppAuthProvider({ children }: { children: ReactNode }) {
         let next: AppAuthState;
         if (result.status === 'unlinked') next = { status: 'unlinked', mode: 'auth0' };
         else if (result.status === 'forbidden') next = { status: 'error', mode: 'auth0', reason: 'forbidden' };
-        else if (result.user.is_active && result.user.employee?.is_active && result.user.system_role_name) {
+        else if (result.user.is_active && result.user.employee?.is_active
+          && result.user.system_role_name && Array.isArray(result.user.permissions)) {
           next = { status: 'authenticated', mode: 'auth0', user: { ...result.user, employee: result.user.employee } };
         } else next = { status: 'error', mode: 'auth0', reason: 'forbidden' };
         setResolution({ subject: user?.sub, result: next });
@@ -133,5 +136,6 @@ export function Auth0AppAuthProvider({ children }: { children: ReactNode }) {
     clearDevelopmentUser,
     signOut,
     retryAuth0,
+    getAccessToken: getAccessTokenSilently,
   }}>{children}</AppAuthContext.Provider>;
 }

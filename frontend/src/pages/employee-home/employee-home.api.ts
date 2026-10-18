@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../../config';
+import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 import type { FormQuestion } from '../forms/forms.api';
 
 type AssignedEvaluationResponse = {
@@ -145,8 +145,8 @@ function mapEmployeeDashboard(dashboard: EmployeeDashboardResponse): EmployeeDas
   };
 }
 
-async function requestApi<T>(path: string, options: RequestInit, fallback: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
+async function requestApi<T>(getAccessToken: AccessTokenGetter, path: string, options: RequestInit, fallback: string): Promise<T> {
+  const response = await authenticatedApiFetch(getAccessToken, path, options);
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const detail =
@@ -157,10 +157,12 @@ async function requestApi<T>(path: string, options: RequestInit, fallback: strin
 }
 
 export async function fetchAssignedEvaluations(
+  getAccessToken: AccessTokenGetter,
   userId: number,
   signal: AbortSignal,
 ): Promise<AssignedEvaluation[]> {
   const evaluations = await requestApi<AssignedEvaluationResponse[]>(
+    getAccessToken,
     `/users/${userId}/assigned-evaluations`,
     { signal },
     'Assigned evaluations could not be loaded.',
@@ -169,11 +171,13 @@ export async function fetchAssignedEvaluations(
 }
 
 export async function fetchEmployeeDashboard(
+  getAccessToken: AccessTokenGetter,
   userId: number,
   signal: AbortSignal,
 ): Promise<EmployeeDashboard> {
   return mapEmployeeDashboard(
     await requestApi<EmployeeDashboardResponse>(
+      getAccessToken,
       `/users/${userId}/employee-dashboard`,
       { signal },
       'Employee dashboard could not be loaded.',
@@ -181,15 +185,17 @@ export async function fetchEmployeeDashboard(
   );
 }
 
-export async function fetchAssignedQuestionnaire(userId: number, evaluationId: number, signal: AbortSignal): Promise<AssignedQuestionnaire> {
+export async function fetchAssignedQuestionnaire(getAccessToken: AccessTokenGetter, userId: number, evaluationId: number, signal: AbortSignal): Promise<AssignedQuestionnaire> {
   const result = await requestApi<{ evaluation: AssignedEvaluationResponse; questions: Array<IssuedBlock | FormQuestion>; answers: QuestionnaireAnswer[] }>(
+    getAccessToken,
     `/users/${userId}/assigned-evaluations/${evaluationId}`, { signal }, 'Questionnaire could not be loaded.',
   );
   return { evaluation: mapAssignedEvaluation(result.evaluation), blocks: mapIssuedBlocks(result.questions), answers: result.answers };
 }
 
-export async function saveAssignedQuestionnaire(userId: number, evaluationId: number, answers: QuestionnaireAnswer[], submit: boolean): Promise<AssignedQuestionnaire> {
+export async function saveAssignedQuestionnaire(getAccessToken: AccessTokenGetter, userId: number, evaluationId: number, answers: QuestionnaireAnswer[], submit: boolean): Promise<AssignedQuestionnaire> {
   const result = await requestApi<{ evaluation: AssignedEvaluationResponse; questions: Array<IssuedBlock | FormQuestion>; answers: QuestionnaireAnswer[] }>(
+    getAccessToken,
     `/users/${userId}/assigned-evaluations/${evaluationId}`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers, submit }) },
     'Questionnaire could not be saved.',

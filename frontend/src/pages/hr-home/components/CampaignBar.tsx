@@ -12,6 +12,7 @@ type CampaignBarProps = {
   selectedCampaign: Campaign | null;
   onSelectCampaign: (campaignId: number) => void;
   onCreateCampaign: () => void;
+  canManageCampaigns: boolean;
   onViewCampaignDetails: () => void;
 };
 
@@ -22,6 +23,7 @@ function CampaignBar({
   selectedCampaign,
   onSelectCampaign,
   onCreateCampaign,
+  canManageCampaigns,
   onViewCampaignDetails,
 }: CampaignBarProps) {
   const [isCampaignListOpen, setIsCampaignListOpen] = useState(false);
@@ -43,7 +45,7 @@ function CampaignBar({
         <div>
           <div className="empty-campaign-title">Dashboard is unavailable</div>
           <div className="empty-campaign-text">
-            Refresh the page after the backend connection is restored.
+            {error}
           </div>
         </div>
       </div>
@@ -56,17 +58,16 @@ function CampaignBar({
         <div>
           <div className="empty-campaign-title">No campaigns yet</div>
           <div className="empty-campaign-text">
-            Create your first campaign to start collecting performance
-            feedback.
+            {canManageCampaigns ? 'Create your first campaign to start collecting performance feedback.' : 'No campaigns are available yet.'}
           </div>
         </div>
-        <button
+        {canManageCampaigns && <button
           type="button"
           className="btn btn-primary empty-campaign-button"
           onClick={onCreateCampaign}
         >
           Create campaign
-        </button>
+        </button>}
       </div>
     );
   }

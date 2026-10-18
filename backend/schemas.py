@@ -193,6 +193,7 @@ class AuthMeResponse(BaseModel):
     email: EmailStr
     system_role_id: int
     system_role_name: str
+    permissions: list[str]
     is_active: bool
     employee: AuthEmployeeResponse | None
 
@@ -333,7 +334,7 @@ class CampaignCreate(BaseModel):
     end_date: date | None = None
     is_active: bool = True
     comment: str | None = None
-    created_by: int
+    created_by: int | None = None
 
 
 class CampaignUpdate(BaseModel):

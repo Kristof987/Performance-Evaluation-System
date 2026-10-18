@@ -6,6 +6,7 @@ import EmployeeOverview from './components/EmployeeOverview';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsLayout from './ReportsLayout';
 import type { EmployeeReportDetail, EmployeeReportRow, EmployeeReportsOverview } from './types/reports.types';
+import type { AccessTokenGetter } from '../../auth/authenticated-api';
 
 function formatScore(value: number | null) {
   if (value === null) return '—';
@@ -24,7 +25,7 @@ export function EmployeeReportsPage() {
   return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{(layout) => <EmployeeReportsContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layout} />}</ReportsLayout>;
 }
 
-function EmployeeReportsContent({ selectedCampaignId, validCampaignId, requesterUserId, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; requesterUserId: number | null; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
+function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccessToken, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; getAccessToken: AccessTokenGetter | undefined; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
   const [data, setData] = useState<EmployeeReportsOverview | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
@@ -34,15 +35,15 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, requester
   const [sort, setSort] = useState('name');
 
   useEffect(() => {
-    if (!validCampaignId || requesterUserId === null) return undefined;
+    if (!validCampaignId || !getAccessToken) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
-    fetchEmployeeReportsOverview(selectedCampaignId, requesterUserId, controller.signal)
+    fetchEmployeeReportsOverview(getAccessToken, selectedCampaignId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Employee reports could not be loaded.'); });
     return () => controller.abort();
-  }, [requesterUserId, reload, selectedCampaignId, validCampaignId]);
+  }, [getAccessToken, reload, selectedCampaignId, validCampaignId]);
 
   const roleOptions = useMemo(() => Array.from(new Set((data?.employees ?? []).map((employee) => employee.company_role))).sort(), [data]);
   const groupOptions = useMemo(() => Array.from(new Set((data?.employees ?? []).flatMap((employee) => employee.groups))).sort(), [data]);
@@ -85,25 +86,25 @@ export function EmployeeReportDetailPage() {
   const { campaignId, employeeId } = useParams();
   const selectedCampaignId = Number(campaignId);
   const selectedEmployeeId = Number(employeeId);
-  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ requesterUserId }) => <EmployeeReportDetailContent campaignId={selectedCampaignId} employeeId={selectedEmployeeId} requesterUserId={requesterUserId} />}</ReportsLayout>;
+  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ getAccessToken }) => <EmployeeReportDetailContent campaignId={selectedCampaignId} employeeId={selectedEmployeeId} getAccessToken={getAccessToken} />}</ReportsLayout>;
 }
 
-function EmployeeReportDetailContent({ campaignId, employeeId, requesterUserId }: { campaignId: number; employeeId: number; requesterUserId: number | null }) {
+function EmployeeReportDetailContent({ campaignId, employeeId, getAccessToken }: { campaignId: number; employeeId: number; getAccessToken: AccessTokenGetter | undefined }) {
   const navigate = useNavigate();
   const [data, setData] = useState<EmployeeReportDetail | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    if (requesterUserId === null) return undefined;
+    if (!getAccessToken) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
-    fetchEmployeeReportDetail(campaignId, employeeId, requesterUserId, controller.signal)
+    fetchEmployeeReportDetail(getAccessToken, campaignId, employeeId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Employee report could not be loaded.'); });
     return () => controller.abort();
-  }, [campaignId, employeeId, requesterUserId, reload]);
+  }, [campaignId, employeeId, getAccessToken, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.employee.id !== employeeId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
   return <EmployeeReportDetailView data={data} onBack={() => navigate(`/reports/campaigns/${campaignId}/employees`)} />;

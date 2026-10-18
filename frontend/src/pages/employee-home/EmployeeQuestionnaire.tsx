@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import AppLayout from '../layout/AppLayout';
-import { formatUserName, getSidebarUser } from '../layout/sidebar-user';
+import { formatUserName } from '../layout/sidebar-user';
+import { useAppAuth } from '../../auth/AppAuth';
+import { ApiAccessError } from '../../auth/authenticated-api';
 import type { FormQuestion } from '../forms/forms.api';
 import { ChoiceRows, RatingChoices } from '../forms/QuestionnaireChoices';
 import { fetchAssignedQuestionnaire, issuedQuestions, saveAssignedQuestionnaire, type AssignedQuestionnaire, type QuestionnaireAnswer } from './employee-home.api';
@@ -78,7 +80,10 @@ export default function EmployeeQuestionnaire() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const userId = getSidebarUser()?.id;
+  const { state, getAccessToken, retryAuth0 } = useAppAuth();
+  const userId = state.status === 'authenticated' && state.mode === 'auth0' ? state.user.id : undefined;
+  const canSubmit = state.status === 'authenticated' && state.mode === 'auth0'
+    && state.user.permissions.includes('evaluations.submit');
   const evaluationId = Number(id);
   const [questionnaire, setQuestionnaire] = useState<AssignedQuestionnaire | null>(null);
   const [answers, setAnswers] = useState<QuestionnaireAnswer[]>([]);
@@ -94,13 +99,16 @@ export default function EmployeeQuestionnaire() {
   const backPath = fromHr ? '/my-evaluations' : '/employee-home';
 
   useEffect(() => {
-    if (userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0) return;
+    if (userId === undefined || !getAccessToken || !Number.isSafeInteger(evaluationId) || evaluationId <= 0) return;
     const controller = new AbortController();
-    fetchAssignedQuestionnaire(userId, evaluationId, controller.signal)
+    fetchAssignedQuestionnaire(getAccessToken, userId, evaluationId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) { setQuestionnaire(result); setAnswers(result.answers); } })
-      .catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Questionnaire could not be loaded.'); });
+      .catch((cause: unknown) => {
+        if (cause instanceof ApiAccessError && cause.status === 401) retryAuth0();
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Questionnaire could not be loaded.');
+      });
     return () => controller.abort();
-  }, [userId, evaluationId]);
+  }, [userId, evaluationId, getAccessToken]);
 
   useEffect(() => {
     if (!confirmOpen) return;
@@ -131,7 +139,7 @@ export default function EmployeeQuestionnaire() {
   }
 
   async function save(submit: boolean) {
-    if (!questionnaire || userId === undefined || saving) return;
+    if (!questionnaire || userId === undefined || !getAccessToken || !canSubmit || saving) return;
     setSubmitAttempted(submit);
     if (submit && (!questions.length || questions.some((question) => question.required && !isQuestionAnswered(question, answers.find((answer) => answer.question_id === question.id)?.value)))) {
       setError('Answer all required questions before submitting.');
@@ -140,7 +148,7 @@ export default function EmployeeQuestionnaire() {
     setSaving(true);
     setError('');
     try {
-      const saved = await saveAssignedQuestionnaire(userId, evaluationId, answers, submit);
+      const saved = await saveAssignedQuestionnaire(getAccessToken, userId, evaluationId, answers, submit);
       setQuestionnaire(saved);
       setAnswers(saved.answers);
       setDirty(false);
@@ -148,6 +156,7 @@ export default function EmployeeQuestionnaire() {
       if (submit) setConfirmOpen(false);
       if (submit) navigate(backPath);
     } catch (cause) {
+      if (cause instanceof ApiAccessError && cause.status === 401) retryAuth0();
       setSaveState('failed');
       setError(cause instanceof Error ? cause.message : 'Questionnaire could not be saved.');
     } finally {
@@ -156,7 +165,7 @@ export default function EmployeeQuestionnaire() {
   }
 
   const available = questionnaire !== null && campaignStatus(questionnaire.evaluation) === 'Ongoing';
-  const readOnly = questionnaire?.evaluation.finishDate !== null || !available;
+  const readOnly = !canSubmit || questionnaire?.evaluation.finishDate !== null || !available;
   const answeredCount = questions.filter((question) => isQuestionAnswered(question, answers.find((answer) => answer.question_id === question.id)?.value)).length;
   const questionCount = questions.length;
   const progress = questionCount === 0 ? 0 : Math.round((answeredCount / questionCount) * 100);

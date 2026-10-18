@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useAppAuth } from '../../../auth/AppAuth';
+import { ApiAccessError } from '../../../auth/authenticated-api';
 
 import { fetchDashboard } from '../services/dashboardService';
 import type {
@@ -9,6 +11,7 @@ import type {
 } from '../hrHome.types';
 
 export function useHrDashboard() {
+  const { getAccessToken, retryAuth0 } = useAppAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(
@@ -26,14 +29,23 @@ export function useHrDashboard() {
     campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
 
   useEffect(() => {
-    loadDashboard();
-  }, []);
+    if (!getAccessToken) {
+      setError('Auth0 sign-in is required to view the Dashboard.');
+      setIsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    void loadDashboard(undefined, controller.signal);
+    return () => controller.abort();
+  }, [getAccessToken]);
 
-  async function loadDashboard(campaignId?: number) {
+  async function loadDashboard(campaignId?: number, signal?: AbortSignal) {
+    if (!getAccessToken) return;
     setIsLoading(true);
 
     try {
-      const dashboard = await fetchDashboard(campaignId);
+      const dashboard = await fetchDashboard(getAccessToken, campaignId, signal);
+      if (signal?.aborted) return;
       setCampaigns(dashboard.campaigns);
       setCurrentDate(dashboard.current_date);
       setSelectedCampaignId(dashboard.selected_campaign_id);
@@ -42,10 +54,14 @@ export function useHrDashboard() {
       setUpcomingDeadlines(dashboard.upcoming_deadlines ?? []);
       setError('');
     } catch (loadError) {
-      console.log('Dashboard could not be loaded', loadError);
-      setError('Dashboard could not be loaded.');
+      if (signal?.aborted) return;
+      if (loadError instanceof ApiAccessError) retryAuth0();
+      setMetrics(null);
+      setParticipants([]);
+      setUpcomingDeadlines([]);
+      setError(loadError instanceof ApiAccessError ? loadError.message : 'Dashboard could not be loaded.');
     } finally {
-      setIsLoading(false);
+      if (!signal?.aborted) setIsLoading(false);
     }
   }
 

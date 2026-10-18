@@ -26,20 +26,20 @@ def status_key(status_name: str | None, finish_date: date | None) -> str:
     return "not_started"
 
 
-def require_reports_access(campaign_id: int | None, requester_user_id: int, db: Session) -> models.Campaign | None:
-    user_role = (
-        db.query(models.User, models.CompanyRole.name.label("role_name"), models.SystemRole.name.label("system_role_name"))
-        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
-        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
+def require_reports_access(campaign_id: int | None, actor: models.User, db: Session) -> models.Campaign | None:
+    grant = (
+        db.query(models.User.id)
         .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
-        .filter(models.User.id == requester_user_id)
+        .join(models.system_role_permissions,
+              models.system_role_permissions.c.system_role_id == models.SystemRole.id)
+        .join(models.SystemPermission,
+              models.SystemPermission.id == models.system_role_permissions.c.permission_id)
+        .filter(models.User.id == actor.id)
         .filter(models.User.is_active.is_(True))
+        .filter(models.SystemPermission.name == "reports.read")
         .first()
     )
-    if user_role is None:
-        raise HTTPException(status_code=403, detail="User is not authorized to view reports")
-    _, role_name, system_role_name = user_role
-    if not any(role and (role.strip().lower() == "hr" or "manager" in role.strip().lower()) for role in (role_name, system_role_name)):
+    if grant is None:
         raise HTTPException(status_code=403, detail="User is not authorized to view reports")
 
     if campaign_id is None:
@@ -50,8 +50,8 @@ def require_reports_access(campaign_id: int | None, requester_user_id: int, db: 
     return campaign
 
 
-def list_report_campaigns(requester_user_id: int, db: Session) -> list[dict[str, Any]]:
-    require_reports_access(None, requester_user_id, db)
+def list_report_campaigns(actor: models.User, db: Session) -> list[dict[str, Any]]:
+    require_reports_access(None, actor, db)
     today = business_today()
     return [
         {
@@ -147,10 +147,10 @@ def _section_score_rows(aggregate, scored, names: dict[int, str]):
     return sorted(rows, key=lambda item: (item["name"].lower(), item["id"]))
 
 
-def build_campaign_report_overview(campaign_id: int, requester_user_id: int, db: Session) -> dict[str, Any]:
+def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     import section_scoring_service
 
-    campaign = require_reports_access(campaign_id, requester_user_id, db)
+    campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
 
     rows = campaign_report_rows(campaign.id, db)
@@ -241,10 +241,10 @@ def build_campaign_report_overview(campaign_id: int, requester_user_id: int, db:
     }
 
 
-def build_groups_overview(campaign_id: int, requester_user_id: int, db: Session) -> dict[str, Any]:
+def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     import section_scoring_service
 
-    campaign = require_reports_access(campaign_id, requester_user_id, db)
+    campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
     rows = campaign_report_rows(campaign.id, db)
     completed_rows = [row for row in rows if status_key(row[2], row[0].finish_date) == "completed"]
@@ -293,10 +293,10 @@ def build_groups_overview(campaign_id: int, requester_user_id: int, db: Session)
     }
 
 
-def build_group_detail(campaign_id: int, group_id: int, requester_user_id: int, db: Session) -> dict[str, Any]:
+def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     import section_scoring_service
 
-    overview = build_groups_overview(campaign_id, requester_user_id, db)
+    overview = build_groups_overview(campaign_id, actor, db)
     group_summary = next((group for group in overview["groups"] if group["group_id"] == group_id), None)
     if group_summary is None:
         raise HTTPException(status_code=404, detail="Group report not found")
@@ -327,6 +327,9 @@ def build_group_detail(campaign_id: int, group_id: int, requester_user_id: int, 
         role_rows = [row for row in completed_rows if row[0].evaluatee_id in role_member_ids]
         role_item["completed_evaluations_received"] = len({row[0].id for row in role_rows})
         role_result = role_results.get(role_item["role_id"])
+        if role_result:
+            role_scored = [item for item in group_scored if role_map.get(item.evaluatee_id) == role_item["role_id"]]
+            role_result = section_scoring_service.suppress_small_complements(role_result, scored, role_scored)
         role_visible = role_result if all(section.availability != "suppressed" for section in group_result.sections.values()) else None
         role_item["average_score"] = role_visible.overall.score if role_visible else None
         role_item["score_availability"] = role_visible.overall.availability if role_visible else "suppressed" if role_result else "no_data"
@@ -367,10 +370,10 @@ def normalize_perspective(perspective: str) -> str:
     return "evaluator" if perspective == "evaluator" else "evaluatee"
 
 
-def build_roles_overview(campaign_id: int, requester_user_id: int, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
+def build_roles_overview(campaign_id: int, actor: models.User, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
     import section_scoring_service
 
-    campaign = require_reports_access(campaign_id, requester_user_id, db)
+    campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
     perspective = normalize_perspective(perspective)
     rows = campaign_report_rows(campaign.id, db)
@@ -424,10 +427,10 @@ def build_roles_overview(campaign_id: int, requester_user_id: int, db: Session, 
     }
 
 
-def build_role_detail(campaign_id: int, role_id: int, requester_user_id: int, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
+def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
     import section_scoring_service
 
-    overview = build_roles_overview(campaign_id, requester_user_id, db, perspective)
+    overview = build_roles_overview(campaign_id, actor, db, perspective)
     role_summary = next((role for role in overview["roles"] if role["role_id"] == role_id), None)
     if role_summary is None:
         raise HTTPException(status_code=404, detail="Role report not found")
@@ -515,10 +518,10 @@ def employee_base_context(campaign_id: int, rows: list[Any], db: Session) -> tup
     return employees_by_id, group_names_by_employee, participant_ids
 
 
-def build_employee_reports_overview(campaign_id: int, requester_user_id: int, db: Session) -> dict[str, Any]:
+def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     import section_scoring_service
 
-    campaign = require_reports_access(campaign_id, requester_user_id, db)
+    campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
     rows = campaign_report_rows(campaign.id, db)
     employees_by_id, group_names_by_employee, participant_ids = employee_base_context(campaign.id, rows, db)
@@ -593,15 +596,17 @@ def build_section_self_peer_comparison(employee_result, names: dict[int, str]) -
     return sorted(comparisons, key=lambda item: (item["section_name"].lower(), item["section_id"]))
 
 
-def build_employee_history(employee_id: int, requester_user_id: int, db: Session) -> list[dict[str, Any]]:
+def build_employee_history(employee_id: int, actor: models.User, db: Session) -> list[dict[str, Any]]:
     import section_scoring_service
 
     campaigns = db.query(models.Campaign).order_by(models.Campaign.start_date.asc(), models.Campaign.id.asc()).all()
     series_by_section: dict[int | None, dict[str, Any]] = {}
     for campaign in campaigns:
         try:
-            require_reports_access(campaign.id, requester_user_id, db)
-        except HTTPException:
+            require_reports_access(campaign.id, actor, db)
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
             continue
         rows = campaign_report_rows(campaign.id, db)
         scored, names = _section_report_data(rows, db)
@@ -625,10 +630,10 @@ def build_employee_history(employee_id: int, requester_user_id: int, db: Session
     return sorted((series for series in series_by_section.values() if len(series["points"]) >= 2), key=lambda series: (series["section_id"] is not None, series["section_name"].lower(), series["section_id"] or 0))
 
 
-def build_employee_report_detail(campaign_id: int, employee_id: int, requester_user_id: int, db: Session) -> dict[str, Any]:
+def build_employee_report_detail(campaign_id: int, employee_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     import section_scoring_service
 
-    campaign = require_reports_access(campaign_id, requester_user_id, db)
+    campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
     rows = campaign_report_rows(campaign.id, db)
     employees_by_id, group_names_by_employee, participant_ids = employee_base_context(campaign.id, rows, db)
@@ -686,6 +691,6 @@ def build_employee_report_detail(campaign_id: int, employee_id: int, requester_u
         "section_availability": availability,
         "self_peer_comparison": build_section_self_peer_comparison(employee_result, names),
         "coverage": {"peer_assigned": len({row[0].id for row in peer_rows}), "peer_completed": len({row[0].id for row in peer_completed_rows}), "peer_outstanding": max(0, len({row[0].id for row in peer_rows}) - len({row[0].id for row in peer_completed_rows})), "self_evaluation": self_status, "campaign_end_date": campaign.end_date, "distinct_peer_evaluators": distinct_peer_evaluators if distinct_peer_evaluators >= MIN_INDIVIDUAL_PEER_REVIEWERS else None},
-        "history": build_employee_history(employee_id, requester_user_id, db),
+        "history": build_employee_history(employee_id, actor, db),
         "notes": {"scoring": "Peer and self Section scores use submitted schema-v2 snapshots and normalized 1-5 ratings; Overall equally weights reportable Sections.", "individual_privacy": f"Individual peer Section scores require at least {MIN_INDIVIDUAL_PEER_REVIEWERS} distinct peer evaluators; suppressed results never enter Overall or Self comparisons.", "raw_feedback": "Raw written feedback and reviewer identities are not returned by Employee Reports."},
     }

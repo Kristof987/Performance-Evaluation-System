@@ -55,8 +55,8 @@ export function getDashboardPath() {
   return isHrOrManagerRole(user?.role_name ?? null) ? '/hr-home' : '/employee-home';
 }
 
-export function getSystemDashboardPath(systemRoleName: string) {
-  return isHrOrManagerRole(systemRoleName) ? '/hr-home' : '/employee-home';
+export function getAuthenticatedDashboardPath(permissions: string[]) {
+  return permissions.includes('campaigns.read') ? '/hr-home' : '/employee-home';
 }
 
 export function getUserDisplayName(user: SidebarUser) {

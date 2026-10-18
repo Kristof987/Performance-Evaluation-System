@@ -6,6 +6,7 @@ export type AuthMe = {
   email: string;
   system_role_id: number;
   system_role_name: string;
+  permissions: string[];
   is_active: boolean;
   employee: {
     id: number;

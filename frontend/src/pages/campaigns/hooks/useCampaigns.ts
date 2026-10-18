@@ -9,30 +9,16 @@ import type {
 import { emptyCampaignForm } from '../campaign.utils';
 import { createCampaign, fetchCampaigns } from '../campaign.api';
 import { formatUserName } from '../../layout/sidebar-user';
-
-function getCurrentUser(): { id: number; username: string } | null {
-  try {
-    const user: unknown = JSON.parse(
-      sessionStorage.getItem('loggedInUser') ?? 'null',
-    );
-    if (
-      user &&
-      typeof user === 'object' &&
-      'id' in user &&
-      typeof user.id === 'number' &&
-      'username' in user &&
-      typeof user.username === 'string'
-    ) {
-      return { id: user.id, username: user.username };
-    }
-  } catch {
-    /* Invalid stored login is treated as signed out. */
-  }
-  return null;
-}
+import { useAuth0 } from '@auth0/auth0-react';
+import { useAppAuth } from '../../../auth/AppAuth';
+import { ApiAccessError } from '../../../auth/authenticated-api';
 
 export function useCampaigns() {
   const navigate = useNavigate();
+  const { getAccessTokenSilently } = useAuth0();
+  const { state, retryAuth0 } = useAppAuth();
+  const user = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
+  const canManageCampaigns = user?.permissions.includes('campaigns.manage') ?? false;
   const [campaignList, setCampaignList] = useState<Campaign[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] =
@@ -45,7 +31,6 @@ export function useCampaigns() {
   const [successMessage, setSuccessMessage] = useState('');
   const [isSavingCampaign, setIsSavingCampaign] = useState(false);
   const saving = useRef(false);
-  const currentUser = getCurrentUser();
   const filteredCampaigns = campaignList.filter(
     (campaign) =>
       campaign.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) &&
@@ -54,25 +39,27 @@ export function useCampaigns() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchCampaigns(controller.signal)
+    fetchCampaigns(getAccessTokenSilently, controller.signal)
       .then((campaigns) => {
         if (!controller.signal.aborted) setCampaignList(campaigns);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (error instanceof ApiAccessError) retryAuth0();
         if (!controller.signal.aborted)
-          setCampaignsError('Campaigns could not be loaded.');
+          setCampaignsError(error instanceof ApiAccessError ? error.message : 'Campaigns could not be loaded.');
       })
       .finally(() => {
         if (!controller.signal.aborted) setIsCampaignsLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [getAccessTokenSilently]);
 
   const updateForm: UpdateCampaignField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
     setCreateMessage('');
   };
   function openCreate() {
+    if (!canManageCampaigns) return;
     setSuccessMessage('');
     setCreateMessage('');
     setIsCreateOpen(true);
@@ -85,10 +72,8 @@ export function useCampaigns() {
   }
   async function handleCreateCampaign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving.current) return;
-    const user = getCurrentUser();
-    if (!user) {
-      setCreateMessage('Please sign in before creating a campaign.');
+    if (saving.current || !canManageCampaigns) {
+      setCreateMessage('You do not have permission to create campaigns.');
       return;
     }
     if (form.endDate !== '' && form.endDate < form.startDate) {
@@ -99,13 +84,14 @@ export function useCampaigns() {
     setIsSavingCampaign(true);
     setCreateMessage('');
     try {
-      const saved = await createCampaign(form, user.id);
+      const saved = await createCampaign(getAccessTokenSilently, form);
       setCampaignList((current) => [saved, ...current]);
        setIsCreateOpen(false);
        setForm(emptyCampaignForm);
        setSuccessMessage('Campaign saved successfully.');
        navigate(`/campaigns/${saved.id}`);
     } catch (error) {
+      if (error instanceof ApiAccessError) retryAuth0();
       setCreateMessage(
         error instanceof Error ? error.message : 'Campaign could not be saved.',
       );
@@ -128,7 +114,8 @@ export function useCampaigns() {
     createMessage,
     successMessage,
     isSavingCampaign,
-    createdByName: currentUser ? formatUserName(currentUser.username) : 'User',
+    canManageCampaigns,
+    createdByName: user ? formatUserName(user.username) : 'User',
     updateForm,
     openCreate,
     closeCreate,

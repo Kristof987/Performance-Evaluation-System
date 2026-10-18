@@ -1,4 +1,7 @@
-import { getSidebarUser, getUserInitials } from '../layout/sidebar-user';
+import { getUserInitials } from '../layout/sidebar-user';
+import { useAuth0 } from '@auth0/auth0-react';
+import { useAppAuth } from '../../auth/AppAuth';
+import { ApiAccessError } from '../../auth/authenticated-api';
 import AppLayout from '../layout/AppLayout';
 import Pagination from '../../components/Pagination';
 import {
@@ -111,10 +114,14 @@ function PeopleHeader({
   activeTab,
   onAddEmployee,
   onAddGroup,
+  canAddEmployee,
+  canAddGroup,
 }: {
   activeTab: PeopleTab;
   onAddEmployee: () => void;
   onAddGroup: () => void;
+  canAddEmployee: boolean;
+  canAddGroup: boolean;
 }) {
   return (
     <section className="people-header">
@@ -122,13 +129,13 @@ function PeopleHeader({
         <h1>People</h1>
         <p>Manage employees and groups in your organization.</p>
       </div>
-      <button
+      {(activeTab === 'employees' ? canAddEmployee : canAddGroup) && <button
         className="btn btn-primary people-button"
         type="button"
         onClick={activeTab === 'employees' ? onAddEmployee : onAddGroup}
       >
         {activeTab === 'employees' ? 'Add employee' : 'Add group'}
-      </button>
+      </button>}
     </section>
   );
 }
@@ -752,7 +759,18 @@ function ImportPanel({
 }
 
 export default function People() {
-  const currentUser = getSidebarUser();
+  const { getAccessTokenSilently } = useAuth0();
+  const { state, retryAuth0 } = useAppAuth();
+  const auth0User = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
+  const permissions = auth0User?.permissions ?? [];
+  const canManageGroups = permissions.includes('groups.manage');
+  const canManageEmployees = permissions.includes('employees.manage') && canManageGroups;
+  const canImportEmployees = canManageEmployees && permissions.includes('roles.assign');
+  const currentUser = auth0User;
+
+  function handleAccessError(error: unknown) {
+    if (error instanceof ApiAccessError) retryAuth0();
+  }
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [isPeopleLoading, setIsPeopleLoading] = useState(true);
@@ -832,20 +850,21 @@ export default function People() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchPeople(controller.signal)
+    fetchPeople(getAccessTokenSilently, controller.signal)
       .then((people) => {
         if (controller.signal.aborted) return;
         applyPeopleData(people);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        handleAccessError(error);
         if (!controller.signal.aborted)
-          setPeopleError('People data could not be loaded.');
+          setPeopleError(error instanceof ApiAccessError ? error.message : 'People data could not be loaded.');
       })
       .finally(() => {
         if (!controller.signal.aborted) setIsPeopleLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [getAccessTokenSilently]);
 
   const filteredEmployees = employees.filter((employee) => {
     const search = employeeSearch.trim().toLowerCase();
@@ -1043,7 +1062,7 @@ export default function People() {
 
   async function handleSaveGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSavingGroup) return;
+    if (isSavingGroup || !canManageGroups) return;
     if (groupForm.name.trim() === '') {
       setGroupFormMessage('Group name is required.');
       return;
@@ -1057,11 +1076,11 @@ export default function People() {
         description: groupForm.description.trim(),
       };
       if (editingGroupId === null) {
-        await createGroup(payload);
+        await createGroup(getAccessTokenSilently, payload);
       } else {
-        await updateGroup(editingGroupId, payload);
+        await updateGroup(getAccessTokenSilently, editingGroupId, payload);
       }
-      const people = await fetchPeople(new AbortController().signal);
+      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
       applyPeopleData(people);
       setGroupPage(1);
       setIsGroupsModalOpen(false);
@@ -1070,6 +1089,7 @@ export default function People() {
       setEditingGroupId(null);
       setGroupForm(emptyGroupForm);
     } catch (error) {
+      handleAccessError(error);
       setGroupFormMessage(
         error instanceof Error ? error.message : 'Group could not be saved.',
       );
@@ -1079,7 +1099,7 @@ export default function People() {
   }
 
   async function handleAddGroupMember(groupId: number, employeeId: string) {
-    if (isAddingGroupMember) return;
+    if (isAddingGroupMember || !canManageGroups) return;
     if (employeeId === '') {
       setGroupMemberMessage('Select an employee first.');
       return;
@@ -1088,12 +1108,13 @@ export default function People() {
     setIsAddingGroupMember(true);
     setGroupMemberMessage('');
     try {
-      await addGroupMember(groupId, Number(employeeId));
-      const people = await fetchPeople(new AbortController().signal);
+      await addGroupMember(getAccessTokenSilently, groupId, Number(employeeId));
+      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
       applyPeopleData(people);
       setSidePanelEmployeeId('');
       setGroupMemberSearch('');
     } catch (error) {
+      handleAccessError(error);
       setGroupMemberMessage(
         error instanceof Error ? error.message : 'Employee could not be added to the group.',
       );
@@ -1115,21 +1136,23 @@ export default function People() {
   }
 
   async function confirmRemoveGroupMember() {
-    if (removingGroupMemberId !== null || pendingMemberRemoval === null) return;
+    if (removingGroupMemberId !== null || pendingMemberRemoval === null || !canManageGroups) return;
 
     setRemovingGroupMemberId(pendingMemberRemoval.employeeId);
     setGroupMemberMessage('');
     try {
       await removeGroupMember(
+        getAccessTokenSilently,
         pendingMemberRemoval.groupId,
         pendingMemberRemoval.employeeId,
       );
-      const people = await fetchPeople(new AbortController().signal);
+      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
       applyPeopleData(people);
       setSidePanelEmployeeId('');
       setGroupMemberSearch('');
       setPendingMemberRemoval(null);
     } catch (error) {
+      handleAccessError(error);
       setGroupMemberMessage(
         error instanceof Error
           ? error.message
@@ -1141,7 +1164,7 @@ export default function People() {
   }
 
   async function handleImportGroups() {
-    if (isImportingGroups) return;
+    if (isImportingGroups || !canManageGroups) return;
     if (groupImportFile === null) {
       setGroupImportMessage('Please choose an Excel file first.');
       setGroupImportErrors([]);
@@ -1157,13 +1180,13 @@ export default function People() {
     setGroupImportMessage('');
     setGroupImportErrors([]);
     try {
-      const result = await importGroups(groupImportFile);
+      const result = await importGroups(getAccessTokenSilently, groupImportFile);
       if (result.errors.length > 0) {
         setGroupImportErrors(result.errors);
         setGroupImportMessage('Groups were not imported. Fix the errors below and upload again.');
         return;
       }
-      const people = await fetchPeople(new AbortController().signal);
+      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
       applyPeopleData(people);
       setGroupImportFile(null);
       setGroupImportMessage(
@@ -1171,6 +1194,7 @@ export default function People() {
       );
       setGroupPage(1);
     } catch (error) {
+      handleAccessError(error);
       setGroupImportMessage(
         error instanceof Error ? error.message : 'Groups could not be imported.',
       );
@@ -1240,7 +1264,7 @@ export default function People() {
 
   async function handleCreateEmployee(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSavingEmployee) return;
+    if (isSavingEmployee || !canManageEmployees) return;
     const validationErrors = validateEmployeeForm(employeeForm);
     setEmployeeFormErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
@@ -1258,11 +1282,11 @@ export default function People() {
         email: employeeForm.email.trim(),
       };
       if (editingEmployeeId === null) {
-        await createEmployee(payload);
+        await createEmployee(getAccessTokenSilently, payload);
       } else {
-        await updateEmployee(editingEmployeeId, payload);
+        await updateEmployee(getAccessTokenSilently, editingEmployeeId, payload);
       }
-      const people = await fetchPeople(new AbortController().signal);
+      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
       applyPeopleData(people);
       setEmployeePage(1);
       setEditingEmployeeId(null);
@@ -1270,6 +1294,7 @@ export default function People() {
       setEmployeeFormErrors({});
       setIsEmployeeModalOpen(false);
     } catch (error) {
+      handleAccessError(error);
       setEmployeeFormMessage(
         error instanceof Error ? error.message : 'Employee could not be saved.',
       );
@@ -1279,7 +1304,7 @@ export default function People() {
   }
 
   async function handleImportEmployees() {
-    if (isImportingEmployees) return;
+    if (isImportingEmployees || !canImportEmployees) return;
     if (employeeImportFile === null) {
       setEmployeeImportMessage('Please choose an Excel file first.');
       setEmployeeImportErrors([]);
@@ -1295,13 +1320,13 @@ export default function People() {
     setEmployeeImportMessage('');
     setEmployeeImportErrors([]);
     try {
-      const result = await importEmployees(employeeImportFile);
+      const result = await importEmployees(getAccessTokenSilently, employeeImportFile);
       if (result.errors.length > 0) {
         setEmployeeImportErrors(result.errors);
         setEmployeeImportMessage('Employees were not imported. Fix the errors below and upload again.');
         return;
       }
-      const people = await fetchPeople(new AbortController().signal);
+      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
       applyPeopleData(people);
       setEmployeeImportFile(null);
       setEmployeeImportMessage(
@@ -1309,6 +1334,7 @@ export default function People() {
       );
       setEmployeePage(1);
     } catch (error) {
+      handleAccessError(error);
       setEmployeeImportMessage(
         error instanceof Error ? error.message : 'Employees could not be imported.',
       );
@@ -1325,6 +1351,8 @@ export default function People() {
             activeTab={activePeopleTab}
             onAddEmployee={openAddEmployeeModal}
             onAddGroup={openAddGroupModal}
+            canAddEmployee={canManageEmployees}
+            canAddGroup={canManageGroups}
           />
 
           <PeopleTabs activeTab={activePeopleTab} onChange={handlePeopleTabChange} />
@@ -1460,7 +1488,7 @@ export default function People() {
                                 {getUserInitials(employee.name)}
                               </div>
                               <div>
-                                <div className="people-person-name"><strong>{employee.name}</strong>{currentUser !== null && ((currentUser.employee_id !== null && employee.id === currentUser.employee_id) || (employee.userId !== null && employee.userId === currentUser.id)) && <span className="badge badge-neutral people-you-badge">You</span>}</div>
+                                <div className="people-person-name"><strong>{employee.name}</strong>{currentUser !== null && ((employee.id === currentUser.employee.id) || (employee.userId !== null && employee.userId === currentUser.id)) && <span className="badge badge-neutral people-you-badge">You</span>}</div>
                                 <span>{employee.email}</span>
                               </div>
                             </div>
@@ -1492,6 +1520,7 @@ export default function People() {
                             </span>
                           </td>
                           <td>
+                            {canManageEmployees &&
                             <button
                               className="link people-link-button"
                               type="button"
@@ -1501,7 +1530,7 @@ export default function People() {
                               }}
                             >
                               Edit
-                            </button>
+                            </button>}
                           </td>
                         </tr>
                       ))}
@@ -1600,7 +1629,7 @@ export default function People() {
                           </td>
                           <td className="people-count-cell">{group.memberCount}</td>
                           <td>
-                            <button
+                            {canManageGroups && <button
                               className="link people-link-button"
                               type="button"
                               onClick={(event) => {
@@ -1609,7 +1638,7 @@ export default function People() {
                               }}
                             >
                               Edit
-                            </button>
+                            </button>}
                           </td>
                         </tr>
                       ))}
@@ -1678,13 +1707,13 @@ export default function People() {
               </div>
             </dl>
 
-            <button
+            {canManageEmployees && <button
               className="btn btn-secondary people-button people-drawer-action"
               type="button"
               onClick={() => openEditEmployeeModal(selectedEmployee)}
             >
               Edit employee
-            </button>
+            </button>}
           </div>
         )}
       </DetailDrawer>
@@ -1731,7 +1760,7 @@ export default function People() {
                           <span>{employee.role}</span>
                         </div>
                       </div>
-                      <button
+                      {canManageGroups && <button
                         className="link people-link-button people-remove-button"
                         type="button"
                         onClick={() => requestRemoveGroupMember(selectedGroup.id, employee.id)}
@@ -1739,7 +1768,7 @@ export default function People() {
                         aria-label={`Remove ${employee.name} from ${selectedGroup.name}`}
                       >
                         {removingGroupMemberId === employee.id ? 'Removing...' : 'Remove'}
-                      </button>
+                      </button>}
                     </div>
                   ))}
                 </div>
@@ -1748,7 +1777,7 @@ export default function People() {
               )}
             </section>
 
-            <section className="people-drawer-section people-member-add">
+            {canManageGroups && <section className="people-drawer-section people-member-add">
               <div>
                 <strong>Add member</strong>
                 <span>Select an employee who is not already in this group.</span>
@@ -1776,15 +1805,15 @@ export default function People() {
                   {groupMemberMessage}
                 </div>
               )}
-            </section>
+            </section>}
 
-            <button
+            {canManageGroups && <button
               className="btn btn-secondary people-button people-drawer-action"
               type="button"
               onClick={() => openEditGroupModal(selectedGroup)}
             >
               Edit group details
-            </button>
+            </button>}
           </div>
         )}
       </DetailDrawer>
@@ -1884,13 +1913,13 @@ export default function People() {
                 >
                   Manual entry
                 </button>
-                <button
+                {canImportEmployees && <button
                   className={`add-tab${employeeTab === 'excelPanel' ? ' active' : ''}`}
                   type="button"
                   onClick={() => setEmployeeTab('excelPanel')}
                 >
                   Excel upload
-                </button>
+                </button>}
               </div>
             )}
             <div
@@ -1975,7 +2004,7 @@ export default function People() {
               </div>
               </form>
             </div>
-            {editingEmployeeId === null && <div
+            {editingEmployeeId === null && canImportEmployees && <div
               className={`panel${employeeTab === 'excelPanel' ? ' active' : ''}`}
               id="excelPanel"
             >

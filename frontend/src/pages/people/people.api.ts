@@ -1,6 +1,6 @@
 import { formatUserName } from '../layout/sidebar-user';
 
-import { API_BASE_URL } from '../../config';
+import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 
 export type Employee = {
   id: number;
@@ -87,8 +87,8 @@ function mapEmployee(employee: PeopleEmployeeResponse): Employee {
   };
 }
 
-export async function fetchPeople(signal: AbortSignal) {
-  const response = await fetch(`${API_BASE_URL}/people`, { signal });
+export async function fetchPeople(getAccessToken: AccessTokenGetter, signal: AbortSignal) {
+  const response = await authenticatedApiFetch(getAccessToken, '/people', { signal });
   if (!response.ok) throw new Error('People data could not be loaded.');
   const people = (await response.json()) as PeopleResponse;
   return {
@@ -97,8 +97,8 @@ export async function fetchPeople(signal: AbortSignal) {
   };
 }
 
-export async function createEmployee(form: EmployeeFormValues): Promise<Employee> {
-  const response = await fetch(`${API_BASE_URL}/people/employees`, {
+export async function createEmployee(getAccessToken: AccessTokenGetter, form: EmployeeFormValues): Promise<Employee> {
+  const response = await authenticatedApiFetch(getAccessToken, '/people/employees', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -120,10 +120,11 @@ export async function createEmployee(form: EmployeeFormValues): Promise<Employee
 }
 
 export async function updateEmployee(
+  getAccessToken: AccessTokenGetter,
   id: number,
   form: EmployeeFormValues,
 ): Promise<Employee> {
-  const response = await fetch(`${API_BASE_URL}/people/employees/${id}`, {
+  const response = await authenticatedApiFetch(getAccessToken, `/people/employees/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -144,10 +145,10 @@ export async function updateEmployee(
   return mapEmployee((await response.json()) as PeopleEmployeeResponse);
 }
 
-export async function importEmployees(file: File): Promise<EmployeeImportResult> {
+export async function importEmployees(getAccessToken: AccessTokenGetter, file: File): Promise<EmployeeImportResult> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(`${API_BASE_URL}/people/employees/import`, {
+  const response = await authenticatedApiFetch(getAccessToken, '/people/employees/import', {
     method: 'POST',
     body: form,
   });
@@ -163,8 +164,8 @@ export async function importEmployees(file: File): Promise<EmployeeImportResult>
   };
 }
 
-export async function createGroup(form: GroupFormValues): Promise<Group> {
-  const response = await fetch(`${API_BASE_URL}/people/groups`, {
+export async function createGroup(getAccessToken: AccessTokenGetter, form: GroupFormValues): Promise<Group> {
+  const response = await authenticatedApiFetch(getAccessToken, '/people/groups', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -182,10 +183,11 @@ export async function createGroup(form: GroupFormValues): Promise<Group> {
 }
 
 export async function updateGroup(
+  getAccessToken: AccessTokenGetter,
   id: number,
   form: GroupFormValues,
 ): Promise<Group> {
-  const response = await fetch(`${API_BASE_URL}/people/groups/${id}`, {
+  const response = await authenticatedApiFetch(getAccessToken, `/people/groups/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -203,10 +205,11 @@ export async function updateGroup(
 }
 
 export async function addGroupMember(
+  getAccessToken: AccessTokenGetter,
   groupId: number,
   employeeId: number,
 ): Promise<Group> {
-  const response = await fetch(`${API_BASE_URL}/people/groups/${groupId}/members`, {
+  const response = await authenticatedApiFetch(getAccessToken, `/people/groups/${groupId}/members`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ employee_id: employeeId }),
@@ -221,11 +224,13 @@ export async function addGroupMember(
 }
 
 export async function removeGroupMember(
+  getAccessToken: AccessTokenGetter,
   groupId: number,
   employeeId: number,
 ): Promise<Group> {
-  const response = await fetch(
-    `${API_BASE_URL}/people/groups/${groupId}/members/${employeeId}`,
+  const response = await authenticatedApiFetch(
+    getAccessToken,
+    `/people/groups/${groupId}/members/${employeeId}`,
     { method: 'DELETE' },
   );
   if (!response.ok) {
@@ -241,10 +246,10 @@ export async function removeGroupMember(
   return mapGroup((await response.json()) as PeopleGroupResponse);
 }
 
-export async function importGroups(file: File): Promise<GroupImportResult> {
+export async function importGroups(getAccessToken: AccessTokenGetter, file: File): Promise<GroupImportResult> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(`${API_BASE_URL}/people/groups/import`, {
+  const response = await authenticatedApiFetch(getAccessToken, '/people/groups/import', {
     method: 'POST',
     body: form,
   });

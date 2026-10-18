@@ -16,13 +16,13 @@ export function Campaigns() {
              <p>Create and manage performance review campaigns.</p>
           </div>
           <div className="campaign-heading-actions">
-            <button
+            {state.canManageCampaigns && <button
               className="btn btn-primary"
               type="button"
               onClick={state.openCreate}
             >
               Create campaign
-            </button>
+            </button>}
           </div>
         </div>
         {state.successMessage !== '' && (

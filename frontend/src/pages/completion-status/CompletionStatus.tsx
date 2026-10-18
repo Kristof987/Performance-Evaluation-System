@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import AppLayout from '../layout/AppLayout';
-import { formatUserName, getSidebarUser } from '../layout/sidebar-user';
+import { formatUserName } from '../layout/sidebar-user';
+import { useAppAuth } from '../../auth/AppAuth';
+import { ApiAccessError } from '../../auth/authenticated-api';
 import { formatShortDate } from '../hr-home/utils/hrHome.utils';
 import { fetchCompletionStatus, type CompletionStatusResponse } from './completionStatus.api';
 import './completion-status.css';
@@ -24,8 +26,7 @@ function SortButton({ label, value, sort, order, onSort }: { label: string; valu
 
 export default function CompletionStatus() {
   const { id } = useParams();
-  const user = getSidebarUser();
-  const requesterUserId = user?.id ?? null;
+  const { getAccessToken, retryAuth0 } = useAppAuth();
   const campaignId = Number(id);
   const [data, setData] = useState<CompletionStatusResponse | null>(null);
   const [error, setError] = useState('');
@@ -38,13 +39,16 @@ export default function CompletionStatus() {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    if (!Number.isSafeInteger(campaignId) || campaignId <= 0 || requesterUserId === null) return;
+    if (!Number.isSafeInteger(campaignId) || campaignId <= 0 || !getAccessToken) return;
     const controller = new AbortController();
-    fetchCompletionStatus(campaignId, { requesterUserId, search, status, questionnaireId, overdueOnly, sort, order, page, pageSize: PAGE_SIZE }, controller.signal)
+    fetchCompletionStatus(getAccessToken, campaignId, { search, status, questionnaireId, overdueOnly, sort, order, page, pageSize: PAGE_SIZE }, controller.signal)
       .then((result) => { if (!controller.signal.aborted) { setData(result); setError(''); } })
-      .catch((cause) => { if (!controller.signal.aborted) { setData(null); setError(cause instanceof Error ? cause.message : 'Completion status could not be loaded.'); } });
+      .catch((cause) => {
+        if (cause instanceof ApiAccessError) retryAuth0();
+        if (!controller.signal.aborted) { setData(null); setError(cause instanceof Error ? cause.message : 'Completion status could not be loaded.'); }
+      });
     return () => controller.abort();
-  }, [campaignId, requesterUserId, search, status, questionnaireId, overdueOnly, sort, order, page]);
+  }, [campaignId, getAccessToken, search, status, questionnaireId, overdueOnly, sort, order, page]);
 
   function updateSort(value: string) {
     setPage(1);
@@ -62,7 +66,7 @@ export default function CompletionStatus() {
 
   const dateRange = data ? `${formatShortDate(data.campaign.start_date)} – ${data.campaign.end_date === null ? 'No end date' : formatShortDate(data.campaign.end_date)}` : '';
   const summary = data?.summary;
-  const invalidRequest = !Number.isSafeInteger(campaignId) || campaignId <= 0 || requesterUserId === null;
+  const invalidRequest = !Number.isSafeInteger(campaignId) || campaignId <= 0;
   const loading = !invalidRequest && data === null && error === '';
 
   return <AppLayout activePage="hr-home" pageClassName="completion-page">
