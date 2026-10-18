@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, aliased
 from database import engine, Base, SessionLocal
 from auth0 import get_verified_auth0_sub
 from business_calendar import business_today as campaign_today, business_date, campaign_instant, campaign_status
+import campaign_lifecycle
 import models
 import form_snapshot_service
 import reporting_service
@@ -2228,9 +2229,9 @@ def get_group_employees(group_id: int, db: Session):
     )
 
 
-def get_self_evaluation_participants(campaign_id: int, db: Session):
+def get_self_evaluation_participants(campaign_id: int, db: Session, group_ids: list[int] | None = None):
     participants = {}
-    for group_id in get_campaign_assigned_group_ids(campaign_id, db):
+    for group_id in (get_campaign_assigned_group_ids(campaign_id, db) if group_ids is None else group_ids):
         group = db.query(models.CompanyGroup).filter(models.CompanyGroup.id == group_id).first()
         for employee, role in get_group_employees(group_id, db):
             row = participants.setdefault(employee.id, {
@@ -2243,8 +2244,8 @@ def get_self_evaluation_participants(campaign_id: int, db: Session):
     return participants
 
 
-def build_campaign_self_evaluations(campaign_id: int, db: Session):
-    participants = get_self_evaluation_participants(campaign_id, db)
+def build_campaign_self_evaluations(campaign_id: int, db: Session, group_ids: list[int] | None = None):
+    participants = get_self_evaluation_participants(campaign_id, db, group_ids)
     mappings = {
         row.employee_id: row.form_id
         for row in db.query(models.CampaignEmployeeSelfEvaluation)
@@ -2342,8 +2343,8 @@ def update_campaign_self_evaluations(campaign_id: int, payload: schemas.Campaign
     return build_campaign_self_evaluations(campaign_id, db)
 
 
-def build_campaign_rule_matrix(campaign_id: int, db: Session):
-    assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db)
+def build_campaign_rule_matrix(campaign_id: int, db: Session, group_ids: list[int] | None = None):
+    assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db) if group_ids is None else group_ids
     groups = []
     if len(assigned_group_ids) > 0:
         groups = (
@@ -2433,8 +2434,8 @@ def get_form_id_for_employee_pair(campaign_id: int, group_id: int, evaluator, ev
     return rule.form_id if rule is not None else None
 
 
-def build_campaign_evaluation_matrix(campaign_id: int, db: Session, issuance_errors=None):
-    assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db)
+def build_campaign_evaluation_matrix(campaign_id: int, db: Session, issuance_errors=None, group_ids: list[int] | None = None):
+    assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db) if group_ids is None else group_ids
     groups = []
     if len(assigned_group_ids) > 0:
         groups = (
@@ -2842,6 +2843,21 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
     }
 
 
+@app.get("/campaigns/{campaign_id}/setup-preview", response_model=schemas.CampaignSetupPreviewResponse)
+def get_campaign_setup_preview(campaign_id: int, group_ids: list[int] = Query(default=[]),
+                               db: Session = Depends(get_db),
+                               _reader: models.User = Depends(require_permission("campaigns.read"))):
+    if db.query(models.Campaign.id).filter(models.Campaign.id == campaign_id).first() is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if len(group_ids) != len(set(group_ids)) or db.query(models.CompanyGroup.id).filter(models.CompanyGroup.id.in_(group_ids)).count() != len(group_ids):
+        raise HTTPException(status_code=400, detail="Selected groups must exist and be unique")
+    return {
+        "rules": build_campaign_rule_matrix(campaign_id, db, group_ids),
+        "self_evaluations": build_campaign_self_evaluations(campaign_id, db, group_ids),
+        "matrix": build_campaign_evaluation_matrix(campaign_id, db, group_ids=group_ids),
+    }
+
+
 @app.put("/campaigns/{campaign_id}/setup", response_model=schemas.CampaignEvaluationMatrixResponse)
 def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate, db: Session = Depends(get_db),
                           manager: models.User = Depends(require_permission("campaigns.manage"))):
@@ -2867,6 +2883,7 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
             raise HTTPException(status_code=400, detail="Groups must exist and be unique")
 
         previous_groups = set(get_campaign_assigned_group_ids(campaign_id, db))
+        removed_groups = previous_groups - group_ids
         membership_keys = set()
         affected = {}
         for change in payload.memberships:
@@ -2905,13 +2922,19 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
         form_ids = {row[0] for row in db.query(models.Form.id).all()}
         rules = {}
         for item in payload.rules:
+            if item.company_group_id in removed_groups:
+                continue
             key = (item.company_group_id, item.evaluator_role_id, item.evaluatee_role_id)
             roles = {person.company_role_id for person in members.get(item.company_group_id, {}).values()}
             if key in rules or item.evaluator_role_id not in roles or item.evaluatee_role_id not in roles or item.form_id not in form_ids:
                 raise HTTPException(status_code=400, detail="Invalid or duplicate role rule")
             rules[key] = item.form_id
         self_forms = {}
+        existing_self = {row.employee_id: row for row in db.query(models.CampaignEmployeeSelfEvaluation)
+                         .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id)}
         for item in payload.self_evaluations:
+            if item.employee_id not in participants and item.employee_id in existing_self and removed_groups:
+                continue
             if item.employee_id in self_forms or item.employee_id not in participants or (item.form_id is not None and item.form_id not in form_ids):
                 raise HTTPException(status_code=400, detail="Invalid or duplicate self-evaluation")
             if item.form_id is not None:
@@ -2920,6 +2943,8 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
         selected = {}
         selected_people = set()
         for item in payload.assignments:
+            if item.company_group_id in removed_groups:
+                continue
             key = (item.company_group_id, item.evaluator_id, item.evaluatee_id)
             pair = (item.evaluator_id, item.evaluatee_id)
             if key in selected or pair in selected_people or item.evaluator_id not in members.get(item.company_group_id, {}) or item.evaluatee_id not in members[item.company_group_id]:
@@ -2944,23 +2969,45 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
                 raise HTTPException(status_code=409, detail="Issued evaluations cannot be changed or removed")
             if campaign.legacy_issuance_blocked and not assignment_is_immutable(row) and selected.get(key) != row.form_id:
                 raise HTTPException(status_code=409, detail="Historical planned assignments cannot be changed")
+        relocated = {}
+        for row in existing_assignments:
+            if row.company_group_id not in removed_groups or assignment_is_immutable(row) or campaign.legacy_issuance_blocked:
+                continue
+            pair = (row.evaluator_id, row.evaluatee_id)
+            if any((other.evaluator_id, other.evaluatee_id) == pair and other.id != row.id for other in existing_assignments):
+                continue
+            candidates = [key for key in selected if key[1:] == pair]
+            if not candidates and pair not in selected_people:
+                for group_id in sorted(group_ids):
+                    people = members[group_id]
+                    if pair[0] not in people or pair[1] not in people:
+                        continue
+                    form_id = (self_forms.get(pair[0]) if pair[0] == pair[1] else rules.get(
+                        (group_id, people[pair[0]].company_role_id, people[pair[1]].company_role_id)))
+                    if form_id is not None:
+                        target = (group_id, *pair)
+                        selected[target] = form_id
+                        selected_people.add(pair)
+                        candidates = [target]
+                        break
+            if candidates:
+                relocated[row.id] = candidates[0]
         existing_rules = {(row.company_group_id, row.evaluator_role_id, row.evaluatee_role_id): row for row in
                           db.query(models.CampaignEvaluationRule).filter(models.CampaignEvaluationRule.campaign_id == campaign_id)}
         for key in issued_role_pair_keys(campaign_id, db):
             if key in existing_rules and rules.get(key) != existing_rules[key].form_id:
                 raise HTTPException(status_code=409, detail="Issued form rules cannot be changed or removed")
-        existing_self = {row.employee_id: row for row in db.query(models.CampaignEmployeeSelfEvaluation)
-                         .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id)}
         for row in existing_assignments:
             if assignment_is_immutable(row) and row.evaluator_id == row.evaluatee_id and self_forms.get(row.evaluator_id) != row.form_id:
                 raise HTTPException(status_code=409, detail="Issued self-evaluations cannot be changed")
 
         for row in existing_assignments:
             if not assignment_is_immutable(row) and not campaign.legacy_issuance_blocked:
-                key = (row.company_group_id, row.evaluator_id, row.evaluatee_id)
+                key = relocated.get(row.id, (row.company_group_id, row.evaluator_id, row.evaluatee_id))
                 if key not in selected:
                     db.delete(row)
                 else:
+                    row.company_group_id = key[0]
                     row.form_id = selected[key]
         for key, row in existing_rules.items():
             if key not in rules:
@@ -2982,9 +3029,10 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
         db.execute(models.campaign_company_groups.delete().where(models.campaign_company_groups.c.campaign_id == campaign_id))
         for group_id in sorted(group_ids):
             db.execute(models.campaign_company_groups.insert().values(campaign_id=campaign_id, company_group_id=group_id))
-        status = get_or_create_default_form_status(db) if selected.keys() - existing_pairs else None
+        retained_pairs = existing_pairs | set(relocated.values())
+        status = get_or_create_default_form_status(db) if selected.keys() - retained_pairs else None
         for key, form_id in selected.items():
-            if key not in existing_pairs:
+            if key not in retained_pairs:
                 db.add(models.FilledForm(campaign_id=campaign_id, company_group_id=key[0], evaluator_id=key[1],
                                          evaluatee_id=key[2], form_id=form_id, status_id=status.id,
                                          finish_date=None, answers=[], form_snapshot=None, snapshot_status=None))

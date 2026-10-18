@@ -756,6 +756,12 @@ class CampaignSetupUpdate(BaseModel):
     memberships: list[CampaignSetupMembershipChange] = Field(default_factory=list)
 
 
+class CampaignSetupPreviewResponse(BaseModel):
+    rules: CampaignEvaluationRulesResponse
+    self_evaluations: CampaignSelfEvaluationsResponse
+    matrix: CampaignEvaluationMatrixResponse
+
+
 class CampaignEvaluationMatrixUpdateResponse(CampaignEvaluationMatrixResponse):
     created_count: int = 0
     removed_count: int = 0

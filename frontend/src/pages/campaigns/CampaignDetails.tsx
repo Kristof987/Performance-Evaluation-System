@@ -18,6 +18,7 @@ export function CampaignDetails() {
   const [copyRequest, setCopyRequest] = useState<RuleCopyRequest | null>(null);
   const [selfCopySourceId, setSelfCopySourceId] = useState<number | null>(null);
   const [expandedRuleGroups, setExpandedRuleGroups] = useState<Set<number>>(() => new Set());
+  const [confirmGroupRemoval, setConfirmGroupRemoval] = useState(false);
   const {
     canManageCampaigns,
     campaign,
@@ -31,12 +32,17 @@ export function CampaignDetails() {
     actionMessage,
     isChangingSchedule,
     isSavingSetup,
+    isSetupPreviewLoading,
+    setupPreviewError,
     handleUpdateSetup,
     handleScheduleAction,
     campaignGroups,
     evaluationRules,
     evaluationMatrix,
     selfEvaluations,
+    persistedEvaluationRules,
+    persistedEvaluationMatrix,
+    persistedSelfEvaluations,
     selectedSelfForms,
     selfMessage,
     isSavingSelf,
@@ -91,6 +97,33 @@ export function CampaignDetails() {
   })));
   const groupsWithIssuedAssignments = new Set(evaluationMatrix.groups.filter((group) => group.assignments.some((assignment) => assignment.issued)).map((group) => group.groupId));
   const selfCopyPreview = selfCopySourceId === null ? null : previewSelfCopy(selfEvaluations, selectedSelfForms, selfCopySourceId);
+  const removedGroupIds = campaignGroups.assignedGroupIds.filter((groupId) => !selectedGroupIds.includes(groupId));
+  const removedGroupNames = removedGroupIds.map((groupId) =>
+    campaignGroups.availableGroups.find((group) => group.id === groupId)?.name ?? `Group ${groupId}`);
+  const removalRules = campaign?.status === 'scheduled' ? persistedEvaluationRules : evaluationRules;
+  const removalMatrix = campaign?.status === 'scheduled' ? persistedEvaluationMatrix : evaluationMatrix;
+  const removalSelf = campaign?.status === 'scheduled' ? persistedSelfEvaluations : selfEvaluations;
+  const removedRules = removalRules.groups.filter((group) => removedGroupIds.includes(group.groupId))
+    .reduce((count, group) => count + group.rolePairs.filter((pair) => pair.formId != null).length, 0);
+  const removedAssignments = removalMatrix.groups.filter((group) => removedGroupIds.includes(group.groupId))
+    .flatMap((group) => group.assignments);
+  const remainingParticipantIds = new Set(evaluationMatrix.groups.filter((group) => selectedGroupIds.includes(group.groupId))
+    .flatMap((group) => group.employees.map((person) => person.id)));
+  const removedSelfForms = removalSelf.participants.filter((person) =>
+    person.formId != null && !remainingParticipantIds.has(person.employeeId)).length;
+
+  function requestGroupSave() {
+    if (removedGroupIds.length && (campaign?.status === 'draft' || campaign?.status === 'scheduled')) {
+      setConfirmGroupRemoval(true);
+    } else {
+      handleUpdateGroups();
+    }
+  }
+
+  function requestSetupSave() {
+    if (removedGroupIds.length) setConfirmGroupRemoval(true);
+    else handleUpdateSetup();
+  }
 
   function reviewMissingAssignments() {
     const missing = formProgress.groups.find((group) => group.firstMissing);
@@ -162,14 +195,17 @@ export function CampaignDetails() {
         )}
         {actionMessage !== '' && <div className="campaign-save-message" role="alert">{actionMessage}</div>}
 
-        {canManageCampaigns && campaign.status === 'scheduled' && (
+        {campaign.status === 'scheduled' && (
           <div className="campaign-heading-actions">
-            <button className="btn btn-primary" type="button" onClick={handleUpdateSetup}
-              disabled={isSavingSetup || !(hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges)}>
-              {isSavingSetup ? 'Saving setup...' : 'Save scheduled setup together'}
-            </button>
+            <span role="status">{isSetupPreviewLoading ? 'Loading selected group setup...' :
+              hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges ? 'Unsaved setup changes' : 'Setup saved'}</span>
+            {canManageCampaigns && <button className="btn btn-primary" type="button" onClick={requestSetupSave}
+              disabled={isSavingSetup || isSetupPreviewLoading || !!setupPreviewError || !(hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges)}>
+              {isSavingSetup ? 'Saving setup...' : 'Save setup changes'}
+            </button>}
           </div>
         )}
+        {setupPreviewError && <div className="campaign-save-message" role="alert">{setupPreviewError}</div>}
 
         <CampaignStats campaign={campaign} />
 
@@ -179,11 +215,11 @@ export function CampaignDetails() {
               <h2>Campaign groups</h2>
               <p>Select which company groups are included in this campaign.</p>
             </div>
-            {canManageCampaigns && <button
+            {canManageCampaigns && campaign.status !== 'scheduled' && <button
               className={hasGroupChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingGroups || !hasGroupChanges}
-              onClick={handleUpdateGroups}
+               onClick={requestGroupSave}
             >
               {isSavingGroups ? 'Saving...' : 'Save groups'}
             </button>}
@@ -233,7 +269,7 @@ export function CampaignDetails() {
             </div>
             {hasRuleChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
             {hasRuleChanges && <button className="btn btn-secondary" type="button" onClick={discardRules}>Discard changes</button>}
-            {canManageCampaigns && <button
+             {canManageCampaigns && campaign.status !== 'scheduled' && <button
               className={hasRuleChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingRules || !hasRuleChanges}
@@ -243,9 +279,11 @@ export function CampaignDetails() {
             </button>}
           </div>
 
-          {evaluationRules.groups.length === 0 ? (
+          {isSetupPreviewLoading && campaign.status === 'scheduled' ? (
+            <div className="campaign-groups-empty">Loading selected group form rules...</div>
+          ) : evaluationRules.groups.length === 0 ? (
             <div className="campaign-groups-empty">
-              Select and save at least one campaign group before assigning forms to role relationships.
+              Select at least one campaign group before assigning forms to role relationships.
             </div>
           ) : (
             <div className="campaign-rule-groups">
@@ -372,13 +410,15 @@ export function CampaignDetails() {
             </div>
             {hasSelfChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
             {hasSelfChanges && <button className="btn btn-secondary" type="button" disabled={isSavingSelf} onClick={discardSelfForms}>Discard changes</button>}
-             {canManageCampaigns && <button className={hasSelfChanges ? 'btn btn-primary' : 'btn btn-secondary'} type="button" disabled={isSavingSelf || !hasSelfChanges || hasMatrixChanges} onClick={handleUpdateSelfForms}>
+             {canManageCampaigns && campaign.status !== 'scheduled' && <button className={hasSelfChanges ? 'btn btn-primary' : 'btn btn-secondary'} type="button" disabled={isSavingSelf || !hasSelfChanges || hasMatrixChanges} onClick={handleUpdateSelfForms}>
                {isSavingSelf ? 'Saving...' : 'Save self-evaluations'}
              </button>}
           </div>
-          {hasMatrixChanges && hasSelfChanges && <p role="status">Save or discard matrix selections before changing self-evaluation forms.</p>}
-          {selfEvaluations.participants.length === 0 ? (
-            <div className="campaign-groups-empty">Select and save campaign groups with active participants to configure self-evaluations.</div>
+           {campaign.status !== 'scheduled' && hasMatrixChanges && hasSelfChanges && <p role="status">Save or discard matrix selections before changing self-evaluation forms.</p>}
+          {isSetupPreviewLoading && campaign.status === 'scheduled' ? (
+            <div className="campaign-groups-empty">Loading selected group participants...</div>
+          ) : selfEvaluations.participants.length === 0 ? (
+              <div className="campaign-groups-empty">Select campaign groups with active participants to configure self-evaluations.</div>
           ) : (
             <div className="campaign-rule-table-wrap">
               <table className="campaign-rule-table campaign-self-table">
@@ -411,7 +451,7 @@ export function CampaignDetails() {
             </div>
             {hasMatrixChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
             {hasMatrixChanges && <button className="btn btn-secondary" type="button" disabled={isSavingMatrix} onClick={discardMatrix}>Discard changes</button>}
-             {canManageCampaigns && <button
+             {canManageCampaigns && campaign.status !== 'scheduled' && <button
                className={hasMatrixChanges ? 'btn btn-primary' : 'btn btn-secondary'}
               type="button"
               disabled={isSavingMatrix || !hasMatrixChanges || matrixReadiness !== 'ready'}
@@ -430,21 +470,23 @@ export function CampaignDetails() {
 
           {matrixReadiness !== 'ready' && (
             <div className="campaign-matrix-prerequisite" role="status">
-              <strong>{matrixReadiness === 'rules' ? 'Save form rules first' : matrixReadiness === 'missing' ? 'Complete form assignments first' : matrixReadiness === 'empty' ? 'No role relationships available' : 'Save campaign groups first'}</strong>
+               <strong>{matrixReadiness === 'rules' ? 'Save form rules first' : matrixReadiness === 'missing' ? 'Complete form assignments first' : matrixReadiness === 'empty' ? 'No role relationships available' : campaign.status === 'scheduled' ? 'Select campaign groups first' : 'Save campaign groups first'}</strong>
               <p>{matrixReadiness === 'rules'
                 ? 'Save your Form assignment rule changes before editing the Evaluation Matrix.'
                 : matrixReadiness === 'missing'
                    ? `${countLabel(formProgress.missing, 'role relationship')} ${formProgress.missing === 1 ? 'still needs' : 'still need'} questionnaires before the Evaluation Matrix can be edited.`
                   : matrixReadiness === 'empty'
                     ? 'Selected groups have no active role relationships to configure.'
-                    : 'Select and save at least one campaign group to configure evaluation assignments.'}</p>
+                     : campaign.status === 'scheduled' ? 'Select at least one campaign group to configure evaluation assignments.' : 'Select and save at least one campaign group to configure evaluation assignments.'}</p>
               {matrixReadiness === 'missing' && <button className="campaign-link" type="button" onClick={reviewMissingAssignments}>Review missing assignments</button>}
             </div>
           )}
 
-          {evaluationMatrix.groups.length === 0 ? (
+          {isSetupPreviewLoading && campaign.status === 'scheduled' ? (
+            <div className="campaign-groups-empty">Loading selected group evaluation matrix...</div>
+          ) : evaluationMatrix.groups.length === 0 ? (
             <div className="campaign-groups-empty">
-              Select and save at least one campaign group before setting up evaluations.
+               Select at least one campaign group before setting up evaluations.
             </div>
           ) : (
             <div className="campaign-matrix-group-grid">
@@ -478,6 +520,29 @@ export function CampaignDetails() {
         </section>
 
       </div>
+
+      {confirmGroupRemoval && (
+        <CampaignModal mode="remove-group" onClose={() => { if (!isSavingSetup) setConfirmGroupRemoval(false); }}>
+          <div className="campaign-copy-preview">
+            <p>Remove <strong>{removedGroupNames.join(', ')}</strong> from this campaign? The group records, Forms, Templates and Sections remain available.</p>
+            <dl className="campaign-copy-counts">
+              <div><dt>Campaign groups removed</dt><dd>{removedGroupIds.length}</dd></div>
+              <div><dt>Form assignment rules removed</dt><dd>{removedRules}</dd></div>
+              <div><dt>Self-evaluation form settings no longer needed</dt><dd>{removedSelfForms}</dd></div>
+              <div><dt>Planned evaluator-evaluatee assignments affected</dt><dd>{removedAssignments.filter((item) => !item.issued).length}</dd></div>
+              <div><dt>Issued assignments protected</dt><dd>{removedAssignments.filter((item) => item.issued).length}</dd></div>
+            </dl>
+            <p>Participants and self-evaluations shared with remaining groups stay. Eligible shared planned assignments move to a remaining group; issued evaluations cannot be removed. The resulting Scheduled configuration must still be valid.</p>
+            <div className="campaign-modal-actions">
+              <button className="btn btn-secondary" type="button" disabled={isSavingSetup} onClick={() => setConfirmGroupRemoval(false)}>Cancel</button>
+              <button className="btn btn-primary" type="button" disabled={isSavingSetup || removedAssignments.some((item) => item.issued)}
+                onClick={async () => { await handleUpdateSetup(); setConfirmGroupRemoval(false); }}>
+                {isSavingSetup ? 'Saving...' : 'Remove and save setup'}
+              </button>
+            </div>
+          </div>
+        </CampaignModal>
+      )}
 
       {copyRequest && copyPreview && (
         <CampaignModal mode={copyRequest.evaluatorRoleId === undefined ? 'copy-group' : 'copy-role'} onClose={() => setCopyRequest(null)}>
@@ -551,10 +616,11 @@ export function CampaignDetails() {
             group={matrixGroupWithSelfLocks(evaluationMatrix, activeMatrixGroup)}
             rules={evaluationRules}
             selfForms={selectedSelfForms}
-            selfFormsDirty={hasSelfChanges}
+             selfFormsDirty={campaign.status === 'scheduled' ? false : hasSelfChanges}
            selection={selectedMatrixAssignments}
-           dirty={hasMatrixChanges}
-           rulesDirty={hasRuleChanges}
+            dirty={hasMatrixChanges}
+            rulesDirty={campaign.status === 'scheduled' ? false : hasRuleChanges}
+            staged={campaign.status === 'scheduled'}
            saving={isSavingMatrix}
            message={matrixMessage}
            onClose={() => setActiveMatrixGroupId(null)}

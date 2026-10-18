@@ -3,10 +3,11 @@ import type { CampaignEvaluationRules } from './campaign.types';
 export function getFormAssignmentProgress(
   rules: CampaignEvaluationRules,
   values: Record<string, number | null>,
+  includeSameRole = false,
 ) {
   const validForms = new Set(rules.forms.map((form) => form.id));
   const groups = rules.groups.map((group) => {
-    const peerPairs = group.rolePairs.filter((pair) => pair.evaluatorRoleId !== pair.evaluateeRoleId);
+    const peerPairs = includeSameRole ? group.rolePairs : group.rolePairs.filter((pair) => pair.evaluatorRoleId !== pair.evaluateeRoleId);
     const missingPairs = peerPairs.filter((pair) => !validForms.has(
       values[`${group.groupId}:${pair.evaluatorRoleId}:${pair.evaluateeRoleId}`] ?? -1,
     ));

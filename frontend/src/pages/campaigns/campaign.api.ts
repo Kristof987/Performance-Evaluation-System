@@ -295,6 +295,21 @@ export async function fetchCampaignEvaluationMatrix(
   );
 }
 
+export async function fetchCampaignSetupPreview(getAccessToken: AccessTokenGetter, id: string, groupIds: number[], signal: AbortSignal) {
+  const query = new URLSearchParams();
+  groupIds.forEach((groupId) => query.append('group_ids', String(groupId)));
+  const response = await requestCampaigns<{
+    rules: CampaignEvaluationRulesResponse;
+    self_evaluations: CampaignSelfEvaluationsResponse;
+    matrix: CampaignEvaluationMatrixResponse;
+  }>(getAccessToken, `/${encodeURIComponent(id)}/setup-preview?${query}`, { signal }, 'Selected group setup could not be loaded.');
+  return {
+    rules: mapCampaignEvaluationRules(response.rules),
+    selfEvaluations: mapSelfEvaluations(response.self_evaluations),
+    matrix: mapCampaignEvaluationMatrix(response.matrix),
+  };
+}
+
 export async function updateCampaignEvaluationMatrix(
   getAccessToken: AccessTokenGetter,
   id: string,
@@ -348,37 +363,6 @@ export async function updateCampaignSetup(
         rules: rules.map((rule) => ({ company_group_id: rule.companyGroupId, evaluator_role_id: rule.evaluatorRoleId, evaluatee_role_id: rule.evaluateeRoleId, form_id: rule.formId })),
         self_evaluations: selfEvaluations.map((item) => ({ employee_id: item.employeeId, form_id: item.formId })),
         assignments: assignments.map((item) => ({ company_group_id: item.companyGroupId, evaluator_id: item.evaluatorId, evaluatee_id: item.evaluateeId })),
-      }),
-    }, 'Campaign setup could not be saved.',
-  );
-  return mapCampaignEvaluationMatrix(response);
-}
-
-export type CampaignSetup = {
-  groupIds: number[];
-  rules: Array<{ companyGroupId: number; evaluatorRoleId: number; evaluateeRoleId: number; formId: number }>;
-  selfEvaluations: Array<{ employeeId: number; formId: number | null }>;
-  assignments: Array<{ companyGroupId: number; evaluatorId: number; evaluateeId: number }>;
-};
-
-export async function updateCampaignSetup(getAccessToken: AccessTokenGetter, id: string, setup: CampaignSetup): Promise<CampaignEvaluationMatrix> {
-  const response = await requestCampaigns<CampaignEvaluationMatrixResponse>(
-    getAccessToken, `/${encodeURIComponent(id)}/setup`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        group_ids: setup.groupIds,
-        rules: setup.rules.map((rule) => ({
-          company_group_id: rule.companyGroupId,
-          evaluator_role_id: rule.evaluatorRoleId,
-          evaluatee_role_id: rule.evaluateeRoleId,
-          form_id: rule.formId,
-        })),
-        self_evaluations: setup.selfEvaluations.map((item) => ({ employee_id: item.employeeId, form_id: item.formId })),
-        assignments: setup.assignments.map((item) => ({
-          company_group_id: item.companyGroupId,
-          evaluator_id: item.evaluatorId,
-          evaluatee_id: item.evaluateeId,
-        })),
       }),
     }, 'Campaign setup could not be saved.',
   );

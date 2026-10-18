@@ -11,6 +11,7 @@ type Props = {
   selection: MatrixSelection;
   dirty: boolean;
   rulesDirty: boolean;
+  staged?: boolean;
   saving: boolean;
   message: string;
   onClose: () => void;
@@ -24,7 +25,7 @@ type Props = {
   onReviewSelf: () => void;
 };
 
-export default function EvaluationMatrixModal({ group, rules, selfForms, selfFormsDirty, selection, dirty, rulesDirty, saving, message, onClose, onToggle, onAddAll, onAddSelf, onGenerate, onClear, onSave, onDiscard, onReviewSelf }: Props) {
+export default function EvaluationMatrixModal({ group, rules, selfForms, selfFormsDirty, selection, dirty, rulesDirty, staged = false, saving, message, onClose, onToggle, onAddAll, onAddSelf, onGenerate, onClear, onSave, onDiscard, onReviewSelf }: Props) {
   const [minimum, setMinimum] = useState('1');
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -43,7 +44,7 @@ export default function EvaluationMatrixModal({ group, rules, selfForms, selfFor
         event.preventDefault();
         if (confirmClear) setConfirmClear(false);
         else if (confirmClose) setConfirmClose(false);
-        else if (dirty) setConfirmClose(true);
+        else if (dirty && !staged) setConfirmClose(true);
         else onClose();
       }
       if (event.key === 'Tab' && dialogRef.current) {
@@ -58,7 +59,7 @@ export default function EvaluationMatrixModal({ group, rules, selfForms, selfFor
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [confirmClear, confirmClose, dirty, onClose]);
+  }, [confirmClear, confirmClose, dirty, staged, onClose]);
   useEffect(() => {
     if (confirmClose || confirmClear) dialogRef.current?.querySelector<HTMLElement>('.campaign-matrix-confirm button')?.focus();
   }, [confirmClose, confirmClear]);
@@ -80,7 +81,7 @@ export default function EvaluationMatrixModal({ group, rules, selfForms, selfFor
             <p>{countLabel(group.employees.length, 'employee')} · {countLabel(matrixSelectedCount(selection, group.groupId), 'evaluation pair')} selected</p>
             <p>Saved assignments before the campaign starts are planned. Issued assignments cannot be changed.</p>
           </div>
-          <button className="campaign-modal-close" type="button" aria-label="Close evaluation matrix" onClick={() => { if (dirty) setConfirmClose(true); else onClose(); }}>×</button>
+          <button className="campaign-modal-close" type="button" aria-label="Close evaluation matrix" onClick={() => { if (dirty && !staged) setConfirmClose(true); else onClose(); }}>×</button>
         </div>
         {rulesDirty && <div className="campaign-matrix-warning">Save form rules before editing the evaluation matrix.</div>}
         {selfFormsDirty && <div className="campaign-matrix-warning">Save self-evaluation forms before editing the matrix diagonals.</div>}
@@ -125,10 +126,10 @@ export default function EvaluationMatrixModal({ group, rules, selfForms, selfFor
            <button className="btn btn-secondary campaign-matrix-danger-btn" type="button" disabled={saving || rulesDirty || clearable === 0} onClick={() => setConfirmClear(true)}>Clear editable selections</button>
         </div>
         <div className="campaign-matrix-modal-footer">
-          <span>{dirty ? 'Unsaved changes · ' : ''}Changes are staged until Save matrix is clicked.{validationMessage || message ? ` ${validationMessage || message}` : ''}</span>
-          <button className="btn btn-primary" type="button" disabled={saving || !dirty || rulesDirty} onClick={onSave}>
-            {saving ? 'Saving...' : 'Save matrix'}
-          </button>
+           <span>{dirty ? 'Unsaved changes · ' : ''}Changes are staged until {staged ? 'Save setup changes on the campaign page' : 'Save matrix'} is clicked.{validationMessage || message ? ` ${validationMessage || message}` : ''}</span>
+           {!staged && <button className="btn btn-primary" type="button" disabled={saving || !dirty || rulesDirty} onClick={onSave}>
+             {saving ? 'Saving...' : 'Save matrix'}
+           </button>}
         </div>
         {confirmClear && <div className="campaign-matrix-confirm" role="alertdialog" aria-label="Clear matrix selections" aria-modal="true">
           <div><h3>Clear matrix selections</h3><p>This removes editable selections in this group. Issued or completed evaluations will not be deleted.</p>
