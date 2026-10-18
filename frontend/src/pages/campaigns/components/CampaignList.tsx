@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import { X } from 'lucide-react';
 import CampaignStatusBadge from './CampaignStatusBadge';
+import { formatDate } from '../campaign.utils';
 import type {
   Campaign,
   CampaignStatus,
@@ -130,11 +131,30 @@ export default function CampaignList({
                   <Link className="campaign-name-link" to={`/campaigns/${campaign.id}`}>{campaign.name}</Link>
                 </td>
                 <td>
-                   <CampaignStatusBadge status={campaign.status} />
-                   {campaign.isArchived && <span className="campaign-archived-label"> Archived</span>}
+                  <CampaignStatusBadge status={campaign.status} />
+                  {campaign.isArchived && <span className="campaign-archived-label"> Archived</span>}
+                  {campaign.status === 'scheduled' && (
+                    <span className={`campaign-activation-note${campaign.activationError ? ' campaign-activation-failed' : ''}`}>
+                      {campaign.activationError ? 'Activation failed' : 'Activation pending'}
+                    </span>
+                  )}
+                  {campaign.status === 'active' && <span className="campaign-activation-note">Activation succeeded</span>}
+                  {campaign.status === 'active' && campaign.lifecycleError && (
+                    <span className="campaign-activation-note campaign-activation-failed">Review transition failed</span>
+                  )}
+                  {campaign.status === 'scheduled' && campaign.activationError && (
+                    <span className="campaign-activation-list-error">{campaign.activationError}</span>
+                  )}
+                  {campaign.status === 'active' && campaign.lifecycleError && (
+                    <span className="campaign-activation-list-error">{campaign.lifecycleError}</span>
+                  )}
+                  {campaign.lastTransitionAt && (
+                    <span className="campaign-activation-note">Last transition: {formatDate(campaign.lastTransitionAt)} (Budapest)</span>
+                  )}
                 </td>
                 <td>
-                  {campaign.start} - {campaign.end}
+                  <span className="campaign-period-label">Start: {campaign.start}</span>
+                  <span className="campaign-period-label">End: {campaign.end}</span>
                 </td>
                 <td>
                   {campaign.sent === 0

@@ -14,6 +14,12 @@ export type Campaign = {
   endDate: string;
   startAt: string;
   endAt: string | null;
+  activationError: string | null;
+  activationRetryAt: string | null;
+  activationAttempts: number;
+  lastTransitionAt: string | null;
+  lifecycleError: string | null;
+  lifecycleRetryAt: string | null;
   description: string | null;
   comment: string | null;
   issuedFormsCount: number;
@@ -40,6 +46,12 @@ export type CampaignResponse = {
   lifecycle_status: CampaignLifecycleStatus;
   campaign_status: CampaignStatus;
   is_archived: boolean;
+  activation_error: string | null;
+  activation_retry_at: string | null;
+  activation_attempts: number;
+  last_transition_at: string | null;
+  lifecycle_error: string | null;
+  lifecycle_retry_at: string | null;
 };
 
 export type CampaignGroup = {

@@ -129,7 +129,7 @@ def transition_campaign(
         raise CampaignLifecycleError("Campaign start must be in the future")
     if current == CampaignStatus.SCHEDULED and target == CampaignStatus.ACTIVE and now < _instant(campaign.start_date):
         raise CampaignLifecycleError("Campaign has not started")
-    if current == CampaignStatus.SCHEDULED and target == CampaignStatus.ACTIVE and (
+    if not automatic and current == CampaignStatus.SCHEDULED and target == CampaignStatus.ACTIVE and (
         campaign.end_date is not None and now >= _instant(campaign.end_date)
     ):
         raise CampaignLifecycleError("Campaign deadline has passed before activation")
@@ -164,6 +164,10 @@ def transition_campaign(
                 raise CampaignLifecycleError("Not all assignments received a snapshot")
         campaign.paused_from_status = current.value if target == CampaignStatus.PAUSED else None
         campaign.status = target.value
+        campaign.lifecycle_error = None
+        campaign.lifecycle_retry_at = None
+        campaign.lifecycle_attempts = 0
+        campaign.last_transition_at = now
         if (current, target) == (CampaignStatus.DRAFT, CampaignStatus.SCHEDULED):
             campaign.is_active = False
         elif (current, target) == (CampaignStatus.SCHEDULED, CampaignStatus.ACTIVE):

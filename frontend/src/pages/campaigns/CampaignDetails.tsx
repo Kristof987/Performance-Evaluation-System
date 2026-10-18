@@ -11,6 +11,7 @@ import { countLabel, previewRuleCopy, type RuleCopyRequest } from './rule-copy';
 import { matrixGroupWithSelfLocks, matrixSelectedCount } from './matrix.utils';
 import EvaluationMatrixModal from './components/EvaluationMatrixModal';
 import { previewSelfCopy } from './self-evaluations';
+import { formatDate } from './campaign.utils';
 export function CampaignDetails() {
   const { id } = useParams();
   const [activeMatrixGroupId, setActiveMatrixGroupId] = useState<number | null>(null);
@@ -194,6 +195,44 @@ export function CampaignDetails() {
           <div className="campaign-success-message">{successMessage}</div>
         )}
         {actionMessage !== '' && <div className="campaign-save-message" role="alert">{actionMessage}</div>}
+
+        <section className="campaign-lifecycle-card" aria-labelledby="campaign-lifecycle-title">
+          <h2 id="campaign-lifecycle-title">Lifecycle</h2>
+          <dl className="campaign-lifecycle-facts">
+            <div><dt>Persisted status</dt><dd><CampaignStatusBadge status={campaign.status} /></dd></div>
+            <div><dt>Configured start</dt><dd>{campaign.start} (Budapest)</dd></div>
+            <div><dt>Configured end</dt><dd>{campaign.endAt ? `${campaign.end} (Budapest)` : 'No deadline'}</dd></div>
+            <div><dt>Activation</dt><dd className={campaign.activationError ? 'campaign-activation-failed' : undefined}>
+              {campaign.status === 'scheduled' ? campaign.activationError ? 'Failed, awaiting retry' : 'Pending' : campaign.status === 'active' || campaign.status === 'review' ? 'Succeeded' : campaign.status === 'draft' ? 'Not scheduled' : 'Not pending'}
+            </dd></div>
+            {campaign.activationRetryAt && campaign.status === 'scheduled' && (
+              <div><dt>Next activation retry</dt><dd>{formatDate(campaign.activationRetryAt)} (Budapest)</dd></div>
+            )}
+            {campaign.activationError && campaign.activationAttempts > 0 && campaign.status === 'scheduled' && (
+              <div><dt>Activation attempts</dt><dd>{campaign.activationAttempts}</dd></div>
+            )}
+            {campaign.lifecycleRetryAt && campaign.lifecycleError && campaign.status === 'active' && (
+              <div><dt>Next review transition retry</dt><dd>{formatDate(campaign.lifecycleRetryAt)} (Budapest)</dd></div>
+            )}
+            {campaign.lastTransitionAt && (
+              <div><dt>Last status transition</dt><dd>{formatDate(campaign.lastTransitionAt)} (Budapest)</dd></div>
+            )}
+          </dl>
+          {campaign.activationError && campaign.status === 'scheduled' && (
+            <div className="campaign-activation-error" role="alert">
+              <strong>Activation could not complete</strong>
+              <p>{campaign.activationError}</p>
+              <p>Review the error and correct the campaign setup or schedule. Activation retries automatically.</p>
+            </div>
+          )}
+          {campaign.lifecycleError && campaign.status === 'active' && (
+            <div className="campaign-activation-error" role="alert">
+              <strong>Review transition could not complete</strong>
+              <p>{campaign.lifecycleError}</p>
+              <p>Review the error and correct the issue. The transition retries automatically.</p>
+            </div>
+          )}
+        </section>
 
         {campaign.status === 'scheduled' && (
           <div className="campaign-heading-actions">

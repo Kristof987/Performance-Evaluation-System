@@ -38,6 +38,20 @@ services:
     depends_on:
       - db
 
+  lifecycle-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    command: ["python", "-m", "campaign_lifecycle_worker"]
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      APP_TIMEZONE: Europe/Budapest
+    depends_on:
+      - db
+
   frontend:
     build:
       context: ./frontend

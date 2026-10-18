@@ -351,6 +351,10 @@ class Campaign(Base):
     # Compatibility boundary: migration-era campaigns must not acquire new snapshots
     # through the old, date/flag-driven issuance path before lifecycle integration.
     legacy_issuance_blocked = Column(Boolean, nullable=False, default=False, server_default="false")
+    lifecycle_error = Column(String, nullable=True)
+    lifecycle_retry_at = Column(DateTime(timezone=True), nullable=True)
+    lifecycle_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    last_transition_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint("status IN ('draft', 'scheduled', 'active', 'paused', 'review', 'closed')", name="ck_campaign_status"),

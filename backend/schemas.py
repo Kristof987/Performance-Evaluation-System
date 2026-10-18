@@ -369,6 +369,12 @@ class CampaignResponse(BaseModel):
     start_at: datetime
     end_at: datetime | None
     is_archived: bool
+    activation_error: str | None = None
+    activation_retry_at: datetime | None = None
+    activation_attempts: int = 0
+    last_transition_at: datetime | None = None
+    lifecycle_error: str | None = None
+    lifecycle_retry_at: datetime | None = None
 
     model_config = {
         "from_attributes": True
