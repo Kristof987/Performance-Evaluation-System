@@ -20,7 +20,7 @@ import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/report
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import './styles/shared.css'
-import { getDashboardPath, isHrOrManagerRole } from './pages/layout/sidebar-user'
+import { getDashboardPath, getSystemDashboardPath, isHrOrManagerRole } from './pages/layout/sidebar-user'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
 import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './auth/AppAuth'
 import { Auth0Dashboard, Auth0Unavailable } from './pages/layout/Auth0Transition'
@@ -41,7 +41,7 @@ function ProtectedPage({ children, hrOnly = false, dashboard = false }: {
     return <Navigate to="/" state={{ from: location.pathname + location.search + location.hash }} replace />
   }
   if (state.mode === 'auth0') {
-    const isHr = isHrOrManagerRole(state.user.system_role_name)
+    const isHr = getSystemDashboardPath(state.user.system_role_name) === '/hr-home'
     if (hrOnly && !isHr) return <Navigate to="/employee-home" replace />
     if (dashboard && location.pathname === '/hr-home' && !isHr) return <Navigate to="/employee-home" replace />
     if (dashboard && location.pathname === '/employee-home' && isHr) return <Navigate to="/hr-home" replace />

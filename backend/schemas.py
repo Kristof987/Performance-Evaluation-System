@@ -181,6 +181,7 @@ class AuthEmployeeResponse(BaseModel):
     id: int
     full_name: str
     company_role_id: int
+    company_role_name: str
     is_active: bool
 
     model_config = {"from_attributes": True}

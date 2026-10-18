@@ -16,6 +16,7 @@ import {
 import {
   getUserDisplayName,
   getDashboardPath,
+  getSystemDashboardPath,
   getSidebarUser,
   getUserInitials,
   isHrOrManagerRole,
@@ -71,11 +72,12 @@ export default function Sidebar({
   const sidebarUserName = auth0User?.employee.full_name ?? (
     sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser));
   const dashboardPath = auth0User
-    ? isHrOrManagerRole(auth0User.system_role_name) ? '/hr-home' : '/employee-home'
+    ? getSystemDashboardPath(auth0User.system_role_name)
     : getDashboardPath();
   const isDashboardActive =
     activePage === 'hr-home' || activePage === 'employee-home';
-  const isHrOrManager = isHrOrManagerRole(auth0User?.system_role_name ?? sidebarUser?.role_name ?? null);
+  const isHrOrManager = auth0User
+    ? dashboardPath === '/hr-home' : isHrOrManagerRole(sidebarUser?.role_name ?? null);
 
   const currentWidth =
     dragWidth ?? (isSidebarCollapsed ? MIN_WIDTH : expandedWidth);

@@ -11,6 +11,7 @@ export type AuthMe = {
     id: number;
     full_name: string;
     company_role_id: number;
+    company_role_name: string;
     is_active: boolean;
   } | null;
 };

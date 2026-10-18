@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router';
 import { useAppAuth } from '../../auth/AppAuth';
-import { isHrOrManagerRole } from './sidebar-user';
+import { getSystemDashboardPath } from './sidebar-user';
 import AppLayout from './AppLayout';
 import type { SidebarPage } from './Sidebar';
 import './auth0-transition.css';
@@ -15,7 +15,7 @@ function useAuth0Identity() {
 
 export function Auth0Dashboard() {
   const user = useAuth0Identity();
-  const isHr = isHrOrManagerRole(user.system_role_name);
+  const isHr = getSystemDashboardPath(user.system_role_name) === '/hr-home';
   const heading = user.system_role_name.trim().toLowerCase() === 'hr'
     ? 'HR Dashboard' : isHr ? 'Manager Dashboard' : 'Employee Dashboard';
   return (
@@ -23,6 +23,7 @@ export function Auth0Dashboard() {
       <div className="main-content auth0-transition-content">
         <h1>{heading}</h1>
         <p>Welcome, {user.employee.full_name}. Your Auth0 identity is linked to your PerfEval account.</p>
+        <p>System role: {user.system_role_name}. Company role: {user.employee.company_role_name}. Dashboard navigation follows your system role.</p>
         <section className="card auth0-transition-card" aria-label="Dashboard availability">
           <h2>Dashboard data is not available yet</h2>
           <p>Campaigns, evaluations, people, forms, reports, results and settings still use business APIs that have not been migrated to Auth0 authorization. They are unavailable in Auth0 mode until the backend validates access tokens and derives the acting user on each request.</p>
@@ -35,8 +36,8 @@ export function Auth0Dashboard() {
 export function Auth0Unavailable() {
   const user = useAuth0Identity();
   const { pathname } = useLocation();
-  const isHr = isHrOrManagerRole(user.system_role_name);
-  const dashboardPath = isHr ? '/hr-home' : '/employee-home';
+  const dashboardPath = getSystemDashboardPath(user.system_role_name);
+  const isHr = dashboardPath === '/hr-home';
   let activePage: SidebarPage = isHr ? 'hr-home' : 'employee-home';
   if (pathname.startsWith('/people')) activePage = 'people';
   else if (pathname.startsWith('/campaigns')) activePage = 'campaigns';

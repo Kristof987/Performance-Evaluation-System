@@ -2,7 +2,7 @@ from copy import deepcopy
 from datetime import date
 import os
 from uuid import uuid4
-from typing import Literal
+from typing import Callable, Literal
 
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -76,12 +76,53 @@ def get_current_employee(user: models.User = Depends(get_current_user)) -> model
     return employee
 
 
+def require_permission(permission_name: str) -> Callable[..., models.User]:
+    """Use as Depends(require_permission("campaigns.manage")) on secured routes."""
+    def check_permission(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)) -> models.User:
+        grant = (
+            db.query(models.SystemPermission.id)
+            .select_from(models.User)
+            .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
+            .join(models.system_role_permissions,
+                  models.system_role_permissions.c.system_role_id == models.SystemRole.id)
+            .join(models.SystemPermission,
+                  models.SystemPermission.id == models.system_role_permissions.c.permission_id)
+            .filter(models.User.id == user.id)
+            .filter(models.User.is_active.is_(True))
+            .filter(models.SystemPermission.name == permission_name)
+            .first()
+        )
+        if grant is None:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+
+    return check_permission
+
+
 @app.get("/auth/me", response_model=schemas.AuthMeResponse)
 def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    system_role_name = db.query(models.SystemRole.name).filter(models.SystemRole.id == user.system_role_id).scalar()
+    roles = (
+        db.query(
+            models.SystemRole.name.label("system_role_name"),
+            models.CompanyRole.name.label("company_role_name"),
+        )
+        .select_from(models.User)
+        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
+        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
+        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
+        .filter(models.User.id == user.id)
+        .one_or_none()
+    )
+    if roles is None:
+        raise HTTPException(status_code=500, detail="Account role configuration is unavailable")
+    employee = user.employee
     return {"id": user.id, "username": user.username, "email": user.email,
-            "system_role_id": user.system_role_id, "system_role_name": system_role_name,
-            "is_active": user.is_active, "employee": user.employee}
+            "system_role_id": user.system_role_id, "system_role_name": roles.system_role_name,
+            "is_active": user.is_active,
+            "employee": {"id": employee.id, "full_name": employee.full_name,
+                         "company_role_id": employee.company_role_id,
+                         "company_role_name": roles.company_role_name,
+                         "is_active": employee.is_active} if employee else None}
 
 
 @app.post("/users", response_model=schemas.UserResponse)
