@@ -1,16 +1,19 @@
-import type { CampaignLifecycleStatus } from './campaign.lifecycle';
-export type CampaignStatus = CampaignLifecycleStatus;
+import type { CampaignLifecycleStatus, CampaignWorkflowStatus } from './campaign.lifecycle';
+export type CampaignStatus = CampaignWorkflowStatus;
 
 export type Campaign = {
   id: string;
   name: string;
   status: CampaignStatus;
+  isArchived: boolean;
   isActive: boolean;
   currentDate: string;
   start: string;
   end: string;
   startDate: string;
   endDate: string;
+  startAt: string;
+  endAt: string | null;
   description: string | null;
   comment: string | null;
   issuedFormsCount: number;
@@ -27,12 +30,16 @@ export type CampaignResponse = {
   description: string | null;
   start_date: string;
   end_date: string | null;
+  start_at: string;
+  end_at: string | null;
   is_active: boolean;
   comment: string | null;
   issued_forms_count: number;
   submitted_forms_count: number;
   current_date: string;
   lifecycle_status: CampaignLifecycleStatus;
+  campaign_status: CampaignStatus;
+  is_archived: boolean;
 };
 
 export type CampaignGroup = {
@@ -183,9 +190,8 @@ export type CampaignSelfEvaluationsResponse = {
 export type CampaignFormValues = {
   name: string;
   description: string;
-  startDate: string;
-  endDate: string;
-  isActive: boolean;
+  startLocal: string;
+  endLocal: string;
   comment: string;
 };
 

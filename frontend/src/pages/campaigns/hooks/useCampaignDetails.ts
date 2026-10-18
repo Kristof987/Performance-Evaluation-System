@@ -27,11 +27,13 @@ import {
   fetchCampaignEvaluationRules,
   fetchCampaignGroups,
   fetchCampaignSelfEvaluations,
+  changeCampaignSchedule,
   updateCampaign,
   updateCampaignEvaluationMatrix,
   updateCampaignEvaluationRules,
   updateCampaignGroups,
   updateCampaignSelfEvaluations,
+  updateCampaignSetup,
 } from '../campaign.api';
 
 function areGroupIdsEqual(first: number[], second: number[]) {
@@ -128,6 +130,9 @@ export function useCampaignDetails(id: string | undefined) {
   const [isSavingMatrix, setIsSavingMatrix] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
+  const [isChangingSchedule, setIsChangingSchedule] = useState(false);
+  const [isSavingSetup, setIsSavingSetup] = useState(false);
   const saving = useRef(false);
   const routeVersion = useRef(0);
 
@@ -153,6 +158,8 @@ export function useCampaignDetails(id: string | undefined) {
     setIsEditOpen(false);
     setSaveMessage('');
     setSuccessMessage('');
+    setActionMessage('');
+    setIsChangingSchedule(false);
     saving.current = false;
     setIsSavingCampaign(false);
     setIsCampaignLoading(true);
@@ -214,6 +221,28 @@ export function useCampaignDetails(id: string | undefined) {
     setSaveMessage('');
     if (campaign) setForm(getCampaignForm(campaign));
   }
+  async function handleScheduleAction(action: 'schedule' | 'unschedule') {
+    if (!campaign || !canManageCampaigns || isChangingSchedule || hasEditChanges && isEditOpen) return;
+    if (hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges) {
+      setActionMessage('Save or discard configuration changes before changing the schedule.');
+      return;
+    }
+    const version = routeVersion.current;
+    setIsChangingSchedule(true);
+    setActionMessage('');
+    try {
+      const updated = await changeCampaignSchedule(getAccessTokenSilently, campaign.id, action);
+      if (routeVersion.current !== version) return;
+      setCampaign(updated);
+      setForm(getCampaignForm(updated));
+      setSuccessMessage(action === 'schedule' ? 'Campaign scheduled.' : 'Campaign returned to draft.');
+    } catch (error) {
+      handleAuthError(error);
+      if (routeVersion.current === version) setActionMessage(error instanceof Error ? error.message : 'Campaign status could not be updated.');
+    } finally {
+      if (routeVersion.current === version) setIsChangingSchedule(false);
+    }
+  }
   const hasEditChanges =
     campaign !== null &&
     !areCampaignFormsEqual(form, getCampaignForm(campaign));
@@ -229,6 +258,60 @@ export function useCampaignDetails(id: string | undefined) {
   const hasSelfChanges = selfFormsDirty(selfEvaluations, selectedSelfForms);
   const formProgress = getFormAssignmentProgress(evaluationRules, selectedRuleFormIds);
   const matrixReadiness = getMatrixReadiness(formProgress, hasGroupChanges, hasRuleChanges);
+
+  async function handleUpdateSetup() {
+    if (!campaign || campaign.status !== 'scheduled' || !canManageCampaigns || isSavingSetup ||
+        !(hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges)) return;
+    const version = routeVersion.current;
+    setIsSavingSetup(true);
+    setActionMessage('');
+    try {
+      const rules = evaluationRules.groups.flatMap((group) => group.rolePairs.flatMap((pair) => {
+        const formId = selectedRuleFormIds[getRuleKey(group.groupId, pair.evaluatorRoleId, pair.evaluateeRoleId)];
+        return formId == null || !selectedGroupIds.includes(group.groupId) ? [] : [{
+          companyGroupId: group.groupId, evaluatorRoleId: pair.evaluatorRoleId,
+          evaluateeRoleId: pair.evaluateeRoleId, formId,
+        }];
+      }));
+      const assignments = evaluationMatrix.groups.flatMap((group) => group.employees.flatMap((evaluator) =>
+        group.employees.flatMap((evaluatee) =>
+          selectedGroupIds.includes(group.groupId) && selectedMatrixAssignments[getMatrixKey(group.groupId, evaluator.id, evaluatee.id)]
+            ? [{ companyGroupId: group.groupId, evaluatorId: evaluator.id, evaluateeId: evaluatee.id }] : [],
+        ),
+      ));
+      const selectedParticipants = new Set(evaluationMatrix.groups.filter((group) => selectedGroupIds.includes(group.groupId))
+        .flatMap((group) => group.employees.filter((person) => person.active !== false).map((person) => person.id)));
+      await updateCampaignSetup(getAccessTokenSilently, campaign.id, selectedGroupIds, rules,
+        selfEvaluations.participants.filter((person) => selectedParticipants.has(person.employeeId)).map((person) => ({
+          employeeId: person.employeeId, formId: selectedSelfForms[person.employeeId] ?? null,
+        })), assignments);
+      if (routeVersion.current !== version) return;
+      const controller = new AbortController();
+      const [loadedGroups, loadedRules, loadedSelf, loadedMatrix, loadedCampaign] = await Promise.all([
+        fetchCampaignGroups(getAccessTokenSilently, campaign.id, controller.signal),
+        fetchCampaignEvaluationRules(getAccessTokenSilently, campaign.id, controller.signal),
+        fetchCampaignSelfEvaluations(getAccessTokenSilently, campaign.id, controller.signal),
+        fetchCampaignEvaluationMatrix(getAccessTokenSilently, campaign.id, controller.signal),
+        fetchCampaign(getAccessTokenSilently, campaign.id, controller.signal),
+      ]);
+      if (routeVersion.current !== version) return;
+      setCampaignGroups(loadedGroups);
+      setSelectedGroupIds(loadedGroups.assignedGroupIds);
+      setEvaluationRules(loadedRules);
+      setSelectedRuleFormIds(getRuleFormMap(loadedRules));
+      setSelfEvaluations(loadedSelf);
+      setSelectedSelfForms(selfFormMap(loadedSelf));
+      setEvaluationMatrix(loadedMatrix);
+      setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
+      setCampaign(loadedCampaign);
+      setSuccessMessage('Scheduled campaign setup saved.');
+    } catch (error) {
+      handleAuthError(error);
+      if (routeVersion.current === version) setActionMessage(error instanceof Error ? error.message : 'Campaign setup could not be saved.');
+    } finally {
+      if (routeVersion.current === version) setIsSavingSetup(false);
+    }
+  }
 
   function toggleGroup(groupId: number) {
     setSelectedGroupIds((current) =>
@@ -592,7 +675,7 @@ export function useCampaignDetails(id: string | undefined) {
     setIsSavingCampaign(true);
     setSaveMessage('');
     try {
-      const saved = await updateCampaign(getAccessTokenSilently, campaign.id, form);
+      const saved = await updateCampaign(getAccessTokenSilently, campaign, form);
       if (routeVersion.current !== version) return;
       if (saved.issuedFormsCount > campaign.issuedFormsCount || saved.status !== campaign.status) {
         setEvaluationMatrix({ groups: [] });
@@ -661,6 +744,11 @@ export function useCampaignDetails(id: string | undefined) {
     matrixMessage,
     saveMessage,
     successMessage,
+    actionMessage,
+    isChangingSchedule,
+    isSavingSetup,
+    handleUpdateSetup,
+    handleScheduleAction,
     isSavingGroups,
     isSavingRules,
     isSavingMatrix,

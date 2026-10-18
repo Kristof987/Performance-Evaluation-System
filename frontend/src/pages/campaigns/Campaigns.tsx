@@ -21,7 +21,7 @@ export function Campaigns() {
               type="button"
               onClick={state.openCreate}
             >
-              Create campaign
+               Create draft
             </button>}
           </div>
         </div>

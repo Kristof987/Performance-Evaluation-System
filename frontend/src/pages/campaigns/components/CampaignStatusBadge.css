@@ -13,13 +13,19 @@
   background: var(--color-primary-soft);
   color: var(--color-primary);
 }
-.campaign-lifecycle-ongoing {
+.campaign-lifecycle-active {
   background: #eefaf2;
   color: #24743c;
 }
-.campaign-lifecycle-disabled {
+.campaign-lifecycle-draft, .campaign-lifecycle-paused {
   color: var(--color-text-muted);
 }
-.campaign-lifecycle-completed {
+.campaign-lifecycle-review, .campaign-lifecycle-closed {
   color: var(--color-text-secondary);
+}
+.campaign-archived-label {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  margin-inline: 6px;
 }

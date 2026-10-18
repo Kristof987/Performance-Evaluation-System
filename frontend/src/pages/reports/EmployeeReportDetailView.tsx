@@ -10,7 +10,12 @@ function formatScore(value: number | null) {
 
 function formatDate(value: string | null) {
   if (!value) return 'No deadline';
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`));
+  const timestamp = value.includes('T');
+  const parsed = new Date(timestamp ? value : `${value}T00:00:00Z`);
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric',
+    timeZone: timestamp ? 'Europe/Budapest' : 'UTC',
+  }).format(parsed);
 }
 
 const sectionEmptyState: Record<EmployeeReportDetail['section_availability'], { title: string; message: string }> = {

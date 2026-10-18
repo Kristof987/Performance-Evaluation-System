@@ -28,6 +28,11 @@ export function CampaignDetails() {
     campaignError,
     saveMessage,
     successMessage,
+    actionMessage,
+    isChangingSchedule,
+    isSavingSetup,
+    handleUpdateSetup,
+    handleScheduleAction,
     campaignGroups,
     evaluationRules,
     evaluationMatrix,
@@ -132,10 +137,16 @@ export function CampaignDetails() {
             <h1>{campaign.name}</h1>
             <p>
               <CampaignStatusBadge status={campaign.status} />
-              {campaign.start} - {campaign.end}
+              {campaign.isArchived && <span className="campaign-archived-label"> Archived</span>}
+              {' '}{campaign.start} - {campaign.end}
             </p>
           </div>
           <div className="campaign-heading-actions">
+            {canManageCampaigns && (campaign.status === 'draft' || campaign.status === 'scheduled') && !campaign.isArchived && (
+              <button className="btn btn-secondary" type="button" disabled={isChangingSchedule || isSavingCampaign} onClick={() => handleScheduleAction(campaign.status === 'draft' ? 'schedule' : 'unschedule')}>
+                {isChangingSchedule ? 'Updating...' : campaign.status === 'draft' ? 'Schedule campaign' : 'Return to draft'}
+              </button>
+            )}
             {canManageCampaigns && <button
               className="btn btn-primary"
               type="button"
@@ -148,6 +159,16 @@ export function CampaignDetails() {
 
         {successMessage !== '' && (
           <div className="campaign-success-message">{successMessage}</div>
+        )}
+        {actionMessage !== '' && <div className="campaign-save-message" role="alert">{actionMessage}</div>}
+
+        {canManageCampaigns && campaign.status === 'scheduled' && (
+          <div className="campaign-heading-actions">
+            <button className="btn btn-primary" type="button" onClick={handleUpdateSetup}
+              disabled={isSavingSetup || !(hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges)}>
+              {isSavingSetup ? 'Saving setup...' : 'Save scheduled setup together'}
+            </button>
+          </div>
         )}
 
         <CampaignStats campaign={campaign} />

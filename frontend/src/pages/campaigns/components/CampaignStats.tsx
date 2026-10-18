@@ -23,7 +23,7 @@ export default function CampaignStats(props: Props) {
         </div>
         <div className="campaign-stat">
           <span>
-            {campaign.status === 'Completed' || campaign.status === 'Disabled'
+             {campaign.status === 'closed' || campaign.status === 'review'
               ? 'Not submitted'
               : 'Awaiting submission'}
           </span>
@@ -42,11 +42,11 @@ export default function CampaignStats(props: Props) {
       <div className="campaign-mini-stat">
         <span>Total campaigns</span>
         <strong>{campaignList.length}</strong>
-        <small>{campaignList.filter((campaign) => campaign.status === 'Disabled').length} disabled</small>
+         <small>{campaignList.filter((campaign) => campaign.isArchived).length} archived</small>
       </div>
-      {(['Scheduled', 'Ongoing', 'Completed'] as const).map((status) => (
+       {(['draft', 'scheduled', 'active'] as const).map((status) => (
         <div className="campaign-mini-stat" key={status}>
-          <span>{status}</span>
+           <span>{status[0].toUpperCase() + status.slice(1)}</span>
           <strong>{campaignList.filter((campaign) => campaign.status === status).length}</strong>
         </div>
       ))}

@@ -12,7 +12,7 @@ import type {
   CampaignSelfEvaluations,
   CampaignSelfEvaluationsResponse,
 } from './campaign.types';
-import { mapCampaignFromResponse } from './campaign.utils';
+import { budapestInstant, budapestLocal, mapCampaignFromResponse } from './campaign.utils';
 
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 
@@ -121,15 +121,21 @@ function mapCampaignEvaluationMatrix(
   };
 }
 
-function getPayload(form: CampaignFormValues) {
+function getPayload(form: CampaignFormValues, campaign?: Campaign) {
   return {
     name: form.name,
     description: form.description || null,
-    start_date: form.startDate,
-    end_date: form.endDate || null,
-    is_active: form.isActive,
+    start_date: campaign && form.startLocal === budapestLocal(campaign.startAt) ? campaign.startAt : budapestInstant(form.startLocal),
+    end_date: campaign && form.endLocal === (campaign.endAt ? budapestLocal(campaign.endAt) : '') ? campaign.endAt : form.endLocal ? budapestInstant(form.endLocal) : null,
     comment: form.comment || null,
   };
+}
+
+export async function changeCampaignSchedule(getAccessToken: AccessTokenGetter, id: string, action: 'schedule' | 'unschedule'): Promise<Campaign> {
+  return mapCampaignFromResponse(await requestCampaigns<CampaignResponse>(
+    getAccessToken, `/${encodeURIComponent(id)}/${action}`, { method: 'POST' },
+    `Campaign could not be ${action === 'schedule' ? 'scheduled' : 'returned to draft'}.`,
+  ));
 }
 
 export async function fetchCampaigns(getAccessToken: AccessTokenGetter, signal: AbortSignal): Promise<Campaign[]> {
@@ -177,17 +183,17 @@ export async function createCampaign(
 
 export async function updateCampaign(
   getAccessToken: AccessTokenGetter,
-  id: string,
+  campaign: Campaign,
   form: CampaignFormValues,
 ): Promise<Campaign> {
   return mapCampaignFromResponse(
     await requestCampaigns<CampaignResponse>(
       getAccessToken,
-      `/${encodeURIComponent(id)}`,
+      `/${encodeURIComponent(campaign.id)}`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(getPayload(form)),
+        body: JSON.stringify(getPayload(form, campaign)),
       },
       'Campaign could not be updated.',
     ),
@@ -324,4 +330,57 @@ export async function updateCampaignEvaluationMatrix(
     removedCount: response.removed_count,
     keptCompletedCount: response.kept_completed_count,
   };
+}
+
+export async function updateCampaignSetup(
+  getAccessToken: AccessTokenGetter,
+  id: string,
+  groupIds: number[],
+  rules: Array<{ companyGroupId: number; evaluatorRoleId: number; evaluateeRoleId: number; formId: number }>,
+  selfEvaluations: Array<{ employeeId: number; formId: number | null }>,
+  assignments: Array<{ companyGroupId: number; evaluatorId: number; evaluateeId: number }>,
+): Promise<CampaignEvaluationMatrix> {
+  const response = await requestCampaigns<CampaignEvaluationMatrixResponse>(
+    getAccessToken, `/${encodeURIComponent(id)}/setup`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_ids: groupIds,
+        rules: rules.map((rule) => ({ company_group_id: rule.companyGroupId, evaluator_role_id: rule.evaluatorRoleId, evaluatee_role_id: rule.evaluateeRoleId, form_id: rule.formId })),
+        self_evaluations: selfEvaluations.map((item) => ({ employee_id: item.employeeId, form_id: item.formId })),
+        assignments: assignments.map((item) => ({ company_group_id: item.companyGroupId, evaluator_id: item.evaluatorId, evaluatee_id: item.evaluateeId })),
+      }),
+    }, 'Campaign setup could not be saved.',
+  );
+  return mapCampaignEvaluationMatrix(response);
+}
+
+export type CampaignSetup = {
+  groupIds: number[];
+  rules: Array<{ companyGroupId: number; evaluatorRoleId: number; evaluateeRoleId: number; formId: number }>;
+  selfEvaluations: Array<{ employeeId: number; formId: number | null }>;
+  assignments: Array<{ companyGroupId: number; evaluatorId: number; evaluateeId: number }>;
+};
+
+export async function updateCampaignSetup(getAccessToken: AccessTokenGetter, id: string, setup: CampaignSetup): Promise<CampaignEvaluationMatrix> {
+  const response = await requestCampaigns<CampaignEvaluationMatrixResponse>(
+    getAccessToken, `/${encodeURIComponent(id)}/setup`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_ids: setup.groupIds,
+        rules: setup.rules.map((rule) => ({
+          company_group_id: rule.companyGroupId,
+          evaluator_role_id: rule.evaluatorRoleId,
+          evaluatee_role_id: rule.evaluateeRoleId,
+          form_id: rule.formId,
+        })),
+        self_evaluations: setup.selfEvaluations.map((item) => ({ employee_id: item.employeeId, form_id: item.formId })),
+        assignments: setup.assignments.map((item) => ({
+          company_group_id: item.companyGroupId,
+          evaluator_id: item.evaluatorId,
+          evaluatee_id: item.evaluateeId,
+        })),
+      }),
+    }, 'Campaign setup could not be saved.',
+  );
+  return mapCampaignEvaluationMatrix(response);
 }

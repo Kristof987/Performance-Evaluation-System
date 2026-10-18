@@ -6,7 +6,7 @@ import type {
   CampaignStatusFilter,
   UpdateCampaignField,
 } from '../campaign.types';
-import { emptyCampaignForm } from '../campaign.utils';
+import { emptyCampaignForm, validateCampaignTimes } from '../campaign.utils';
 import { createCampaign, fetchCampaigns } from '../campaign.api';
 import { formatUserName } from '../../layout/sidebar-user';
 import { useAuth0 } from '@auth0/auth0-react';
@@ -76,8 +76,9 @@ export function useCampaigns() {
       setCreateMessage('You do not have permission to create campaigns.');
       return;
     }
-    if (form.endDate !== '' && form.endDate < form.startDate) {
-      setCreateMessage('End date cannot be earlier than the start date.');
+    const validation = validateCampaignTimes(form);
+    if (validation) {
+      setCreateMessage(validation);
       return;
     }
     saving.current = true;

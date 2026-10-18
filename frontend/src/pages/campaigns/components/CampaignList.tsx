@@ -57,10 +57,12 @@ export default function CampaignList({
             }
           >
             <option>All statuses</option>
-            <option>Scheduled</option>
-            <option>Ongoing</option>
-            <option>Completed</option>
-            <option>Disabled</option>
+             <option value="draft">Draft</option>
+             <option value="scheduled">Scheduled</option>
+             <option value="active">Active</option>
+             <option value="paused">Paused</option>
+             <option value="review">Review</option>
+             <option value="closed">Closed</option>
           </select>
           <button
             className="btn btn-secondary"
@@ -128,7 +130,8 @@ export default function CampaignList({
                   <Link className="campaign-name-link" to={`/campaigns/${campaign.id}`}>{campaign.name}</Link>
                 </td>
                 <td>
-                  <CampaignStatusBadge status={campaign.status} />
+                   <CampaignStatusBadge status={campaign.status} />
+                   {campaign.isArchived && <span className="campaign-archived-label"> Archived</span>}
                 </td>
                 <td>
                   {campaign.start} - {campaign.end}

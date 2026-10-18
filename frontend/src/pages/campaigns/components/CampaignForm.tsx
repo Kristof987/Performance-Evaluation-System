@@ -4,7 +4,6 @@ import type {
   CampaignFormValues,
   UpdateCampaignField,
 } from '../campaign.types';
-import { getEndDateMin, isCampaignStarted } from '../campaign.utils';
 type Props = {
   form: CampaignFormValues;
   campaign?: Campaign;
@@ -58,43 +57,30 @@ export default function CampaignForm({
       </label>
 
       <label className="form-field">
-        <span className="form-label">Start date *</span>
+         <span className="form-label">Start date and time *</span>
         <input
           className="form-control"
           required
-          type="date"
-          value={form.startDate}
-          disabled={campaign ? isCampaignStarted(campaign) : false}
-          onChange={(event) => updateForm('startDate', event.target.value)}
+           type="datetime-local"
+           step="60"
+           value={form.startLocal}
+           disabled={campaign ? campaign.status !== 'draft' && campaign.status !== 'scheduled' : false}
+           onChange={(event) => updateForm('startLocal', event.target.value)}
         />
       </label>
 
       <label className="form-field">
-        <span className="form-label">End date</span>
+         <span className="form-label">End date and time</span>
         <input
           className="form-control"
-          type="date"
-          value={form.endDate}
-          min={campaign ? getEndDateMin(form, campaign) : form.startDate}
-          onChange={(event) => updateForm('endDate', event.target.value)}
+           type="datetime-local"
+           step="60"
+           value={form.endLocal}
+           disabled={campaign ? campaign.status !== 'draft' && campaign.status !== 'scheduled' : false}
+           min={form.startLocal}
+           onChange={(event) => updateForm('endLocal', event.target.value)}
         />
-        {campaign && campaign.issuedFormsCount > 0 && (
-          <span className="campaign-field-help">
-            End date cannot be moved earlier after questionnaires are issued.
-          </span>
-        )}
-      </label>
-
-      <label className="campaign-enabled-control">
-        <input
-          type="checkbox"
-          checked={form.isActive}
-          onChange={(event) => updateForm('isActive', event.target.checked)}
-        />
-        <span>
-          <strong>Enabled</strong>
-          <small>Allow this campaign to run during its scheduled period.</small>
-        </span>
+        <span className="campaign-field-help">Budapest time (Europe/Budapest). Times skipped or repeated by daylight saving are not accepted.</span>
       </label>
 
       <label className="form-field campaign-field-wide">
@@ -108,11 +94,7 @@ export default function CampaignForm({
         />
       </label>
 
-      {campaign && isCampaignStarted(campaign) && (
-        <span className="campaign-form-guidance campaign-field-wide">
-          Start date cannot be changed after the campaign begins.
-        </span>
-      )}
+       {!campaign && <span className="campaign-form-guidance campaign-field-wide">New campaigns are saved as drafts. Configure groups and evaluations before scheduling.</span>}
 
       {message !== '' && !nameConflict && <div className="campaign-save-message">{message}</div>}
 
@@ -125,7 +107,7 @@ export default function CampaignForm({
           type="submit"
           disabled={isSaving || !hasChanges}
         >
-          {isSaving ? 'Saving...' : campaign ? 'Save changes' : 'Create campaign'}
+           {isSaving ? 'Saving...' : campaign ? 'Save changes' : 'Create draft'}
         </button>
       </div>
     </form>

@@ -1,7 +1,10 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from business_calendar import business_date
+from models import CampaignStatus
 
 
 class FormStatusCreate(BaseModel):
@@ -206,6 +209,7 @@ class AssignedEvaluationResponse(BaseModel):
     campaign_id: int
     campaign_name: str
     campaign_start_date: date
+    campaign_start_at: datetime
     campaign_is_active: bool
     campaign_lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
     current_date: date
@@ -330,8 +334,8 @@ class PeopleGroupMemberCreate(BaseModel):
 class CampaignCreate(BaseModel):
     name: str
     description: str | None = None
-    start_date: date
-    end_date: date | None = None
+    start_date: date | datetime
+    end_date: date | datetime | None = None
     is_active: bool = True
     comment: str | None = None
     created_by: int | None = None
@@ -340,8 +344,10 @@ class CampaignCreate(BaseModel):
 class CampaignUpdate(BaseModel):
     name: str
     description: str | None = None
-    start_date: date
-    end_date: date | None = None
+    start_date: date | datetime | None = None
+    end_date: date | datetime | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
     is_active: bool = True
     comment: str | None = None
 
@@ -359,6 +365,10 @@ class CampaignResponse(BaseModel):
     submitted_forms_count: int = 0
     current_date: date
     lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
+    campaign_status: CampaignStatus
+    start_at: datetime
+    end_at: datetime | None
+    is_archived: bool
 
     model_config = {
         "from_attributes": True
@@ -494,6 +504,11 @@ class ReportCampaignOption(BaseModel):
     start_date: date
     end_date: date | None = None
     is_active: bool
+
+    @field_validator("start_date", "end_date", mode="before")
+    @classmethod
+    def preserve_legacy_calendar_date(cls, value):
+        return business_date(value)
 
 
 class ReportKpiSummary(BaseModel):
@@ -725,6 +740,20 @@ class CampaignEvaluationMatrixUpdateItem(BaseModel):
 
 class CampaignEvaluationMatrixUpdate(BaseModel):
     assignments: list[CampaignEvaluationMatrixUpdateItem] = Field(default_factory=list)
+
+
+class CampaignSetupMembershipChange(BaseModel):
+    company_group_id: int
+    employee_id: int
+    included: bool
+
+
+class CampaignSetupUpdate(BaseModel):
+    group_ids: list[int]
+    rules: list[CampaignEvaluationRuleUpdateItem]
+    self_evaluations: list[CampaignSelfEvaluationAssignment]
+    assignments: list[CampaignEvaluationMatrixUpdateItem]
+    memberships: list[CampaignSetupMembershipChange] = Field(default_factory=list)
 
 
 class CampaignEvaluationMatrixUpdateResponse(CampaignEvaluationMatrixResponse):

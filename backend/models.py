@@ -1,10 +1,11 @@
-from sqlite3 import Date
+from enum import Enum
 
 from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
     Date,
+    CheckConstraint,
     ForeignKey,
     Integer,
     String,
@@ -16,6 +17,15 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from database import Base
+
+
+class CampaignStatus(str, Enum):
+    DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    REVIEW = "review"
+    CLOSED = "closed"
 
 class CampaignEvaluationRule(Base):
     __tablename__ = "campaign_evaluation_rules"
@@ -332,8 +342,20 @@ class Campaign(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
 
-    start_date = Column(Date, nullable=False)
-    end_date = Column(Date, nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=True)
+
+    status = Column(String(16), nullable=False, default=CampaignStatus.DRAFT.value, server_default=CampaignStatus.DRAFT.value)
+    paused_from_status = Column(String(16), nullable=True)
+    is_archived = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Compatibility boundary: migration-era campaigns must not acquire new snapshots
+    # through the old, date/flag-driven issuance path before lifecycle integration.
+    legacy_issuance_blocked = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'scheduled', 'active', 'paused', 'review', 'closed')", name="ck_campaign_status"),
+        CheckConstraint("(status = 'paused' AND paused_from_status IN ('active', 'review')) OR (status <> 'paused' AND paused_from_status IS NULL)", name="ck_campaign_paused_from_status"),
+    )
 
     is_active = Column(Boolean, default=True, nullable=False)
 
@@ -343,6 +365,24 @@ class Campaign(Base):
         Integer,
         ForeignKey("users.id"),
         nullable=False,
+    )
+
+
+class CampaignLifecycleHistory(Base):
+    __tablename__ = "campaign_lifecycle_history"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
+    previous_status = Column(String(16), nullable=False)
+    new_status = Column(String(16), nullable=False)
+    transitioned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_automatic = Column(Boolean, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("previous_status IN ('draft', 'scheduled', 'active', 'paused', 'review', 'closed')", name="ck_campaign_history_previous_status"),
+        CheckConstraint("new_status IN ('draft', 'scheduled', 'active', 'paused', 'review', 'closed')", name="ck_campaign_history_new_status"),
+        CheckConstraint("is_automatic OR actor_user_id IS NOT NULL", name="ck_campaign_history_manual_actor"),
     )
 
 class CompanyGroup(Base):
