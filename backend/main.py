@@ -2001,6 +2001,11 @@ def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> l
         errors.append("Select at least one campaign group")
     members = {group_id: {employee.id: employee for employee, _ in get_group_employees(group_id, db)}
                for group_id in group_ids}
+    group_names = dict(db.query(models.CompanyGroup.id, models.CompanyGroup.name)
+                       .filter(models.CompanyGroup.id.in_(group_ids)).all())
+    role_ids = {person.company_role_id for people in members.values() for person in people.values()}
+    role_names = dict(db.query(models.CompanyRole.id, models.CompanyRole.name)
+                      .filter(models.CompanyRole.id.in_(role_ids)).all())
     if not any(members.values()):
         errors.append("Selected groups need active employees")
     rules = {(rule.company_group_id, rule.evaluator_role_id, rule.evaluatee_role_id): rule.form_id
@@ -2019,12 +2024,15 @@ def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> l
             errors.extend(f"Form {form.name}: {error}" for error in form_issuance_errors(form.questions, db))
     for group_id, people in members.items():
         if not people:
-            errors.append(f"Group {group_id} has no active employees")
+            errors.append(f"Group {group_names.get(group_id, group_id)} has no active employees")
         roles = {person.company_role_id for person in people.values()}
         for evaluator_role in roles:
             for evaluatee_role in roles:
                 if (group_id, evaluator_role, evaluatee_role) not in rules:
-                    errors.append(f"Group {group_id} lacks rule for roles {evaluator_role}/{evaluatee_role}")
+                    errors.append(
+                        f"{group_names.get(group_id, f'Group {group_id}')}: No questionnaire assigned for "
+                        f"{role_names.get(evaluator_role, f'Role {evaluator_role}')} → "
+                        f"{role_names.get(evaluatee_role, f'Role {evaluatee_role}')}")
     participants = {employee_id for people in members.values() for employee_id in people}
     for employee_id in self_forms:
         if employee_id not in participants:

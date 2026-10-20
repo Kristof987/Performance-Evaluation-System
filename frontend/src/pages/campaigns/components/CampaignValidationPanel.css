@@ -1,0 +1,70 @@
+.campaign-page .campaign-validation-panel {
+  display: flex;
+  gap: 14px;
+  margin: 16px 0 22px;
+  padding: 18px 20px;
+  border: 1px solid #efc7bd;
+  border-radius: var(--radius-xl);
+  background: var(--color-danger-bg);
+  color: var(--color-text);
+}
+
+.campaign-page .campaign-validation-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-danger);
+}
+
+.campaign-page .campaign-validation-content { min-width: 0; flex: 1; }
+.campaign-page .campaign-view .campaign-validation-content h2 {
+  margin: 0 0 5px;
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+.campaign-page .campaign-validation-content p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+.campaign-page .campaign-validation-content ul {
+  margin: 13px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.campaign-page .campaign-validation-content li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 9px 0;
+  border-top: 1px solid #f1dbd5;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.campaign-page .campaign-validation-content li > span { flex: 1 1 240px; }
+.campaign-page .campaign-validation-content li button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary-dark);
+  font: 600 12px var(--font-sans);
+  cursor: pointer;
+}
+.campaign-page .campaign-validation-content li button:hover { text-decoration: underline; }
+.campaign-page .campaign-validation-content li button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.campaign-page .campaign-validation-network,
+.campaign-page .campaign-validation-authorization,
+.campaign-page .campaign-validation-server {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-subtle);
+}

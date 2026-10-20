@@ -18,6 +18,7 @@ import { previewRuleCopy, type RuleCopyRequest } from '../rule-copy';
 import { clearMatrixPairs, generateMatrixPairs, matrixDirty, matrixGroupWithSelfLocks, matrixKey, selectMatrixPairs, synchronizeSelfPair, toggleMatrixPair } from '../matrix.utils';
 import { getFormAssignmentProgress, getMatrixReadiness } from '../campaign-readiness';
 import { previewSelfCopy, selfFormMap, selfFormsDirty } from '../self-evaluations';
+import { campaignFeedbackFromError, type CampaignFeedback } from '../components/CampaignValidationPanel';
 import {
   areCampaignFormsEqual,
   emptyCampaignForm,
@@ -143,6 +144,7 @@ export function useCampaignDetails(id: string | undefined) {
   const [saveMessage, setSaveMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
+  const [configurationFeedback, setConfigurationFeedback] = useState<CampaignFeedback | null>(null);
   const [isChangingSchedule, setIsChangingSchedule] = useState(false);
   const [confirmationAction, setConfirmationAction] = useState<'review' | 'close' | null>(null);
   const [operationalMetrics, setOperationalMetrics] = useState<CampaignOperationalMetrics | null>(null);
@@ -193,6 +195,7 @@ export function useCampaignDetails(id: string | undefined) {
     setSaveMessage('');
     setSuccessMessage('');
     setActionMessage('');
+    setConfigurationFeedback(null);
     setIsChangingSchedule(false);
     setConfirmationAction(null);
     setOperationalMetrics(null);
@@ -337,6 +340,7 @@ export function useCampaignDetails(id: string | undefined) {
         setForm(getCampaignForm(updated));
         setDestructiveAction(null);
         setSuccessMessage(action === 'archive' ? 'Campaign archived.' : 'Campaign unarchived.');
+        setConfigurationFeedback(null);
         try {
           const refreshed = await fetchCampaign(getAccessTokenSilently, campaign.id, new AbortController().signal);
           if (routeVersion.current === version) {
@@ -431,23 +435,45 @@ export function useCampaignDetails(id: string | undefined) {
     if (campaign) setForm(getCampaignForm(campaign));
   }
   async function handleScheduleAction(action: 'schedule' | 'unschedule') {
-    if (!campaign || !canManageCampaigns || isChangingSchedule || hasEditChanges && isEditOpen) return;
+    if (!campaign || !canManageCampaigns || isChangingSchedule) return;
+    if (hasEditChanges && isEditOpen) {
+      setConfigurationFeedback({ kind: 'validation', title: 'Save your campaign details first',
+        description: 'Finish or discard the open edit before changing the schedule.',
+        issues: [{ message: 'Save or discard the unsaved campaign details.', section: 'dates' }] });
+      setActionMessage('');
+      return;
+    }
     if (hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges) {
-      setActionMessage('Save or discard configuration changes before changing the schedule.');
+      setConfigurationFeedback({ kind: 'validation',
+        title: action === 'schedule' ? 'Campaign isn’t ready to schedule' : 'Save setup changes first',
+        description: 'Save or discard these pending changes before changing the schedule:',
+        issues: [
+          ...(hasGroupChanges ? [{ message: 'Campaign groups have unsaved changes.', section: 'groups' as const }] : []),
+          ...(hasRuleChanges ? [{ message: 'Form assignment rules have unsaved changes.', section: 'rules' as const }] : []),
+          ...(hasSelfChanges ? [{ message: 'Self-evaluations have unsaved changes.', section: 'self' as const }] : []),
+          ...(hasMatrixChanges ? [{ message: 'Evaluation assignments have unsaved changes.', section: 'matrix' as const }] : []),
+        ],
+      });
+      setActionMessage('');
       return;
     }
     const version = routeVersion.current;
     setIsChangingSchedule(true);
     setActionMessage('');
+    setSuccessMessage('');
+    setConfigurationFeedback(null);
     try {
       const updated = await changeCampaignSchedule(getAccessTokenSilently, campaign.id, action);
       if (routeVersion.current !== version) return;
       setCampaign(updated);
       setForm(getCampaignForm(updated));
+      setConfigurationFeedback(null);
       setSuccessMessage(action === 'schedule' ? 'Campaign scheduled.' : 'Campaign returned to draft.');
     } catch (error) {
       handleAuthError(error);
-      if (routeVersion.current === version) setActionMessage(error instanceof Error ? error.message : 'Campaign status could not be updated.');
+      if (routeVersion.current === version) setConfigurationFeedback(campaignFeedbackFromError(error, action, {
+        groups: campaignGroups, rules: evaluationRules, matrix: evaluationMatrix, selfEvaluations,
+      }));
     } finally {
       if (routeVersion.current === version) setIsChangingSchedule(false);
     }
@@ -503,6 +529,7 @@ export function useCampaignDetails(id: string | undefined) {
       setOperationalMetrics(null);
       setConfirmationError('');
       setIsEditOpen(false);
+      setConfigurationFeedback(null);
       setSuccessMessage(action === 'pause' ? 'Campaign paused.' : action === 'resume' ? 'Campaign resumed.' : action === 'review' ? 'Campaign moved to review.' : 'Campaign closed.');
     } catch (error) {
       handleAuthError(error);
@@ -559,6 +586,9 @@ export function useCampaignDetails(id: string | undefined) {
     const version = routeVersion.current;
     setIsSavingSetup(true);
     setActionMessage('');
+    setSuccessMessage('');
+    setConfigurationFeedback(null);
+    let setupSaved = false;
     try {
       const rules = evaluationRules.groups.flatMap((group) => group.rolePairs.flatMap((pair) => {
         const formId = selectedRuleFormIds[getRuleKey(group.groupId, pair.evaluatorRoleId, pair.evaluateeRoleId)];
@@ -579,7 +609,10 @@ export function useCampaignDetails(id: string | undefined) {
         selfEvaluations.participants.filter((person) => selectedParticipants.has(person.employeeId)).map((person) => ({
           employeeId: person.employeeId, formId: selectedSelfForms[person.employeeId] ?? null,
         })), assignments);
+      setupSaved = true;
       if (routeVersion.current !== version) return;
+      setConfigurationFeedback(null);
+      setSuccessMessage('Campaign setup saved.');
       const controller = new AbortController();
       const [loadedGroups, loadedRules, loadedSelf, loadedMatrix, loadedCampaign] = await Promise.all([
         fetchCampaignGroups(getAccessTokenSilently, campaign.id, controller.signal),
@@ -606,7 +639,17 @@ export function useCampaignDetails(id: string | undefined) {
         : 'Campaign setup saved.');
     } catch (error) {
       handleAuthError(error);
-      if (routeVersion.current === version) setActionMessage(error instanceof Error ? error.message : 'Campaign setup could not be saved.');
+      if (routeVersion.current === version) {
+        const feedback = campaignFeedbackFromError(error, 'setup', {
+          groups: campaignGroups, rules: evaluationRules, matrix: evaluationMatrix, selfEvaluations,
+        });
+        setConfigurationFeedback(setupSaved ? {
+          ...feedback,
+          title: 'Campaign saved, refresh needed',
+          description: 'Your setup was saved, but the latest campaign details could not be loaded. Reload the page to see the persisted configuration.',
+          issues: [],
+        } : feedback);
+      }
     } finally {
       if (routeVersion.current === version) setIsSavingSetup(false);
     }
@@ -758,6 +801,7 @@ export function useCampaignDetails(id: string | undefined) {
       setSelfEvaluations(saved);
       setSelectedSelfForms(selfFormMap(saved));
       setSelfMessage('Self-evaluation forms saved.');
+      setConfigurationFeedback(null);
       try {
         const controller = new AbortController();
         const [loadedMatrix, loadedCampaign, loadedRules] = await Promise.all([
@@ -830,6 +874,7 @@ export function useCampaignDetails(id: string | undefined) {
       setSelectedRuleFormIds(getRuleFormMap(loadedRules));
       setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setSuccessMessage('Campaign groups updated successfully.');
+      setConfigurationFeedback(null);
     } catch (error) {
       handleAuthError(error);
       if (routeVersion.current === version) {
@@ -878,6 +923,7 @@ export function useCampaignDetails(id: string | undefined) {
       setEvaluationMatrix(loadedMatrix);
       setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setSuccessMessage('Campaign form rules updated successfully.');
+      setConfigurationFeedback(null);
     } catch (error) {
       handleAuthError(error);
       if (routeVersion.current === version) {
@@ -947,6 +993,7 @@ export function useCampaignDetails(id: string | undefined) {
             : ''
         }.`,
       );
+      setConfigurationFeedback(null);
     } catch (error) {
       handleAuthError(error);
       if (routeVersion.current === version) {
@@ -984,6 +1031,7 @@ export function useCampaignDetails(id: string | undefined) {
       setForm(getCampaignForm(saved));
       setIsEditOpen(false);
       setSuccessMessage('Campaign updated successfully.');
+      setConfigurationFeedback(null);
       try {
         const controller = new AbortController();
         const [loadedMatrix, loadedSelf] = await Promise.all([
@@ -1047,6 +1095,7 @@ export function useCampaignDetails(id: string | undefined) {
     saveMessage,
     successMessage,
     actionMessage,
+    configurationFeedback: campaign?.id === id ? configurationFeedback : null,
     isChangingSchedule,
     confirmationAction,
     operationalMetrics,

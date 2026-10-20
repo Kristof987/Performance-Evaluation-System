@@ -6,6 +6,7 @@ import CampaignStats from './components/CampaignStats';
 import CampaignModal from './components/CampaignModal';
 import CampaignForm from './components/CampaignForm';
 import CampaignStatusBadge from './components/CampaignStatusBadge';
+import CampaignValidationPanel, { type CampaignIssue, type CampaignIssueSection } from './components/CampaignValidationPanel';
 import { useCampaignDetails } from './hooks/useCampaignDetails';
 import { countLabel, previewRuleCopy, type RuleCopyRequest } from './rule-copy';
 import { matrixGroupWithSelfLocks, matrixSelectedCount } from './matrix.utils';
@@ -34,6 +35,7 @@ export function CampaignDetails() {
     saveMessage,
     successMessage,
     actionMessage,
+    configurationFeedback,
     isChangingSchedule,
     confirmationAction,
     operationalMetrics,
@@ -148,6 +150,26 @@ export function CampaignDetails() {
     else handleUpdateSetup();
   }
 
+  function navigateToIssue(issue: CampaignIssue) {
+    if (issue.section === 'dates') {
+      if (!isEditOpen) openEdit();
+      return;
+    }
+    if (issue.section === 'rules' && issue.groupId) {
+      const groupId = issue.groupId;
+      setExpandedRuleGroups((current) => new Set(current).add(groupId));
+    }
+    const sectionIds: Partial<Record<CampaignIssueSection, string>> = {
+      groups: 'campaign-groups', rules: 'campaign-form-assignment-rules',
+      self: 'campaign-self-evaluations', matrix: 'campaign-evaluation-matrix',
+    };
+    const sectionId = issue.section && sectionIds[issue.section];
+    if (!sectionId) return;
+    const section = document.getElementById(sectionId);
+    section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    section?.focus({ preventScroll: true });
+  }
+
   function reviewMissingAssignments() {
     const missing = formProgress.groups.find((group) => group.firstMissing);
     if (missing) setExpandedRuleGroups((current) => new Set([...current, missing.groupId]));
@@ -247,6 +269,7 @@ export function CampaignDetails() {
           <div className="campaign-success-message">{successMessage}</div>
         )}
         {actionMessage !== '' && <div className="campaign-save-message" role="alert">{actionMessage}</div>}
+        {configurationFeedback && <CampaignValidationPanel feedback={configurationFeedback} onNavigate={navigateToIssue} />}
         {canManageCampaigns && (campaign.status === 'draft' || campaign.status === 'scheduled') &&
           (eligibilityError || (deletionEligibility && !deletionEligibility.can_delete && deletionEligibility.reason)) && (
             <div className="campaign-save-message" role="status">{eligibilityError || deletionEligibility?.reason}</div>
@@ -315,7 +338,7 @@ export function CampaignDetails() {
 
         <CampaignStats campaign={campaign} />
 
-        <section className="campaign-groups-card">
+        <section className="campaign-groups-card" id="campaign-groups" tabIndex={-1}>
           <div className="campaign-groups-heading">
             <div>
               <h2>Campaign groups</h2>
@@ -508,7 +531,7 @@ export function CampaignDetails() {
           </div>
         </section>
 
-        <section className="campaign-rules-card" id="campaign-self-evaluations">
+        <section className="campaign-rules-card" id="campaign-self-evaluations" tabIndex={-1}>
           <div className="campaign-groups-heading">
             <div>
               <h2>Self-evaluations</h2>
@@ -549,7 +572,7 @@ export function CampaignDetails() {
           <div className="campaign-groups-footer"><span>{countLabel(selfEvaluations.participants.length, 'participant')}</span>{selfMessage && <strong role="status">{selfMessage}</strong>}</div>
         </section>
 
-        <section className="campaign-rules-card">
+        <section className="campaign-rules-card" id="campaign-evaluation-matrix" tabIndex={-1}>
           <div className="campaign-groups-heading">
             <div>
               <h2>Evaluation Matrix</h2>
