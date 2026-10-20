@@ -34,6 +34,8 @@ services:
       COMPASS_ENV: development
       COMPASS_DEV_LOGIN_ENABLED: "true"
       APP_TIMEZONE: Europe/Budapest
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_ANALYSIS_MODEL: ${OPENAI_ANALYSIS_MODEL}
 
     depends_on:
       - db

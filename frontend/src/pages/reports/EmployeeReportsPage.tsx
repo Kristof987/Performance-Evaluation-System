@@ -107,5 +107,6 @@ function EmployeeReportDetailContent({ campaignId, employeeId, getAccessToken }:
   }, [campaignId, employeeId, getAccessToken, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.employee.id !== employeeId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-  return <EmployeeReportDetailView data={data} onBack={() => navigate(`/reports/campaigns/${campaignId}/employees`)} />;
+  if (!getAccessToken) return <div className="reports-state">Waiting for authentication...</div>;
+  return <EmployeeReportDetailView data={data} getAccessToken={getAccessToken} onBack={() => navigate(`/reports/campaigns/${campaignId}/employees`)} />;
 }

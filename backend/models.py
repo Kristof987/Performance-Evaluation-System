@@ -11,6 +11,8 @@ from sqlalchemy import (
     String,
     Table,
     UniqueConstraint,
+    Index,
+    text,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -189,6 +191,41 @@ class FilledForm(Base):
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+
+class EmployeeAIAnalysis(Base):
+    __tablename__ = "employee_ai_analyses"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    evaluatee_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    version = Column(Integer, nullable=False)
+    parent_analysis_id = Column(Integer, ForeignKey("employee_ai_analyses.id"), nullable=True)
+    status = Column(String(16), nullable=False, default="draft")
+    is_current_approved = Column(Boolean, nullable=False, default=False)
+    analysis = Column(JSONB, nullable=False)
+    evidence_summary = Column(JSONB, nullable=False)
+    model_identifier = Column(String(120), nullable=False)
+    generated_at = Column(DateTime(timezone=True), nullable=False)
+    generated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    edited_at = Column(DateTime(timezone=True), nullable=True)
+    edited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    source_fingerprint = Column(String(64), nullable=False)
+    schema_version = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "evaluatee_employee_id", "version", name="uq_employee_ai_analysis_version"),
+        Index("uq_employee_ai_current_approved", "campaign_id", "evaluatee_employee_id", unique=True,
+              postgresql_where=text("is_current_approved")),
+        CheckConstraint("version > 0 AND schema_version = 1", name="ck_employee_ai_version_schema"),
+        CheckConstraint("status IN ('draft', 'approved')", name="ck_employee_ai_status"),
+        CheckConstraint("NOT is_current_approved OR status = 'approved'", name="ck_employee_ai_current_status"),
+        CheckConstraint("(status = 'draft' AND approved_at IS NULL AND approved_by_user_id IS NULL) OR "
+                        "(status = 'approved' AND approved_at IS NOT NULL AND approved_by_user_id IS NOT NULL)",
+                        name="ck_employee_ai_approval_fields"),
     )
 
 

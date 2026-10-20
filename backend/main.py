@@ -21,6 +21,9 @@ import models
 import form_snapshot_service
 import reporting_service
 import question_analytics_service
+import ai_workflow_service
+from ai_analysis_models import EmployeeAIAnalysis
+from ai_generation_service import AnalysisGenerationError
 import schemas
 
 #Base.metadata.create_all(bind=engine)
@@ -1757,6 +1760,49 @@ def get_campaign_report_employee_detail(
 ):
     reject_conflicting_requester(requester_user_id, actor)
     return reporting_service.build_employee_report_detail(campaign_id, employee_id, actor, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis")
+def get_employee_ai_analyses(
+    campaign_id: int, employee_id: int, db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    return ai_workflow_service.list_analyses(db, campaign_id, employee_id, actor=actor)
+
+
+@app.post("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis/generate")
+def generate_employee_ai_report(
+    campaign_id: int, employee_id: int, db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("campaigns.manage")),
+):
+    try:
+        return ai_workflow_service.generate(db, campaign_id, employee_id, actor=actor)
+    except AnalysisGenerationError as error:
+        status = {"analysis_rate_limited": 429, "analysis_timeout": 504,
+                  "analysis_not_configured": 503, "analysis_provider_unavailable": 503,
+                  "insufficient_analysis_data": 422, "analysis_context_too_large": 422,
+                  "invalid_analysis_output": 422, "invalid_analysis_evidence": 422,
+                  "invalid_analysis_claim": 422}.get(error.code, 503)
+        raise HTTPException(status_code=status, detail=error.code) from None
+
+
+@app.put("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis/{analysis_id}")
+def edit_employee_ai_report(
+    campaign_id: int, employee_id: int, analysis_id: int, payload: EmployeeAIAnalysis,
+    db: Session = Depends(get_db), actor: models.User = Depends(require_permission("campaigns.manage")),
+):
+    try:
+        return ai_workflow_service.edit(db, campaign_id, employee_id, analysis_id, payload, actor=actor)
+    except AnalysisGenerationError:
+        raise HTTPException(status_code=422, detail="Edited analysis contains unsupported evidence or numerical claims") from None
+
+
+@app.post("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis/{analysis_id}/approve")
+def approve_employee_ai_report(
+    campaign_id: int, employee_id: int, analysis_id: int, db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("campaigns.manage")),
+):
+    return ai_workflow_service.approve(db, campaign_id, employee_id, analysis_id, actor=actor)
 
 
 def reject_conflicting_requester(requester_user_id: int | None, actor: models.User):

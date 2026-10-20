@@ -55,18 +55,22 @@ def require_reports_access(campaign_id: int | None, actor: models.User, db: Sess
     return campaign
 
 
+def _report_campaign_option(campaign: models.Campaign) -> dict[str, Any]:
+    return {
+        "id": campaign.id,
+        "name": campaign.name,
+        "start_date": business_date(campaign.start_date),
+        "end_date": business_date(campaign.end_date),
+        "is_active": campaign.is_active,
+        "campaign_status": campaign.status,
+        "is_archived": campaign.is_archived,
+    }
+
+
 def list_report_campaigns(actor: models.User, db: Session) -> list[dict[str, Any]]:
     require_reports_access(None, actor, db)
     return [
-        {
-            "id": campaign.id,
-            "name": campaign.name,
-            "start_date": business_date(campaign.start_date),
-            "end_date": business_date(campaign.end_date),
-            "is_active": campaign.is_active,
-            "campaign_status": campaign.status,
-            "is_archived": campaign.is_archived,
-        }
+        _report_campaign_option(campaign)
         for campaign in db.query(models.Campaign)
         .order_by(models.Campaign.start_date.desc(), models.Campaign.id.desc())
         .all()
@@ -210,7 +214,7 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
     configured_self = db.query(func.count(models.CampaignEmployeeSelfEvaluation.employee_id)).filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign.id).scalar() or 0
 
     return {
-        "campaign": {"id": campaign.id, "name": campaign.name, "start_date": business_date(campaign.start_date), "end_date": business_date(campaign.end_date), "is_active": campaign.is_active},
+        "campaign": _report_campaign_option(campaign),
         "kpis": {
             "total_evaluations": total,
             "completed_evaluations": completed,
@@ -286,7 +290,7 @@ def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> 
             "reportable_sections": sum(section.availability == "available" for section in result.sections.values()) if result else 0,
         })
     return {
-        "campaign": {"id": campaign.id, "name": campaign.name, "start_date": business_date(campaign.start_date), "end_date": business_date(campaign.end_date), "is_active": campaign.is_active},
+        "campaign": _report_campaign_option(campaign),
         "kpis": {
             "groups_in_campaign": len(groups),
             "participating_employees": len(participating),
@@ -423,7 +427,7 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session, pers
             })
     comparison = next(({"section_id": section_id, "section_name": names.get(section_id, "Archived section"), "roles": items} for section_id, items in sorted(section_candidate.items(), key=lambda pair: (names.get(pair[0], "Archived section").lower(), pair[0])) if len(items) >= 2 and section_id not in suppressed_sections), None)
     return {
-        "campaign": {"id": campaign.id, "name": campaign.name, "start_date": business_date(campaign.start_date), "end_date": business_date(campaign.end_date), "is_active": campaign.is_active},
+        "campaign": _report_campaign_option(campaign),
         "perspective": perspective,
         "kpis": {"roles_in_campaign": len(role_summaries), "participating_employees": len(participating_employees), "completed_evaluations": sum(item["completed_evaluations"] for item in role_summaries), "roles_with_reportable_results": sum(1 for item in role_summaries if item["average_score"] is not None)},
         "roles": role_summaries,
@@ -570,7 +574,7 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
     with_peer_feedback = len({row[0].evaluatee_id for row in completed_peer_rows})
     awaiting_peer = len({employee["employee_id"] for employee in employees if employee["peer_assigned"] > 0 and employee["peer_completed"] == 0})
     return {
-        "campaign": {"id": campaign.id, "name": campaign.name, "start_date": business_date(campaign.start_date), "end_date": business_date(campaign.end_date), "is_active": campaign.is_active},
+        "campaign": _report_campaign_option(campaign),
         "kpis": {
             "participating_employees": len(employees),
             "employees_with_peer_feedback": with_peer_feedback,
@@ -683,7 +687,7 @@ def build_employee_report_detail(campaign_id: int, employee_id: int, actor: mode
     self_status = self_evaluation_status(rows, employee_id)
     distinct_peer_evaluators = len({row[0].evaluator_id for row in peer_completed_rows})
     return {
-        "campaign": {"id": campaign.id, "name": campaign.name, "start_date": business_date(campaign.start_date), "end_date": business_date(campaign.end_date), "is_active": campaign.is_active},
+        "campaign": _report_campaign_option(campaign),
         "employee": {"id": employee.id, "name": employee.full_name, "email": employee.user.email if employee.user else None, "company_role": role.name, "groups": group_names_by_employee.get(employee.id, [])},
         "kpis": {
             "peer_reviews_received": len({row[0].id for row in peer_completed_rows}),

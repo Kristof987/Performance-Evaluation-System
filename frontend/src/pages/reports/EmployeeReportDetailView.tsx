@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import ReportsEmptyState from './components/ReportsEmptyState';
+import EmployeeAIAnalysisPanel from './components/EmployeeAIAnalysisPanel';
 import type { EmployeeReportDetail } from './types/reports.types';
+import type { AccessTokenGetter } from '../../auth/authenticated-api';
 
 function formatScore(value: number | null) {
   if (value === null) return '—';
@@ -42,7 +44,7 @@ function selfPeerMessage(data: EmployeeReportDetail) {
   return 'No reportable sections are available for comparison.';
 }
 
-export default function EmployeeReportDetailView({ data, onBack }: { data: EmployeeReportDetail; onBack: () => void }) {
+export default function EmployeeReportDetailView({ data, onBack, getAccessToken }: { data: EmployeeReportDetail; onBack: () => void; getAccessToken: AccessTokenGetter }) {
   const [historyKey, setHistoryKey] = useState<string | null>(null);
   const historyOptions = data.history.map((series) => ({ series, key: series.section_id === null ? 'overall' : `section-${series.section_id}` }));
   const selectedHistory = historyOptions.find((option) => option.key === historyKey) ?? historyOptions.find((option) => option.key === 'overall') ?? historyOptions[0];
@@ -69,6 +71,7 @@ export default function EmployeeReportDetailView({ data, onBack }: { data: Emplo
         ['Overall self score', formatScore(data.kpis.overall_self_score)],
       ].map(([label, value], index) => <div className={index === 0 ? 'reports-kpi-segment reports-kpi-primary' : 'reports-kpi-segment'} key={label as string}><span>{label}</span><strong>{value}</strong>{index === 1 && <small>{data.kpis.peer_completion_rate === null ? 'No reviews assigned' : `${data.kpis.peer_completion_rate}% complete`}</small>}</div>)}
     </section>
+    <EmployeeAIAnalysisPanel campaignId={data.campaign.id} employeeId={data.employee.id} getAccessToken={getAccessToken} />
     <section className="reports-card">
       <div className="reports-section-heading"><h2>Performance by section</h2><p>Aggregated peer feedback by rated section on a 1-5 scale.</p></div>
       {data.sections.length === 0 ? <ReportsEmptyState title={emptyState.title} message={emptyState.message} /> : <div className="reports-dimension-chart">{data.sections.map((section) => <div className="reports-bar-row" key={section.id}>
