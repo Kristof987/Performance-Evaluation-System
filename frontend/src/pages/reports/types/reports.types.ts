@@ -4,7 +4,8 @@ export type ReportCampaignOption = {
   start_date: string;
   end_date: string | null;
   is_active: boolean;
-  lifecycle_status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
+  campaign_status: 'draft' | 'scheduled' | 'active' | 'paused' | 'review' | 'closed';
+  is_archived: boolean;
 };
 
 export type QuestionResult = {

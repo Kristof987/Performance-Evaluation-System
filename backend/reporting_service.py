@@ -7,12 +7,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
-from business_calendar import business_date, business_today, campaign_status
+import campaign_lifecycle
+from business_calendar import business_date
 
 
 COMPLETED_STATUSES = {"completed", "submitted"}
 MIN_AGGREGATE_EVALUATEES = 2
 MIN_INDIVIDUAL_PEER_REVIEWERS = 2
+REPORTABLE_CAMPAIGN_STATUSES = tuple(status.value for status in campaign_lifecycle.REPORTABLE_STATUSES)
 
 
 def status_key(status_name: str | None, finish_date: date | None) -> str:
@@ -44,15 +46,17 @@ def require_reports_access(campaign_id: int | None, actor: models.User, db: Sess
 
     if campaign_id is None:
         return None
-    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    # Hold a shared row lock while reading results so Pause cannot commit mid-report.
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update(read=True).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if not campaign_lifecycle.reporting_allowed(campaign):
+        raise HTTPException(status_code=409, detail="Reports are available only for campaigns in review or closed status")
     return campaign
 
 
 def list_report_campaigns(actor: models.User, db: Session) -> list[dict[str, Any]]:
     require_reports_access(None, actor, db)
-    today = business_today()
     return [
         {
             "id": campaign.id,
@@ -60,10 +64,11 @@ def list_report_campaigns(actor: models.User, db: Session) -> list[dict[str, Any
             "start_date": business_date(campaign.start_date),
             "end_date": business_date(campaign.end_date),
             "is_active": campaign.is_active,
-            "lifecycle_status": campaign_status(campaign.start_date, campaign.end_date, campaign.is_active, today),
+            "campaign_status": campaign.status,
+            "is_archived": campaign.is_archived,
         }
         for campaign in db.query(models.Campaign)
-        .order_by(models.Campaign.is_active.desc(), models.Campaign.start_date.desc(), models.Campaign.id.desc())
+        .order_by(models.Campaign.start_date.desc(), models.Campaign.id.desc())
         .all()
     ]
 
@@ -599,7 +604,9 @@ def build_section_self_peer_comparison(employee_result, names: dict[int, str]) -
 def build_employee_history(employee_id: int, actor: models.User, db: Session) -> list[dict[str, Any]]:
     import section_scoring_service
 
-    campaigns = db.query(models.Campaign).order_by(models.Campaign.start_date.asc(), models.Campaign.id.asc()).all()
+    campaigns = (db.query(models.Campaign)
+                 .filter(models.Campaign.status.in_(REPORTABLE_CAMPAIGN_STATUSES))
+                 .order_by(models.Campaign.start_date.asc(), models.Campaign.id.asc()).all())
     series_by_section: dict[int | None, dict[str, Any]] = {}
     for campaign in campaigns:
         try:

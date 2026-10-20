@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router';
 import CampaignPage from './components/CampaignPage';
 import CampaignList from './components/CampaignList';
 import CampaignStats from './components/CampaignStats';
@@ -6,6 +7,7 @@ import CampaignForm from './components/CampaignForm';
 import { useCampaigns } from './hooks/useCampaigns';
 export { CampaignDetails } from './CampaignDetails';
 export function Campaigns() {
+  const location = useLocation();
   const state = useCampaigns();
   return (
     <CampaignPage>
@@ -28,7 +30,10 @@ export function Campaigns() {
         {state.successMessage !== '' && (
           <div className="campaign-success-message">{state.successMessage}</div>
         )}
-        <CampaignStats campaignList={state.campaignList} />
+        {(location.state as { campaignDeleted?: boolean } | null)?.campaignDeleted && (
+          <div className="campaign-success-message" role="status">Campaign permanently deleted.</div>
+        )}
+        <CampaignStats campaignList={state.summaryCampaigns} archived={state.statusFilter === 'Archived'} />
         <CampaignList
           campaignList={state.campaignList}
           filteredCampaigns={state.filteredCampaigns}

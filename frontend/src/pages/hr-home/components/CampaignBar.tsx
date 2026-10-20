@@ -82,7 +82,8 @@ function CampaignBar({
         >
           <Folder size={16} color="#4553C4" />
           <div className="campaign-name">{selectedCampaign?.name}</div>
-          {selectedCampaign && <CampaignStatusBadge status={selectedCampaign.lifecycle_status} />}
+          {selectedCampaign && <CampaignStatusBadge status={selectedCampaign.campaign_status} />}
+          {selectedCampaign?.is_archived && <span className="campaign-archived-label">Archived</span>}
           <ChevronDown size={14} color="#5A6079" />
         </button>
         {isCampaignListOpen && (
@@ -98,7 +99,8 @@ function CampaignBar({
                 }}
               >
                 <span>{campaign.name}</span>
-                <CampaignStatusBadge status={campaign.lifecycle_status} />
+                <CampaignStatusBadge status={campaign.campaign_status} />
+                {campaign.is_archived && <span className="campaign-archived-label">Archived</span>}
               </button>
             ))}
           </div>

@@ -1,7 +1,7 @@
 import type { Campaign } from '../campaign.types';
 type Props =
-  | { campaignList: Campaign[]; campaign?: never }
-  | { campaign: Campaign; campaignList?: never };
+  | { campaignList: Campaign[]; archived?: boolean; campaign?: never }
+  | { campaign: Campaign; campaignList?: never; archived?: never };
 export default function CampaignStats(props: Props) {
   if (props.campaign) {
     const campaign = props.campaign;
@@ -40,11 +40,10 @@ export default function CampaignStats(props: Props) {
   return (
     <div className="campaign-overview-stats" aria-label="Campaign statistics">
       <div className="campaign-mini-stat">
-        <span>Total campaigns</span>
+        <span>{props.archived ? 'Archived campaigns' : 'Total campaigns'}</span>
         <strong>{campaignList.length}</strong>
-         <small>{campaignList.filter((campaign) => campaign.isArchived).length} archived</small>
       </div>
-       {(['draft', 'scheduled', 'active'] as const).map((status) => (
+        {(props.archived ? ['paused', 'closed'] : ['draft', 'scheduled', 'active']).map((status) => (
         <div className="campaign-mini-stat" key={status}>
            <span>{status[0].toUpperCase() + status.slice(1)}</span>
           <strong>{campaignList.filter((campaign) => campaign.status === status).length}</strong>

@@ -4,7 +4,6 @@ import CampaignStatusBadge from './CampaignStatusBadge';
 import { formatDate } from '../campaign.utils';
 import type {
   Campaign,
-  CampaignStatus,
   CampaignStatusFilter,
 } from '../campaign.types';
 type Props = {
@@ -53,7 +52,7 @@ export default function CampaignList({
             value={statusFilter}
             onChange={(event) =>
               setStatusFilter(
-                event.target.value as 'All statuses' | CampaignStatus,
+                 event.target.value as CampaignStatusFilter,
               )
             }
           >
@@ -63,7 +62,8 @@ export default function CampaignList({
              <option value="active">Active</option>
              <option value="paused">Paused</option>
              <option value="review">Review</option>
-             <option value="closed">Closed</option>
+              <option value="closed">Closed</option>
+              <option value="Archived">Archived</option>
           </select>
           <button
             className="btn btn-secondary"
@@ -111,7 +111,7 @@ export default function CampaignList({
               campaignList.length === 0 && (
                 <tr>
                   <td className="campaign-state-cell" colSpan={6}>
-                    No campaigns have been created yet.
+                     No campaigns have been created yet.
                   </td>
                 </tr>
               )}

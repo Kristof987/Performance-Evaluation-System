@@ -6,6 +6,8 @@ export type Campaign = {
   end_date: string | null;
   current_date: string;
   lifecycle_status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
+  campaign_status: 'draft' | 'scheduled' | 'active' | 'paused' | 'review' | 'closed';
+  is_archived: boolean;
 };
 
 export type DashboardMetrics = {

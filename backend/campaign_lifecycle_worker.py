@@ -8,7 +8,7 @@ from sqlalchemy import and_, or_
 
 import campaign_lifecycle
 from database import SessionLocal
-from models import Campaign, CampaignStatus
+from models import Campaign, CampaignOperationAudit, CampaignStatus
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,12 @@ def run_due_transitions(validate_configuration, issue_snapshots, *, limit=100):
                 if failed is not None and failed.status == (
                     CampaignStatus.SCHEDULED.value if target == CampaignStatus.ACTIVE else CampaignStatus.ACTIVE.value
                 ) and not failed.is_archived:
+                    if failed.lifecycle_attempts == 0:
+                        db.add(CampaignOperationAudit(
+                            campaign_id=failed.id, category="transition_failure", actor_user_id=None,
+                            is_automatic=True, occurred_at=datetime.now(timezone.utc),
+                            previous_status=failed.status, resulting_status=failed.status, issued_count=0,
+                        ))
                     attempts = failed.lifecycle_attempts + 1
                     failed.lifecycle_attempts = attempts
                     failed.lifecycle_error = (str(error)[:2000] if isinstance(error, campaign_lifecycle.CampaignLifecycleError)

@@ -31,7 +31,7 @@ type MetricsGridProps = {
 
 function getNextCampaign(campaigns: Campaign[]): Campaign | null {
   return [...campaigns]
-    .filter((campaign) => campaign.lifecycle_status === 'Scheduled')
+    .filter((campaign) => campaign.campaign_status === 'scheduled' && !campaign.is_archived)
     .sort((first, second) => {
       if (first.start_date !== second.start_date) return first.start_date.localeCompare(second.start_date);
       return first.name.localeCompare(second.name, 'hu') || first.id - second.id;

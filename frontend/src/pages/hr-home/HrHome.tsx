@@ -89,7 +89,7 @@ function HrHome() {
                 campaignName={selectedCampaign?.name}
                 onOpenCampaign={selectedCampaignDetailsHandler}
                 onOpenResults={() => selectedCampaign && navigate(`/reports/campaigns/${selectedCampaign.id}`)}
-                includeResults={canReadReports}
+                includeResults={canReadReports && (selectedCampaign?.campaign_status === 'review' || selectedCampaign?.campaign_status === 'closed')}
               />
             </div>
           </>

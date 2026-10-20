@@ -8,14 +8,14 @@ from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import and_, asc, desc, func, or_
+from sqlalchemy import and_, asc, case, desc, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, aliased
 
 from database import engine, Base, SessionLocal
 from auth0 import get_verified_auth0_sub
-from business_calendar import business_today as campaign_today, business_date, campaign_instant, campaign_status
+from business_calendar import business_today as campaign_today, business_date, campaign_instant
 import campaign_lifecycle
 import models
 import form_snapshot_service
@@ -930,7 +930,14 @@ def get_campaign_participants(campaign_id: int, db: Session):
 
 
 def campaign_lifecycle_status(campaign: models.Campaign, today: date) -> str:
-    return campaign_status(campaign.start_date, campaign.end_date, campaign.is_active, today)
+    return {
+        models.CampaignStatus.DRAFT.value: "Disabled",
+        models.CampaignStatus.SCHEDULED.value: "Scheduled",
+        models.CampaignStatus.ACTIVE.value: "Ongoing",
+        models.CampaignStatus.PAUSED.value: "Disabled",
+        models.CampaignStatus.REVIEW.value: "Completed",
+        models.CampaignStatus.CLOSED.value: "Completed",
+    }[campaign.status]
 
 
 def campaign_payload(campaign: models.Campaign, today: date, issued: int = 0, submitted: int = 0) -> dict:
@@ -945,6 +952,8 @@ def campaign_payload(campaign: models.Campaign, today: date, issued: int = 0, su
 
 
 def require_mutable_campaign_configuration(campaign: models.Campaign) -> None:
+    if campaign.is_archived:
+        raise HTTPException(status_code=409, detail="Archived campaign configuration cannot be changed")
     if campaign.status in {models.CampaignStatus.PAUSED.value, models.CampaignStatus.REVIEW.value,
                            models.CampaignStatus.CLOSED.value}:
         raise HTTPException(status_code=409, detail="Campaign configuration is locked in this lifecycle status")
@@ -959,24 +968,27 @@ def issued_snapshot_filter():
     return and_(models.FilledForm.form_snapshot.isnot(None), models.FilledForm.form_snapshot != JSONB.NULL)
 
 
-def ensure_campaign_issued(campaign_id: int, db: Session, *, commit: bool = True, today: date | None = None):
+def ensure_campaign_issued(campaign_id: int, db: Session, *, commit: bool = True,
+                           actor_user_id: int | None = None):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     now = datetime.now(timezone.utc)
-    if (campaign is None or campaign.legacy_issuance_blocked or not campaign.is_active
+    if (campaign is None or campaign.legacy_issuance_blocked
             or campaign.status != models.CampaignStatus.ACTIVE.value
             or campaign.is_archived or campaign.start_date > now
             or (campaign.end_date is not None and campaign.end_date <= now)):
         return []
 
-    errors = issue_activation_snapshots(campaign, db)
+    errors = issue_activation_snapshots(campaign, db, actor_user_id=actor_user_id)
     if commit:
         db.commit()
     return errors
 
 
-def issue_activation_snapshots(campaign: models.Campaign, db: Session) -> list[str]:
+def issue_activation_snapshots(campaign: models.Campaign, db: Session,
+                               *, actor_user_id: int | None = None) -> list[str]:
     """Issue only untouched planned rows; caller owns the campaign lock and transaction."""
     errors = []
+    issued_count = 0
     for assignment in db.query(models.FilledForm).filter(
         models.FilledForm.campaign_id == campaign.id,
         unissued_snapshot_filter(),
@@ -994,7 +1006,9 @@ def issue_activation_snapshots(campaign: models.Campaign, db: Session) -> list[s
             continue
         assignment.form_snapshot = form_snapshot_service.create_form_snapshot(form, db)
         assignment.snapshot_status = "verified"
+        issued_count += 1
 
+    campaign_lifecycle.record_snapshot_issuance(db, campaign, issued_count, actor_user_id=actor_user_id)
     return errors
 
 
@@ -1011,8 +1025,13 @@ def ensure_group_membership_mutable(group_id: int | None, employee_id: int, db: 
         assignment_query = assignment_query.filter(models.FilledForm.company_group_id == group_id)
     existing_assignments = assignment_query.all()
     campaign_ids = {assignment.campaign_id for assignment in existing_assignments}
-    for campaign_id in campaign_ids:
-        ensure_campaign_issued(campaign_id, db, commit=False)
+    campaigns = (db.query(models.Campaign).filter(models.Campaign.id.in_(campaign_ids))
+                 .order_by(models.Campaign.id).with_for_update().all()) if campaign_ids else []
+    if any(campaign.status in {
+        models.CampaignStatus.ACTIVE.value, models.CampaignStatus.PAUSED.value,
+        models.CampaignStatus.REVIEW.value, models.CampaignStatus.CLOSED.value,
+    } for campaign in campaigns):
+        raise HTTPException(status_code=409, detail="Employees with active or historical campaign assignments cannot be removed or change roles")
     if any(assignment_is_immutable(assignment) for assignment in existing_assignments):
         detail = "Employee role cannot change while this group has issued evaluations" if role_change else "Employee cannot be removed from this group while issued evaluations reference them"
         raise HTTPException(status_code=409, detail=detail)
@@ -1258,8 +1277,7 @@ def get_employee_dashboard(user_id: int, db: Session = Depends(get_db),
             db.query(models.Campaign)
             .join(models.FilledForm, models.FilledForm.campaign_id == models.Campaign.id)
             .filter(models.FilledForm.evaluator_id == employee.id)
-            .filter(models.Campaign.start_date >= campaign_instant(campaign_today()))
-            .filter(models.Campaign.is_active.is_(True))
+            .filter(models.Campaign.start_date >= datetime.now(timezone.utc))
             .filter(models.Campaign.status == models.CampaignStatus.ACTIVE.value)
             .filter(models.Campaign.is_archived.is_(False))
             .order_by(models.Campaign.start_date.asc())
@@ -1306,7 +1324,13 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
                   _reader: models.User = Depends(require_permission("campaigns.read"))):
     campaigns = (
         db.query(models.Campaign)
-        .order_by(models.Campaign.is_active.desc(), models.Campaign.start_date.desc())
+        .order_by(models.Campaign.is_archived.asc(),
+                  case((models.Campaign.status == models.CampaignStatus.ACTIVE.value, 0),
+                       (models.Campaign.status == models.CampaignStatus.REVIEW.value, 1),
+                       (models.Campaign.status == models.CampaignStatus.PAUSED.value, 2),
+                       (models.Campaign.status == models.CampaignStatus.SCHEDULED.value, 3),
+                       (models.Campaign.status == models.CampaignStatus.DRAFT.value, 4), else_=5),
+                  models.Campaign.start_date.desc())
         .all()
     )
     today = campaign_today()
@@ -1321,7 +1345,9 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
 
     upcoming_campaigns = (
         db.query(models.Campaign)
-        .filter(models.Campaign.start_date >= campaign_instant(today))
+        .filter(models.Campaign.status == models.CampaignStatus.SCHEDULED.value,
+                models.Campaign.is_archived.is_(False),
+                models.Campaign.start_date >= datetime.now(timezone.utc))
         .order_by(models.Campaign.start_date.asc())
         .limit(3)
         .all()
@@ -1346,7 +1372,8 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
                 "date": business_date(campaign.start_date),
             }
             for campaign in campaigns
-            if business_date(campaign.start_date) > today
+            if campaign.status == models.CampaignStatus.SCHEDULED.value and not campaign.is_archived
+            and campaign.start_date > datetime.now(timezone.utc)
         ]
         + [
             {
@@ -1356,7 +1383,8 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
                 "date": business_date(campaign.end_date),
             }
             for campaign in campaigns
-            if campaign.end_date is not None and business_date(campaign.end_date) > today
+            if campaign.status == models.CampaignStatus.ACTIVE.value and not campaign.is_archived
+            and campaign.end_date is not None and campaign.end_date > datetime.now(timezone.utc)
         ],
         key=lambda item: (item["date"], item["deadline_type"], item["name"], item["campaign_id"]),
     )[:8]
@@ -1369,6 +1397,8 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
             "end_date": business_date(campaign.end_date),
             "current_date": today,
             "lifecycle_status": campaign_lifecycle_status(campaign, today),
+            "campaign_status": campaign.status,
+            "is_archived": campaign.is_archived,
         }
         for campaign in campaigns
     ]
@@ -1396,22 +1426,25 @@ def get_dashboard(campaign_id: int | None = Query(default=None), db: Session = D
     overdue_assignments = [
         assignment
         for assignment in assignments
-        if assignment.form_snapshot is not None and assignment.finish_date is None
-        and selected_campaign.end_date is not None
-        and business_date(selected_campaign.end_date) < today
+        if assignment.form_snapshot is not None
+        and campaign_lifecycle.is_overdue(assignment, selected_campaign, now=datetime.now(timezone.utc))
     ]
     form_ids = get_campaign_form_ids(selected_campaign.id, db)
     overdue_form_ids = {assignment.form_id for assignment in overdue_assignments}
     next_campaign = next((campaign for campaign in upcoming_campaigns if campaign.id != selected_campaign.id), None)
 
+    status_names = dict(db.query(models.FormStatus.id, models.FormStatus.name).all())
+    in_progress_count = sum(assignment.finish_date is None and not (assignment.form_snapshot is None and not assignment.answers)
+                            and (bool(assignment.answers) or normalize_form_status(status_names.get(assignment.status_id), None)[0] == "in_progress")
+                            for assignment in assignments)
     metrics = {
         "assignment_count": assignment_count,
         "planned_count": planned_count,
         "submitted_count": submitted_count,
         "completion_rate": round((submitted_count / assignment_count) * 100) if assignment_count > 0 else 0,
         "awaiting_submission_count": assignment_count - submitted_count,
-        "not_started_count": assignment_count - submitted_count,
-        "in_progress_count": 0,
+        "not_started_count": max(0, assignment_count - submitted_count - in_progress_count),
+        "in_progress_count": in_progress_count,
         "overdue_count": len(overdue_assignments),
         "overdue_forms_count": len(overdue_form_ids),
         "upcoming_reviews_count": len(upcoming_reviews),
@@ -1601,6 +1634,10 @@ def get_campaign_completion_status(
             "is_active": campaign.is_active,
             "start_date": business_date(campaign.start_date),
             "end_date": business_date(campaign.end_date),
+            "current_date": today,
+            "lifecycle_status": campaign_lifecycle_status(campaign, today),
+            "campaign_status": campaign.status,
+            "is_archived": campaign.is_archived,
         },
         "summary": summary,
         "rows": page_rows,
@@ -1810,10 +1847,16 @@ def set_section_archived(section_id: int, archived: bool, db: Session):
 
 @app.get("/campaigns", response_model=list[schemas.CampaignResponse])
 def get_campaigns(db: Session = Depends(get_db),
-                  _reader: models.User = Depends(require_permission("campaigns.read"))):
+                   _reader: models.User = Depends(require_permission("campaigns.read"))):
     campaigns = (
         db.query(models.Campaign)
-        .order_by(models.Campaign.is_active.desc(), models.Campaign.start_date.desc())
+        .order_by(models.Campaign.is_archived.asc(),
+                  case((models.Campaign.status == models.CampaignStatus.ACTIVE.value, 0),
+                       (models.Campaign.status == models.CampaignStatus.SCHEDULED.value, 1),
+                       (models.Campaign.status == models.CampaignStatus.REVIEW.value, 2),
+                       (models.Campaign.status == models.CampaignStatus.PAUSED.value, 3),
+                       (models.Campaign.status == models.CampaignStatus.DRAFT.value, 4), else_=5),
+                  models.Campaign.start_date.desc())
         .all()
     )
     today = campaign_today()
@@ -1880,6 +1923,65 @@ def get_campaign_operational_metrics(campaign_id: int, db: Session = Depends(get
             "submitted": submitted, "incomplete": total - submitted,
             "completion_rate": round(submitted * 100 / total) if total else 0,
             "overdue": sum(campaign_lifecycle.is_overdue(row, campaign, now=now) for row in rows)}
+
+
+@app.get("/campaigns/{campaign_id}/deletion-eligibility", response_model=schemas.CampaignDeletionEligibility)
+def get_campaign_deletion_eligibility(campaign_id: int, db: Session = Depends(get_db),
+                                      _reader: models.User = Depends(require_permission("campaigns.read"))):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    reason = campaign_lifecycle.deletion_blocker(db, campaign)
+    return {"campaign_id": campaign_id, "can_delete": reason is None, "reason": reason}
+
+
+def change_campaign_archive(campaign_id: int, archived: bool, db: Session, actor: models.User):
+    try:
+        campaign = campaign_lifecycle.set_campaign_archived(
+            db, campaign_id, archived, actor_user_id=actor.id, now=datetime.now(timezone.utc))
+        db.commit()
+    except campaign_lifecycle.CampaignLifecycleError as error:
+        db.rollback()
+        raise HTTPException(status_code=404 if str(error) == "Campaign not found" else 409, detail=str(error)) from error
+    db.refresh(campaign)
+    return campaign_payload(campaign, campaign_today())
+
+
+@app.post("/campaigns/{campaign_id}/archive", response_model=schemas.CampaignResponse)
+def archive_campaign(campaign_id: int, db: Session = Depends(get_db),
+                     actor: models.User = Depends(require_permission("campaigns.manage"))):
+    return change_campaign_archive(campaign_id, True, db, actor)
+
+
+@app.post("/campaigns/{campaign_id}/unarchive", response_model=schemas.CampaignResponse)
+def unarchive_campaign(campaign_id: int, db: Session = Depends(get_db),
+                       actor: models.User = Depends(require_permission("campaigns.manage"))):
+    return change_campaign_archive(campaign_id, False, db, actor)
+
+
+@app.delete("/campaigns/{campaign_id}")
+def delete_campaign(campaign_id: int, db: Session = Depends(get_db),
+                     manager: models.User = Depends(require_permission("campaigns.manage"))):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).populate_existing().with_for_update().one_or_none()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    reason = campaign_lifecycle.deletion_blocker(db, campaign)
+    if reason is not None:
+        raise HTTPException(status_code=409, detail=reason)
+    db.add(models.CampaignOperationAudit(
+        campaign_id=campaign.id, category="delete", actor_user_id=manager.id,
+        is_automatic=False, occurred_at=datetime.now(timezone.utc),
+        previous_status=campaign.status, resulting_status=None, issued_count=0,
+    ))
+    # All these rows are campaign-owned; forms, groups, employees and users are shared.
+    db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign_id).delete(synchronize_session=False)
+    db.query(models.CampaignEvaluationRule).filter(models.CampaignEvaluationRule.campaign_id == campaign_id).delete(synchronize_session=False)
+    db.query(models.CampaignEmployeeSelfEvaluation).filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id).delete(synchronize_session=False)
+    db.execute(models.campaign_company_groups.delete().where(models.campaign_company_groups.c.campaign_id == campaign_id))
+    db.query(models.CampaignLifecycleHistory).filter(models.CampaignLifecycleHistory.campaign_id == campaign_id).delete(synchronize_session=False)
+    db.delete(campaign)
+    db.commit()
+    return {"deleted": True}
 
 
 def duplicate_campaign_name(db: Session, name: str, exclude_id: int | None = None) -> bool:
@@ -2084,7 +2186,7 @@ def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_
 
 @app.put("/campaigns/{campaign_id}", response_model=schemas.CampaignResponse)
 def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, db: Session = Depends(get_db),
-                     _manager: models.User = Depends(require_permission("campaigns.manage"))):
+                     manager: models.User = Depends(require_permission("campaigns.manage"))):
     if not campaign_update.name.strip():
         raise HTTPException(status_code=400, detail="Campaign name is required")
     campaign = (
@@ -2175,8 +2277,8 @@ def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, d
     try:
         db.flush()
         validate_scheduled_campaign(campaign, db)
-        issuance_errors = ensure_campaign_issued(campaign_id, db, commit=False)
-        if campaign.is_active and business_date(campaign.start_date) <= campaign_today() and issuance_errors:
+        issuance_errors = ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=manager.id)
+        if campaign.status == models.CampaignStatus.ACTIVE.value and campaign.start_date <= datetime.now(timezone.utc) and issuance_errors:
             raise HTTPException(status_code=409, detail="Campaign cannot issue planned evaluations until their forms are ready: " + "; ".join(issuance_errors))
         db.commit()
     except IntegrityError as error:
@@ -2367,7 +2469,7 @@ def get_campaign_self_evaluations(campaign_id: int, db: Session = Depends(get_db
 
 @app.put("/campaigns/{campaign_id}/self-evaluations", response_model=schemas.CampaignSelfEvaluationsResponse)
 def update_campaign_self_evaluations(campaign_id: int, payload: schemas.CampaignSelfEvaluationsUpdate, db: Session = Depends(get_db),
-                                      _manager: models.User = Depends(require_permission("campaigns.manage"))):
+                                      manager: models.User = Depends(require_permission("campaigns.manage"))):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -2424,7 +2526,7 @@ def update_campaign_self_evaluations(campaign_id: int, payload: schemas.Campaign
             record.form_id = form_id
     db.flush()
     validate_scheduled_campaign(campaign, db)
-    errors = ensure_campaign_issued(campaign_id, db, commit=False)
+    errors = ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=manager.id)
     blocking_errors = [error for error in errors if any(error.startswith(f"Assignment {record_id}:") or error.startswith(f"Assignment {record_id} (") for record_id in changed_ids)]
     if business_date(campaign.start_date) <= campaign_today() and blocking_errors:
         raise HTTPException(status_code=409, detail="Cannot issue self-evaluation: " + "; ".join(blocking_errors))
@@ -2606,7 +2708,7 @@ def get_campaign_evaluation_rules(campaign_id: int, db: Session = Depends(get_db
 
 @app.put("/campaigns/{campaign_id}/evaluation-rules", response_model=schemas.CampaignEvaluationRulesResponse)
 def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.CampaignEvaluationRulesUpdate, db: Session = Depends(get_db),
-                                      _manager: models.User = Depends(require_permission("campaigns.manage"))):
+                                      manager: models.User = Depends(require_permission("campaigns.manage"))):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -2678,7 +2780,7 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
             assignment.form_id = form_id
     db.flush()
     validate_scheduled_campaign(campaign, db)
-    ensure_campaign_issued(campaign_id, db, commit=False)
+    ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=manager.id)
     db.commit()
 
     return build_campaign_rule_matrix(campaign_id, db)
@@ -2746,7 +2848,7 @@ def validate_matrix_form_readiness(rule_matrix):
 
 @app.put("/campaigns/{campaign_id}/evaluation-matrix", response_model=schemas.CampaignEvaluationMatrixUpdateResponse)
 def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.CampaignEvaluationMatrixUpdate, db: Session = Depends(get_db),
-                                       _manager: models.User = Depends(require_permission("campaigns.manage"))):
+                                       manager: models.User = Depends(require_permission("campaigns.manage"))):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -2899,8 +3001,8 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
 
     now = datetime.now(timezone.utc)
     if campaign.status == models.CampaignStatus.ACTIVE.value and created_records and (
-        not campaign.is_active or campaign.is_archived or campaign.status != models.CampaignStatus.ACTIVE.value
-        or campaign.start_date > now or (campaign.end_date is not None and campaign.end_date <= now)
+        campaign.is_archived or campaign.start_date > now
+        or (campaign.end_date is not None and campaign.end_date <= now)
     ):
         raise HTTPException(status_code=409, detail="New assignments can only be issued during an active, unarchived campaign window")
     db.flush()
@@ -2915,9 +3017,10 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
                 raise HTTPException(status_code=409, detail="Cannot issue selected assignment: " + "; ".join(problems))
             record.form_snapshot = form_snapshot_service.create_form_snapshot(form, db)
             record.snapshot_status = "verified"
+        campaign_lifecycle.record_snapshot_issuance(db, campaign, len(created_records), actor_user_id=manager.id)
         errors = []
     elif not campaign.legacy_issuance_blocked:
-        errors = ensure_campaign_issued(campaign_id, db, commit=False)
+        errors = ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=manager.id)
     else:
         errors = []
     if campaign.status == models.CampaignStatus.ACTIVE.value and any(record.form_snapshot is None for record in created_records):
@@ -2968,6 +3071,7 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
         campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
         if campaign is None:
             raise HTTPException(status_code=404, detail="Campaign not found")
+        require_mutable_campaign_configuration(campaign)
         if campaign.status not in {models.CampaignStatus.DRAFT.value, models.CampaignStatus.SCHEDULED.value}:
             raise HTTPException(status_code=409, detail="Only draft and scheduled campaigns can replace their setup")
 
@@ -3409,12 +3513,16 @@ def create_form_template(template: schemas.FormCreate, db: Session = Depends(get
 
 @app.put("/forms/{form_id}", response_model=schemas.FormResponse)
 def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Depends(get_db),
-                 _manager: models.User = Depends(require_permission("forms.manage"))):
-    # Issue already-started references before the editable source Form changes.
+                  _manager: models.User = Depends(require_permission("forms.manage"))):
+    # Editing a shared source Form must not silently issue campaign questionnaires.
     campaigns = campaigns_referencing_form(form_id, db)
     for campaign in campaigns:
         require_mutable_campaign_configuration(campaign)
-        ensure_campaign_issued(campaign.id, db, commit=False)
+        if campaign.status == models.CampaignStatus.ACTIVE.value and db.query(models.FilledForm.id).filter(
+            models.FilledForm.campaign_id == campaign.id, models.FilledForm.form_id == form_id,
+            unissued_snapshot_filter(),
+        ).first() is not None:
+            raise HTTPException(status_code=409, detail="Issue planned active campaign assignments before editing their source form")
     form = db.query(models.Form).filter(models.Form.id == form_id).first()
     if form is None:
         raise HTTPException(status_code=404, detail="Form not found")
@@ -3448,7 +3556,7 @@ def update_form_template(template_id: int, template_update: schemas.FormUpdate, 
 @app.delete("/forms/{form_id}")
 def delete_form(form_id: int, db: Session = Depends(get_db),
                   _manager: models.User = Depends(require_permission("forms.manage"))):
-    if any(campaign.status in {models.CampaignStatus.SCHEDULED.value, models.CampaignStatus.PAUSED.value,
+    if any(campaign.is_archived or campaign.status in {models.CampaignStatus.SCHEDULED.value, models.CampaignStatus.PAUSED.value,
                                models.CampaignStatus.REVIEW.value, models.CampaignStatus.CLOSED.value}
            for campaign in campaigns_referencing_form(form_id, db)):
         raise HTTPException(status_code=409, detail="A locked campaign still uses this form")

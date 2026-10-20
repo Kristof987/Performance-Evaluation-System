@@ -66,6 +66,12 @@ export type CampaignOperationalMetrics = {
   overdue: number;
 };
 
+export type CampaignDeletionEligibility = {
+  campaign_id: number;
+  can_delete: boolean;
+  reason: string | null;
+};
+
 export type CampaignGroup = {
   id: number;
   name: string;
@@ -219,7 +225,7 @@ export type CampaignFormValues = {
   comment: string;
 };
 
-export type CampaignStatusFilter = 'All statuses' | CampaignStatus;
+export type CampaignStatusFilter = 'All statuses' | 'Archived' | CampaignStatus;
 export type UpdateCampaignField = <K extends keyof CampaignFormValues>(
   field: K,
   value: CampaignFormValues[K],

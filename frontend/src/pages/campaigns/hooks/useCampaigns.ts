@@ -34,8 +34,11 @@ export function useCampaigns() {
   const filteredCampaigns = campaignList.filter(
     (campaign) =>
       campaign.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) &&
-      (statusFilter === 'All statuses' || campaign.status === statusFilter),
+      (statusFilter === 'Archived' ? campaign.isArchived :
+        !campaign.isArchived && (statusFilter === 'All statuses' || campaign.status === statusFilter)),
   );
+  const summaryCampaigns = campaignList.filter((campaign) =>
+    statusFilter === 'Archived' ? campaign.isArchived : !campaign.isArchived);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -103,6 +106,7 @@ export function useCampaigns() {
   }
   return {
     campaignList,
+    summaryCampaigns,
     filteredCampaigns,
     searchQuery,
     setSearchQuery,

@@ -381,6 +381,10 @@ class CampaignResponse(BaseModel):
     start_at: datetime
     end_at: datetime | None
     is_archived: bool
+    archived_at: datetime | None = None
+    archived_by: int | None = None
+    unarchived_at: datetime | None = None
+    unarchived_by: int | None = None
     activation_error: str | None = None
     activation_retry_at: datetime | None = None
     activation_attempts: int = 0
@@ -403,6 +407,12 @@ class CampaignOperationalMetrics(BaseModel):
     overdue: int
 
 
+class CampaignDeletionEligibility(BaseModel):
+    campaign_id: int
+    can_delete: bool
+    reason: str | None
+
+
 class CampaignGroupsUpdate(BaseModel):
     group_ids: list[int] = Field(default_factory=list)
 
@@ -415,6 +425,8 @@ class DashboardCampaignSummary(BaseModel):
     end_date: date | None = None
     current_date: date
     lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
+    campaign_status: CampaignStatus
+    is_archived: bool
 
 
 class DashboardMetricSummary(BaseModel):
@@ -532,6 +544,8 @@ class ReportCampaignOption(BaseModel):
     start_date: date
     end_date: date | None = None
     is_active: bool
+    campaign_status: CampaignStatus
+    is_archived: bool
 
     @field_validator("start_date", "end_date", mode="before")
     @classmethod

@@ -12,8 +12,11 @@ import { matrixGroupWithSelfLocks, matrixSelectedCount } from './matrix.utils';
 import EvaluationMatrixModal from './components/EvaluationMatrixModal';
 import { previewSelfCopy } from './self-evaluations';
 import { formatDate } from './campaign.utils';
+import { useAppAuth } from '../../auth/AppAuth';
 export function CampaignDetails() {
   const { id } = useParams();
+  const { state } = useAppAuth();
+  const canReadReports = state.status === 'authenticated' && state.mode === 'auth0' && state.user.permissions.includes('reports.read');
   const [activeMatrixGroupId, setActiveMatrixGroupId] = useState<number | null>(null);
   const [groupSearch, setGroupSearch] = useState('');
   const [copyRequest, setCopyRequest] = useState<RuleCopyRequest | null>(null);
@@ -37,6 +40,15 @@ export function CampaignDetails() {
     confirmationError,
     isLoadingMetrics,
     isChangingLifecycle,
+    deletionEligibility,
+    eligibilityError,
+    isLoadingEligibility,
+    destructiveAction,
+    destructiveError,
+    isChangingArchive,
+    openDestructiveConfirmation,
+    closeDestructiveConfirmation,
+    handleDestructiveAction,
     openLifecycleConfirmation,
     closeLifecycleConfirmation,
     handleLifecycleAction,
@@ -93,7 +105,8 @@ export function CampaignDetails() {
     handleUpdateMatrix,
     handleUpdateCampaign,
   } = useCampaignDetails(id);
-  const canEdit = canManageCampaigns && campaign?.status !== 'closed';
+  const canEdit = canManageCampaigns && !campaign?.isArchived &&
+    (campaign?.status === 'draft' || campaign?.status === 'scheduled' || campaign?.status === 'active');
   const activeMatrixGroup = evaluationMatrix.groups.find(
     (group) => group.groupId === activeMatrixGroupId,
   );
@@ -206,6 +219,20 @@ export function CampaignDetails() {
                 {isChangingLifecycle ? 'Updating...' : 'Resume campaign'}
               </button>
             )}
+            {canManageCampaigns && (campaign.status === 'paused' || campaign.status === 'closed') && (
+              <button className="btn btn-secondary" type="button" disabled={isChangingArchive || isChangingLifecycle}
+                onClick={() => openDestructiveConfirmation(campaign.isArchived ? 'unarchive' : 'archive')}>
+                {campaign.isArchived ? 'Unarchive campaign' : 'Archive campaign'}
+              </button>
+            )}
+            {canManageCampaigns && (campaign.status === 'draft' || campaign.status === 'scheduled') && (
+              <button className="btn btn-secondary" type="button"
+                disabled={isLoadingEligibility || isChangingArchive || !deletionEligibility?.can_delete}
+                title={deletionEligibility?.reason ?? undefined}
+                onClick={() => openDestructiveConfirmation('delete')}>
+                Delete campaign
+              </button>
+            )}
             {canEdit && <button
               className="btn btn-primary"
               type="button"
@@ -220,6 +247,10 @@ export function CampaignDetails() {
           <div className="campaign-success-message">{successMessage}</div>
         )}
         {actionMessage !== '' && <div className="campaign-save-message" role="alert">{actionMessage}</div>}
+        {canManageCampaigns && (campaign.status === 'draft' || campaign.status === 'scheduled') &&
+          (eligibilityError || (deletionEligibility && !deletionEligibility.can_delete && deletionEligibility.reason)) && (
+            <div className="campaign-save-message" role="status">{eligibilityError || deletionEligibility?.reason}</div>
+          )}
 
         <section className="campaign-lifecycle-card" aria-labelledby="campaign-lifecycle-title">
           <h2 id="campaign-lifecycle-title">Lifecycle</h2>
@@ -260,6 +291,14 @@ export function CampaignDetails() {
               <p>Review the error and correct the issue. The transition retries automatically.</p>
             </div>
           )}
+        </section>
+
+        <section className="campaign-lifecycle-card" aria-labelledby="campaign-results-title">
+          <h2 id="campaign-results-title">Campaign results</h2>
+          {campaign.status === 'review' || campaign.status === 'closed' ? (
+            canReadReports ? <p>Results are available{campaign.isArchived ? ' for this archived Closed campaign' : ''}. <Link to={`/reports/campaigns/${campaign.id}`}>Open reports</Link></p>
+              : <p>Results require reports.read permission.</p>
+          ) : <p>{campaign.isArchived ? 'This archived Paused campaign has no available report.' : campaign.status === 'draft' ? 'Reports are unavailable while this campaign is a draft.' : campaign.status === 'scheduled' ? 'Reports become available once this scheduled campaign reaches Review.' : campaign.status === 'active' ? 'Results are unavailable while this campaign is Active. Operational completion remains available separately.' : 'Results are unavailable while this campaign is Paused; resume it and move it to Review.'}</p>}
         </section>
 
         {campaign.status === 'scheduled' && (
@@ -587,6 +626,29 @@ export function CampaignDetails() {
         </section>
 
       </div>
+
+       {destructiveAction && (
+         <CampaignModal mode={destructiveAction} onClose={closeDestructiveConfirmation}>
+           <div className="campaign-copy-preview">
+              <p>{destructiveAction === 'delete'
+                ? `Permanently delete ${campaign.name}? This cannot be undone. Only campaigns confirmed eligible by the server can be deleted.`
+                : destructiveAction === 'archive'
+                  ? campaign.status === 'paused'
+                    ? `Archive ${campaign.name}? It will remain Paused. Employees cannot access its questionnaires, and it must be unarchived before HR can resume it. Its history and saved data remain available to authorized HR users.`
+                    : `Archive ${campaign.name}? It will remain Closed and hidden from the default list. All historical evaluations, snapshots and answers will be preserved.`
+                  : `Unarchive ${campaign.name}? It will appear in the default campaign list again.`}</p>
+              {destructiveAction === 'delete' && <p>The campaign and its campaign-specific setup will be permanently removed. Shared Groups, Forms and Employees will not be deleted.</p>}
+             {destructiveError && <div className="campaign-save-message" role="alert">{destructiveError}</div>}
+             <div className="campaign-modal-actions">
+               <button className="btn btn-secondary" type="button" disabled={isChangingArchive} onClick={closeDestructiveConfirmation}>Cancel</button>
+               <button className="btn btn-primary" type="button" disabled={isChangingArchive || (destructiveAction === 'delete' && !deletionEligibility?.can_delete)}
+                 onClick={handleDestructiveAction}>
+                 {isChangingArchive ? 'Updating...' : destructiveAction === 'delete' ? 'Delete permanently' : destructiveAction === 'archive' ? 'Archive campaign' : 'Unarchive campaign'}
+               </button>
+             </div>
+           </div>
+         </CampaignModal>
+       )}
 
        {confirmationAction && (
          <CampaignModal mode={confirmationAction} onClose={closeLifecycleConfirmation}>

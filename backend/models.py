@@ -348,6 +348,11 @@ class Campaign(Base):
     status = Column(String(16), nullable=False, default=CampaignStatus.DRAFT.value, server_default=CampaignStatus.DRAFT.value)
     paused_from_status = Column(String(16), nullable=True)
     is_archived = Column(Boolean, nullable=False, default=False, server_default="false")
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    archived_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    unarchived_at = Column(DateTime(timezone=True), nullable=True)
+    unarchived_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    ever_issued = Column(Boolean, nullable=False, default=False, server_default="false")
     # Compatibility boundary: migration-era campaigns must not acquire new snapshots
     # through the old, date/flag-driven issuance path before lifecycle integration.
     legacy_issuance_blocked = Column(Boolean, nullable=False, default=False, server_default="false")
@@ -387,6 +392,37 @@ class CampaignLifecycleHistory(Base):
         CheckConstraint("previous_status IN ('draft', 'scheduled', 'active', 'paused', 'review', 'closed')", name="ck_campaign_history_previous_status"),
         CheckConstraint("new_status IN ('draft', 'scheduled', 'active', 'paused', 'review', 'closed')", name="ck_campaign_history_new_status"),
         CheckConstraint("is_automatic OR actor_user_id IS NOT NULL", name="ck_campaign_history_manual_actor"),
+    )
+
+
+class CampaignArchiveEvent(Base):
+    __tablename__ = "campaign_archive_events"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
+    action = Column(String(16), nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (CheckConstraint("action IN ('archive', 'unarchive')", name="ck_campaign_archive_action"),)
+
+
+class CampaignOperationAudit(Base):
+    __tablename__ = "campaign_operation_audit"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, nullable=False, index=True)
+    category = Column(String(24), nullable=False)
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_automatic = Column(Boolean, nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    previous_status = Column(String(16), nullable=False)
+    resulting_status = Column(String(16), nullable=True)
+    issued_count = Column(Integer, nullable=False, default=0, server_default="0")
+
+    __table_args__ = (
+        CheckConstraint("category IN ('snapshot_issuance', 'transition_failure', 'delete')", name="ck_campaign_operation_category"),
+        CheckConstraint("issued_count >= 0", name="ck_campaign_operation_issued_count"),
     )
 
 class CompanyGroup(Base):

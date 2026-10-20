@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useAppAuth } from '../../../auth/AppAuth';
 import { ApiAccessError } from '../../../auth/authenticated-api';
@@ -9,6 +10,7 @@ import type {
   CampaignFormValues,
   CampaignGroups,
   CampaignOperationalMetrics,
+  CampaignDeletionEligibility,
   CampaignSelfEvaluations,
   UpdateCampaignField,
 } from '../campaign.types';
@@ -32,6 +34,10 @@ import {
   changeCampaignSchedule,
   changeCampaignLifecycle,
   fetchCampaignOperationalMetrics,
+  fetchCampaignDeletionEligibility,
+  changeCampaignArchive,
+  deleteCampaign,
+  CampaignRequestError,
   type CampaignLifecycleAction,
   updateCampaign,
   updateCampaignEvaluationMatrix,
@@ -95,6 +101,7 @@ function getMatrixAssignmentMap(matrix: CampaignEvaluationMatrix) {
 }
 
 export function useCampaignDetails(id: string | undefined) {
+  const navigate = useNavigate();
   const { getAccessTokenSilently } = useAuth0();
   const { state, retryAuth0 } = useAppAuth();
   const canManageCampaigns = state.status === 'authenticated' && state.mode === 'auth0'
@@ -142,6 +149,13 @@ export function useCampaignDetails(id: string | undefined) {
   const [confirmationError, setConfirmationError] = useState('');
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
   const [isChangingLifecycle, setIsChangingLifecycle] = useState(false);
+  const [deletionEligibility, setDeletionEligibility] = useState<CampaignDeletionEligibility | null>(null);
+  const [eligibilityError, setEligibilityError] = useState('');
+  const [isLoadingEligibility, setIsLoadingEligibility] = useState(false);
+  const [destructiveAction, setDestructiveAction] = useState<'archive' | 'unarchive' | 'delete' | null>(null);
+  const [destructiveError, setDestructiveError] = useState('');
+  const [isChangingArchive, setIsChangingArchive] = useState(false);
+  const archivePending = useRef(false);
   const [isSavingSetup, setIsSavingSetup] = useState(false);
   const [isSetupPreviewLoading, setIsSetupPreviewLoading] = useState(false);
   const [setupPreviewError, setSetupPreviewError] = useState('');
@@ -185,6 +199,12 @@ export function useCampaignDetails(id: string | undefined) {
     setConfirmationError('');
     setIsLoadingMetrics(false);
     setIsChangingLifecycle(false);
+    setDeletionEligibility(null);
+    setEligibilityError('');
+    setDestructiveAction(null);
+    setDestructiveError('');
+    setIsChangingArchive(false);
+    archivePending.current = false;
     saving.current = false;
     setIsSavingCampaign(false);
     setIsCampaignLoading(true);
@@ -232,6 +252,138 @@ export function useCampaignDetails(id: string | undefined) {
   }, [id, getAccessTokenSilently]);
 
   useEffect(() => {
+    if (!campaign || (campaign.status !== 'draft' && campaign.status !== 'scheduled')) {
+      setDeletionEligibility(null);
+      setEligibilityError('');
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingEligibility(true);
+    setDeletionEligibility(null);
+    setEligibilityError('');
+    fetchCampaignDeletionEligibility(getAccessTokenSilently, campaign.id)
+      .then((eligibility) => { if (!cancelled) setDeletionEligibility(eligibility); })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        handleAuthError(error);
+        setEligibilityError(error instanceof Error ? error.message : 'Deletion eligibility could not be loaded.');
+      })
+      .finally(() => { if (!cancelled) setIsLoadingEligibility(false); });
+    return () => { cancelled = true; };
+  }, [campaign?.id, campaign?.status, getAccessTokenSilently]);
+
+  function closeDestructiveConfirmation() {
+    if (archivePending.current) return;
+    setDestructiveAction(null);
+    setDestructiveError('');
+  }
+
+  async function openDestructiveConfirmation(action: 'archive' | 'unarchive' | 'delete') {
+    if (!campaign || !canManageCampaigns || archivePending.current ||
+        (action === 'delete' ? !['draft', 'scheduled'].includes(campaign.status) || !deletionEligibility?.can_delete :
+          !['paused', 'closed'].includes(campaign.status) || campaign.isArchived !== (action === 'unarchive'))) return;
+    setDestructiveError('');
+    setActionMessage('');
+    if (action === 'delete') {
+      archivePending.current = true;
+      setIsChangingArchive(true);
+      const version = routeVersion.current;
+      try {
+        const latest = await fetchCampaignDeletionEligibility(getAccessTokenSilently, campaign.id);
+        if (routeVersion.current !== version) return;
+        setDeletionEligibility(latest);
+        if (!latest.can_delete) {
+          setActionMessage(latest.reason ?? 'This campaign is not eligible for deletion.');
+          return;
+        }
+      } catch (error) {
+        handleAuthError(error);
+        if (routeVersion.current === version) setActionMessage(error instanceof Error ? error.message : 'Deletion eligibility could not be loaded.');
+        return;
+      } finally {
+        if (routeVersion.current === version) {
+          archivePending.current = false;
+          setIsChangingArchive(false);
+        }
+      }
+    }
+    setDestructiveAction(action);
+  }
+
+  async function handleDestructiveAction() {
+    if (!campaign || !destructiveAction || !canManageCampaigns || archivePending.current ||
+        (destructiveAction === 'delete' ? !['draft', 'scheduled'].includes(campaign.status) || !deletionEligibility?.can_delete :
+          !['paused', 'closed'].includes(campaign.status) || campaign.isArchived !== (destructiveAction === 'unarchive'))) return;
+    const action = destructiveAction;
+    const version = routeVersion.current;
+    archivePending.current = true;
+    setIsChangingArchive(true);
+    setDestructiveError('');
+    try {
+      if (action === 'delete') {
+        const latest = await fetchCampaignDeletionEligibility(getAccessTokenSilently, campaign.id);
+        if (routeVersion.current !== version) return;
+        setDeletionEligibility(latest);
+        if (!latest.can_delete) {
+          setDestructiveError(latest.reason ?? 'This campaign is no longer eligible for deletion.');
+          return;
+        }
+        await deleteCampaign(getAccessTokenSilently, campaign.id);
+        if (routeVersion.current === version) navigate('/campaigns', { replace: true, state: { campaignDeleted: true } });
+      } else {
+        const updated = await changeCampaignArchive(getAccessTokenSilently, campaign.id, action);
+        if (routeVersion.current !== version) return;
+        setCampaign(updated);
+        setForm(getCampaignForm(updated));
+        setDestructiveAction(null);
+        setSuccessMessage(action === 'archive' ? 'Campaign archived.' : 'Campaign unarchived.');
+        try {
+          const refreshed = await fetchCampaign(getAccessTokenSilently, campaign.id, new AbortController().signal);
+          if (routeVersion.current === version) {
+            setCampaign(refreshed);
+            setForm(getCampaignForm(refreshed));
+          }
+        } catch (refreshError) {
+          handleAuthError(refreshError);
+          if (routeVersion.current === version) setActionMessage('Campaign updated, but its latest details could not be refreshed. Reload to see the latest status.');
+        }
+      }
+    } catch (error) {
+      handleAuthError(error);
+      if (routeVersion.current !== version) return;
+      if (error instanceof CampaignRequestError && error.status === 404) {
+        setDestructiveAction(null);
+        setCampaign(null);
+        setCampaignError('Campaign not found. It may have been deleted.');
+        return;
+      }
+      setDestructiveError(error instanceof Error ? error.message : 'Campaign could not be updated.');
+      if (error instanceof CampaignRequestError && error.status === 409) {
+        try {
+          const refreshed = await fetchCampaign(getAccessTokenSilently, campaign.id, new AbortController().signal);
+          if (routeVersion.current !== version) return;
+          setCampaign(refreshed);
+          setForm(getCampaignForm(refreshed));
+          if (action === 'delete' && (refreshed.status === 'draft' || refreshed.status === 'scheduled')) {
+            const latest = await fetchCampaignDeletionEligibility(getAccessTokenSilently, campaign.id);
+            if (routeVersion.current === version) setDeletionEligibility(latest);
+          } else if (action === 'delete' || !['paused', 'closed'].includes(refreshed.status) || refreshed.isArchived !== (action === 'unarchive')) {
+            setDestructiveAction(null);
+            setActionMessage('Campaign state changed. Review its current status before trying again.');
+          }
+        } catch (refreshError) {
+          handleAuthError(refreshError);
+        }
+      }
+    } finally {
+      if (routeVersion.current === version) {
+        archivePending.current = false;
+        setIsChangingArchive(false);
+      }
+    }
+  }
+
+  useEffect(() => {
     if (!campaign || campaign.status !== 'scheduled') return;
     const controller = new AbortController();
     const version = routeVersion.current;
@@ -265,7 +417,8 @@ export function useCampaignDetails(id: string | undefined) {
     setSuccessMessage('');
   };
   function openEdit() {
-    if (!campaign || !canManageCampaigns || campaign.status === 'closed') return;
+    if (!campaign || !canManageCampaigns || campaign.isArchived ||
+        !['draft', 'scheduled', 'active'].includes(campaign.status)) return;
     setForm(getCampaignForm(campaign));
     setSaveMessage('');
     setSuccessMessage('');
@@ -900,6 +1053,15 @@ export function useCampaignDetails(id: string | undefined) {
     confirmationError,
     isLoadingMetrics,
     isChangingLifecycle,
+    deletionEligibility,
+    eligibilityError,
+    isLoadingEligibility,
+    destructiveAction,
+    destructiveError,
+    isChangingArchive,
+    openDestructiveConfirmation,
+    closeDestructiveConfirmation,
+    handleDestructiveAction,
     openLifecycleConfirmation,
     closeLifecycleConfirmation,
     handleLifecycleAction,

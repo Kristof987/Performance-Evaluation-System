@@ -12,7 +12,7 @@ from sqlalchemy import or_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
-from models import Campaign, CampaignLifecycleHistory, CampaignStatus, FilledForm
+from models import Campaign, CampaignArchiveEvent, CampaignLifecycleHistory, CampaignOperationAudit, CampaignStatus, FilledForm
 
 
 class CampaignLifecycleError(ValueError):
@@ -27,6 +27,7 @@ ALLOWED_TRANSITIONS = {
     CampaignStatus.REVIEW: {CampaignStatus.PAUSED, CampaignStatus.CLOSED},
     CampaignStatus.CLOSED: set(),
 }
+REPORTABLE_STATUSES = (CampaignStatus.REVIEW, CampaignStatus.CLOSED)
 
 
 def _instant(value: datetime) -> datetime:
@@ -63,8 +64,19 @@ def validate_date_edit(
 
 
 def reporting_allowed(campaign: Campaign) -> bool:
-    """Additional future reports.read gate; privacy suppression still applies."""
-    return CampaignStatus(campaign.status) in {CampaignStatus.REVIEW, CampaignStatus.CLOSED}
+    """Result availability is separate from reports.read and privacy suppression."""
+    return CampaignStatus(campaign.status) in REPORTABLE_STATUSES
+
+
+def record_snapshot_issuance(db: Session, campaign: Campaign, count: int,
+                             *, actor_user_id: int | None = None) -> None:
+    if count <= 0:
+        return
+    db.add(CampaignOperationAudit(
+        campaign_id=campaign.id, category="snapshot_issuance", actor_user_id=actor_user_id,
+        is_automatic=actor_user_id is None, occurred_at=datetime.now(timezone.utc),
+        previous_status=campaign.status, resulting_status=campaign.status, issued_count=count,
+    ))
 
 
 def is_overdue(form: FilledForm, campaign: Campaign, *, now: datetime) -> bool:
@@ -105,8 +117,8 @@ def transition_campaign(
     current = CampaignStatus(campaign.status)
     if target not in ALLOWED_TRANSITIONS[current]:
         raise CampaignLifecycleError(f"Invalid transition: {current.value} -> {target.value}")
-    if campaign.is_archived and automatic:
-        raise CampaignLifecycleError("Archived campaigns cannot transition automatically")
+    if campaign.is_archived:
+        raise CampaignLifecycleError("Archived campaigns cannot transition")
     if automatic and (current, target) not in {
         (CampaignStatus.SCHEDULED, CampaignStatus.ACTIVE),
         (CampaignStatus.ACTIVE, CampaignStatus.REVIEW),
@@ -166,6 +178,8 @@ def transition_campaign(
                 raise CampaignLifecycleError("Not all assignments received a snapshot")
         campaign.paused_from_status = current.value if target == CampaignStatus.PAUSED else None
         campaign.status = target.value
+        if target == CampaignStatus.ACTIVE:
+            campaign.ever_issued = True
         campaign.lifecycle_error = None
         campaign.lifecycle_retry_at = None
         campaign.lifecycle_attempts = 0
@@ -188,11 +202,54 @@ def transition_campaign(
     return campaign
 
 
-def set_campaign_archived(db: Session, campaign_id: int, archived: bool) -> Campaign:
+def set_campaign_archived(db: Session, campaign_id: int, archived: bool, *, actor_user_id: int, now: datetime) -> Campaign:
     """Archiving is orthogonal to lifecycle; callers own the transaction."""
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id).populate_existing().with_for_update().one_or_none()
     if campaign is None:
         raise CampaignLifecycleError("Campaign not found")
+    if campaign.is_archived == archived:
+        raise CampaignLifecycleError("Campaign is already " + ("archived" if archived else "unarchived"))
+    if archived and campaign.status not in {CampaignStatus.PAUSED.value, CampaignStatus.CLOSED.value}:
+        raise CampaignLifecycleError("Only paused or closed campaigns can be archived")
     campaign.is_archived = archived
+    if archived:
+        campaign.archived_at = _instant(now)
+        campaign.archived_by = actor_user_id
+    else:
+        campaign.unarchived_at = _instant(now)
+        campaign.unarchived_by = actor_user_id
+    db.add(CampaignArchiveEvent(campaign_id=campaign.id, action="archive" if archived else "unarchive",
+                                occurred_at=_instant(now), actor_user_id=actor_user_id))
     db.flush()
     return campaign
+
+
+def deletion_blocker(db: Session, campaign: Campaign) -> str | None:
+    if campaign.is_archived:
+        return "Archived campaigns cannot be permanently deleted"
+    if campaign.status not in {CampaignStatus.DRAFT.value, CampaignStatus.SCHEDULED.value}:
+        return "Only draft or scheduled campaigns can be deleted"
+    if campaign.ever_issued or campaign.legacy_issuance_blocked:
+        return "Campaign has historical issuance or uncertain legacy provenance"
+    if db.query(CampaignOperationAudit.id).filter(
+        CampaignOperationAudit.campaign_id == campaign.id,
+        CampaignOperationAudit.category == "snapshot_issuance",
+    ).first() is not None:
+        return "Campaign has recorded questionnaire issuance"
+    if db.query(CampaignArchiveEvent.id).filter(CampaignArchiveEvent.campaign_id == campaign.id).first() is not None:
+        return "Campaign has archive history and cannot be permanently deleted"
+    if db.query(CampaignLifecycleHistory.id).filter(
+        CampaignLifecycleHistory.campaign_id == campaign.id,
+        or_(CampaignLifecycleHistory.previous_status.in_(("active", "paused", "review", "closed")),
+            CampaignLifecycleHistory.new_status.in_(("active", "paused", "review", "closed"))),
+    ).first() is not None:
+        return "Campaign has previously entered an issued lifecycle status"
+    if db.query(FilledForm.id).filter(
+        FilledForm.campaign_id == campaign.id,
+        or_(FilledForm.finish_date.isnot(None),
+            (FilledForm.snapshot_status.isnot(None) & (FilledForm.snapshot_status != "legacy_unsnapshotted")),
+            FilledForm.answers.notin_([[], {}, JSONB.NULL]),
+            (FilledForm.form_snapshot.isnot(None) & (FilledForm.form_snapshot != JSONB.NULL))),
+    ).first() is not None:
+        return "Campaign has issued or answered evaluations"
+    return None

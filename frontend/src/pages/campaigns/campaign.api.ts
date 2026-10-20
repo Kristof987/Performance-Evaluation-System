@@ -9,6 +9,7 @@ import type {
   CampaignGroups,
   CampaignGroupsResponse,
   CampaignOperationalMetrics,
+  CampaignDeletionEligibility,
   CampaignResponse,
   CampaignSelfEvaluations,
   CampaignSelfEvaluationsResponse,
@@ -16,6 +17,12 @@ import type {
 import { budapestInstant, budapestLocal, mapCampaignFromResponse } from './campaign.utils';
 
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
+
+export class CampaignRequestError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
 
 async function requestCampaigns<T>(
   getAccessToken: AccessTokenGetter,
@@ -29,7 +36,7 @@ async function requestCampaigns<T>(
     const detail =
       body && typeof body === 'object' && 'detail' in body ? body.detail : null;
     const message = detail && typeof detail === 'object' && 'message' in detail ? detail.message : null;
-    throw new Error(typeof detail === 'string' ? detail : typeof message === 'string' ? message : fallback);
+    throw new CampaignRequestError(response.status, typeof detail === 'string' ? detail : typeof message === 'string' ? message : fallback);
   }
   return response.json() as Promise<T>;
 }
@@ -152,6 +159,27 @@ export async function fetchCampaignOperationalMetrics(getAccessToken: AccessToke
   return requestCampaigns<CampaignOperationalMetrics>(
     getAccessToken, `/${encodeURIComponent(id)}/operational-metrics`, {},
     'Campaign completion metrics could not be loaded.',
+  );
+}
+
+export async function fetchCampaignDeletionEligibility(getAccessToken: AccessTokenGetter, id: string): Promise<CampaignDeletionEligibility> {
+  return requestCampaigns<CampaignDeletionEligibility>(
+    getAccessToken, `/${encodeURIComponent(id)}/deletion-eligibility`, {},
+    'Campaign deletion eligibility could not be loaded.',
+  );
+}
+
+export async function changeCampaignArchive(getAccessToken: AccessTokenGetter, id: string, action: 'archive' | 'unarchive'): Promise<Campaign> {
+  return mapCampaignFromResponse(await requestCampaigns<CampaignResponse>(
+    getAccessToken, `/${encodeURIComponent(id)}/${action}`, { method: 'POST' },
+    `Campaign could not be ${action === 'archive' ? 'archived' : 'unarchived'}.`,
+  ));
+}
+
+export async function deleteCampaign(getAccessToken: AccessTokenGetter, id: string): Promise<void> {
+  await requestCampaigns<{ deleted: boolean }>(
+    getAccessToken, `/${encodeURIComponent(id)}`, { method: 'DELETE' },
+    'Campaign could not be deleted.',
   );
 }
 
