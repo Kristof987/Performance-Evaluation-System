@@ -122,7 +122,9 @@ class NumericClaim(AnalysisModel):
 class AnalysisFinding(AnalysisModel):
     assessment: str = Field(min_length=1, max_length=1200)
     reasoning: str = Field(min_length=1, max_length=2000)
-    supporting_evidence_ids: list[str] = Field(min_length=1, max_length=30)
+    # Generated handle citations expand to all authorized source references for
+    # each cited aggregate before this persisted contract is validated.
+    supporting_evidence_ids: list[str] = Field(min_length=1, max_length=1000)
     numeric_claims: list[NumericClaim] = Field(default_factory=list, max_length=20)
 
     @field_validator("assessment", "reasoning")
@@ -143,3 +145,33 @@ class EmployeeAIAnalysis(AnalysisModel):
     overall_assessment: AnalysisFinding
     strengths: list[AnalysisFinding] = Field(max_length=5)
     development_areas: list[AnalysisFinding] = Field(max_length=5)
+
+
+class AggregateEvidence(AnalysisModel):
+    evidence_id: str
+    category: Literal["peer", "self", "aggregate"]
+    scope: str
+    question_text: str
+    section_name: str | None = None
+    details: dict
+
+
+class AggregateStatistic(AnalysisModel):
+    statistic_id: str
+    value: float | int
+    unit: Literal["normalized", "count", "difference", "percentage"]
+    description: str
+    evidence_ids: list[str]
+    denominator: int | None = None
+
+
+class AggregateAnalysisContext(AnalysisModel):
+    campaign_id: int
+    scope_type: Literal["campaign", "group", "role"]
+    scope_id: int | None
+    scope_label: str
+    payload: dict
+    evidence: list[AggregateEvidence]
+    statistics: list[AggregateStatistic]
+    comparison_evidence: list[list[str]]
+    source_fingerprint: str

@@ -1,8 +1,15 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { AnalysisVersion, EmployeeAIAnalysis, EmployeeAIAnalysisHistory } from '../types/ai-analysis.types';
+import type { AIAnalysis, AIAnalysisHistory, AIAnalysisScope, AnalysisVersion } from '../types/ai-analysis.types';
 
-const basePath = (campaignId: number, employeeId: number) =>
-  `/reports/campaigns/${encodeURIComponent(campaignId)}/employees/${encodeURIComponent(employeeId)}/ai-analysis`;
+function basePath(scope: AIAnalysisScope) {
+  const campaignPath = `/reports/campaigns/${encodeURIComponent(scope.campaignId)}`;
+  switch (scope.type) {
+    case 'employee': return `${campaignPath}/employees/${encodeURIComponent(scope.employeeId)}/ai-analysis`;
+    case 'group': return `${campaignPath}/groups/${encodeURIComponent(scope.groupId)}/ai-analysis`;
+    case 'role': return `${campaignPath}/roles/${encodeURIComponent(scope.roleId)}/ai-analysis`;
+    case 'campaign': return `${campaignPath}/ai-analysis`;
+  }
+}
 
 async function request<T>(getAccessToken: AccessTokenGetter, path: string, init: RequestInit = {}): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, path, init);
@@ -27,20 +34,20 @@ async function request<T>(getAccessToken: AccessTokenGetter, path: string, init:
   return response.json() as Promise<T>;
 }
 
-export function fetchAIAnalyses(getAccessToken: AccessTokenGetter, campaignId: number, employeeId: number, signal: AbortSignal) {
-  return request<EmployeeAIAnalysisHistory>(getAccessToken, basePath(campaignId, employeeId), { signal });
+export function fetchAIAnalyses(getAccessToken: AccessTokenGetter, scope: AIAnalysisScope, signal: AbortSignal) {
+  return request<AIAnalysisHistory>(getAccessToken, basePath(scope), { signal });
 }
 
-export function generateAIAnalysis(getAccessToken: AccessTokenGetter, campaignId: number, employeeId: number) {
-  return request<AnalysisVersion>(getAccessToken, `${basePath(campaignId, employeeId)}/generate`, { method: 'POST' });
+export function generateAIAnalysis(getAccessToken: AccessTokenGetter, scope: AIAnalysisScope) {
+  return request<AnalysisVersion>(getAccessToken, `${basePath(scope)}/generate`, { method: 'POST' });
 }
 
-export function saveAIAnalysis(getAccessToken: AccessTokenGetter, campaignId: number, employeeId: number, analysisId: number, analysis: EmployeeAIAnalysis) {
-  return request<AnalysisVersion>(getAccessToken, `${basePath(campaignId, employeeId)}/${encodeURIComponent(analysisId)}`, {
+export function saveAIAnalysis(getAccessToken: AccessTokenGetter, scope: AIAnalysisScope, analysisId: number, analysis: AIAnalysis) {
+  return request<AnalysisVersion>(getAccessToken, `${basePath(scope)}/${encodeURIComponent(analysisId)}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(analysis),
   });
 }
 
-export function approveAIAnalysis(getAccessToken: AccessTokenGetter, campaignId: number, employeeId: number, analysisId: number) {
-  return request<AnalysisVersion>(getAccessToken, `${basePath(campaignId, employeeId)}/${encodeURIComponent(analysisId)}/approve`, { method: 'POST' });
+export function approveAIAnalysis(getAccessToken: AccessTokenGetter, scope: AIAnalysisScope, analysisId: number) {
+  return request<AnalysisVersion>(getAccessToken, `${basePath(scope)}/${encodeURIComponent(analysisId)}/approve`, { method: 'POST' });
 }

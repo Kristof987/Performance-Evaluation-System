@@ -71,7 +71,7 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
         ['Overall self score', formatScore(data.kpis.overall_self_score)],
       ].map(([label, value], index) => <div className={index === 0 ? 'reports-kpi-segment reports-kpi-primary' : 'reports-kpi-segment'} key={label as string}><span>{label}</span><strong>{value}</strong>{index === 1 && <small>{data.kpis.peer_completion_rate === null ? 'No reviews assigned' : `${data.kpis.peer_completion_rate}% complete`}</small>}</div>)}
     </section>
-    <EmployeeAIAnalysisPanel campaignId={data.campaign.id} employeeId={data.employee.id} getAccessToken={getAccessToken} />
+    <EmployeeAIAnalysisPanel scope={{ type: 'employee', campaignId: data.campaign.id, employeeId: data.employee.id }} getAccessToken={getAccessToken} />
     <section className="reports-card">
       <div className="reports-section-heading"><h2>Performance by section</h2><p>Aggregated peer feedback by rated section on a 1-5 scale.</p></div>
       {data.sections.length === 0 ? <ReportsEmptyState title={emptyState.title} message={emptyState.message} /> : <div className="reports-dimension-chart">{data.sections.map((section) => <div className="reports-bar-row" key={section.id}>

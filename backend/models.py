@@ -229,6 +229,50 @@ class EmployeeAIAnalysis(Base):
     )
 
 
+class AggregateAIAnalysis(Base):
+    __tablename__ = "aggregate_ai_analyses"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    scope_type = Column(String(16), nullable=False)
+    scope_id = Column(Integer, nullable=True)
+    version = Column(Integer, nullable=False)
+    parent_analysis_id = Column(Integer, ForeignKey("aggregate_ai_analyses.id"), nullable=True)
+    status = Column(String(16), nullable=False, default="draft")
+    is_current_approved = Column(Boolean, nullable=False, default=False)
+    analysis = Column(JSONB, nullable=False)
+    evidence_summary = Column(JSONB, nullable=False)
+    model_identifier = Column(String(120), nullable=False)
+    generated_at = Column(DateTime(timezone=True), nullable=False)
+    generated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    edited_at = Column(DateTime(timezone=True), nullable=True)
+    edited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    source_fingerprint = Column(String(64), nullable=False)
+    schema_version = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "scope_type", "scope_id", "version", name="uq_aggregate_ai_version"),
+        Index("ix_aggregate_ai_subject", "campaign_id", "scope_type", "scope_id"),
+        Index("uq_aggregate_ai_current_approved", "campaign_id", "scope_type", "scope_id", unique=True,
+              postgresql_where=text("is_current_approved")),
+        Index("uq_aggregate_ai_campaign_version", "campaign_id", "version", unique=True,
+              postgresql_where=text("scope_type = 'campaign'")),
+        Index("uq_aggregate_ai_campaign_approved", "campaign_id", unique=True,
+              postgresql_where=text("scope_type = 'campaign' AND is_current_approved")),
+        CheckConstraint("(scope_type = 'campaign' AND scope_id IS NULL) OR "
+                        "(scope_type IN ('group', 'role') AND scope_id IS NOT NULL AND scope_id > 0)",
+                        name="ck_aggregate_ai_scope"),
+        CheckConstraint("version > 0 AND schema_version = 1", name="ck_aggregate_ai_version_schema"),
+        CheckConstraint("status IN ('draft', 'approved')", name="ck_aggregate_ai_status"),
+        CheckConstraint("NOT is_current_approved OR status = 'approved'", name="ck_aggregate_ai_current_status"),
+        CheckConstraint("(status = 'draft' AND approved_at IS NULL AND approved_by_user_id IS NULL) OR "
+                        "(status = 'approved' AND approved_at IS NOT NULL AND approved_by_user_id IS NOT NULL)",
+                        name="ck_aggregate_ai_approval_fields"),
+    )
+
+
 class CampaignEmployeeSelfEvaluation(Base):
     __tablename__ = "campaign_employee_self_evaluations"
 

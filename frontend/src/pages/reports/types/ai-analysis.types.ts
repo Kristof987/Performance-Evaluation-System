@@ -7,7 +7,13 @@ export type AnalysisFinding = {
   numeric_claims: NumericClaim[];
 };
 
-export type EmployeeAIAnalysis = {
+export type AIAnalysisScope =
+  | { type: 'employee'; campaignId: number; employeeId: number }
+  | { type: 'group'; campaignId: number; groupId: number }
+  | { type: 'role'; campaignId: number; roleId: number }
+  | { type: 'campaign'; campaignId: number };
+
+export type AIAnalysis = {
   overall_assessment: AnalysisFinding;
   strengths: AnalysisFinding[];
   development_areas: AnalysisFinding[];
@@ -16,7 +22,7 @@ export type EmployeeAIAnalysis = {
 export type AnalysisEvidence = {
   question_text: string;
   section_name: string | null;
-  category: 'peer' | 'self';
+  category: 'peer' | 'self' | 'aggregate';
   original_value?: number | null;
   normalized_value?: number | null;
   response_text?: string;
@@ -28,9 +34,10 @@ export type AnalysisEvidence = {
     scale_max: number | null;
     min_label: string | null;
     max_label: string | null;
-    original_distribution: Array<{ original_value: number; count: number }>;
+    original_distribution?: Array<{ original_value: number; count: number }>;
   }>;
   section_statistics: Array<{ section_name: string; average_normalized: number | null; contributor_count: number | null }>;
+  completion_statistics?: Array<{ label: string; value: string | number | null; count?: number | null }>;
 };
 
 export type AnalysisVersion = {
@@ -40,7 +47,7 @@ export type AnalysisVersion = {
   status: 'draft' | 'approved';
   is_current_approved: boolean;
   outdated: boolean;
-  analysis: EmployeeAIAnalysis;
+  analysis: AIAnalysis;
   evidence: Record<string, AnalysisEvidence>;
   model_identifier: string;
   generated_at: string;
@@ -51,8 +58,9 @@ export type AnalysisVersion = {
   approved_by_user_id: number | null;
 };
 
-export type EmployeeAIAnalysisHistory = {
+export type AIAnalysisHistory = {
   versions: AnalysisVersion[];
   can_manage: boolean;
   has_eligible_evidence: boolean;
+  scope_label?: string;
 };

@@ -22,6 +22,7 @@ import form_snapshot_service
 import reporting_service
 import question_analytics_service
 import ai_workflow_service
+import ai_aggregate_workflow_service
 from ai_analysis_models import EmployeeAIAnalysis
 from ai_generation_service import AnalysisGenerationError
 import schemas
@@ -1803,6 +1804,49 @@ def approve_employee_ai_report(
     actor: models.User = Depends(require_permission("campaigns.manage")),
 ):
     return ai_workflow_service.approve(db, campaign_id, employee_id, analysis_id, actor=actor)
+
+
+def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
+    """Keep all three aggregate scopes on the same authorized HR workflow."""
+    def history(campaign_id: int, scope_id: int | None = None, db: Session = Depends(get_db),
+                actor: models.User = Depends(require_permission("reports.read"))):
+        return ai_aggregate_workflow_service.list_analyses(db, campaign_id, scope_type, scope_id, actor=actor)
+
+    def generate(campaign_id: int, scope_id: int | None = None, db: Session = Depends(get_db),
+                 actor: models.User = Depends(require_permission("campaigns.manage"))):
+        try:
+            return ai_aggregate_workflow_service.generate(db, campaign_id, scope_type, scope_id, actor=actor)
+        except AnalysisGenerationError as error:
+            status = {"analysis_rate_limited": 429, "analysis_timeout": 504,
+                      "analysis_not_configured": 503, "analysis_provider_unavailable": 503,
+                      "insufficient_analysis_data": 422, "analysis_context_too_large": 422,
+                      "invalid_analysis_output": 422, "invalid_analysis_evidence": 422,
+                      "invalid_analysis_claim": 422, "invalid_analysis_context": 422}.get(error.code, 503)
+            raise HTTPException(status_code=status, detail=error.code) from None
+
+    def edit(campaign_id: int, analysis_id: int, payload: EmployeeAIAnalysis,
+             scope_id: int | None = None, db: Session = Depends(get_db),
+             actor: models.User = Depends(require_permission("campaigns.manage"))):
+        try:
+            return ai_aggregate_workflow_service.edit(db, campaign_id, scope_type, scope_id,
+                                                        analysis_id, payload, actor=actor)
+        except AnalysisGenerationError:
+            raise HTTPException(status_code=422, detail="Edited analysis contains unsupported evidence or numerical claims") from None
+
+    def approve(campaign_id: int, analysis_id: int, scope_id: int | None = None,
+                db: Session = Depends(get_db),
+                actor: models.User = Depends(require_permission("campaigns.manage"))):
+        return ai_aggregate_workflow_service.approve(db, campaign_id, scope_type, scope_id, analysis_id, actor=actor)
+
+    app.add_api_route(route, history, methods=["GET"], name=f"get_{scope_type}_ai_analysis")
+    app.add_api_route(f"{route}/generate", generate, methods=["POST"], name=f"generate_{scope_type}_ai_analysis")
+    app.add_api_route(f"{route}/{{analysis_id}}", edit, methods=["PUT"], name=f"edit_{scope_type}_ai_analysis")
+    app.add_api_route(f"{route}/{{analysis_id}}/approve", approve, methods=["POST"], name=f"approve_{scope_type}_ai_analysis")
+
+
+_register_aggregate_ai_routes("campaign", "/reports/campaigns/{campaign_id}/ai-analysis")
+_register_aggregate_ai_routes("group", "/reports/campaigns/{campaign_id}/groups/{scope_id}/ai-analysis")
+_register_aggregate_ai_routes("role", "/reports/campaigns/{campaign_id}/roles/{scope_id}/ai-analysis")
 
 
 def reject_conflicting_requester(requester_user_id: int | None, actor: models.User):
