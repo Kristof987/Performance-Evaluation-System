@@ -13,6 +13,16 @@ export type AIAnalysisScope =
   | { type: 'role'; campaignId: number; roleId: number }
   | { type: 'campaign'; campaignId: number };
 
+export type AIAnalysisGenerationJob = {
+  id: number;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  analysis_id: number | null;
+  error_code: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
 export type AIAnalysis = {
   overall_assessment: AnalysisFinding;
   strengths: AnalysisFinding[];

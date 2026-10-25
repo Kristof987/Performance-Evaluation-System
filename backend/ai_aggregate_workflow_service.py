@@ -16,7 +16,7 @@ from ai_analysis_models import AggregateAnalysisContext, EmployeeAIAnalysis
 from ai_generation_service import (
     AnalysisGenerationError, generate_aggregate_ai_analysis_from_context, validate_aggregate_ai_analysis,
 )
-from ai_workflow_service import _lock_campaign, can_manage
+from ai_workflow_service import _commit_generation_result, _lock_campaign, can_manage
 
 
 def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
@@ -134,7 +134,8 @@ def list_analyses(db: Session, campaign_id: int, scope_type: str, scope_id: int 
             "has_eligible_evidence": bool(context.evidence), "scope_label": context.scope_label}
 
 
-def generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, *, actor: models.User) -> dict:
+def generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, *, actor: models.User,
+             job_id: int | None = None, worker_token: str | None = None) -> dict:
     initial = _context(db, campaign_id, scope_type, scope_id, actor)
     _writable(db, campaign_id, actor)
     db.rollback()
@@ -169,8 +170,7 @@ def generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | Non
                 model_identifier=model, generated_at=datetime.now(timezone.utc), generated_by_user_id=actor.id,
                 source_fingerprint=fingerprint, schema_version=1,
             )
-            db.add(record)
-            db.commit()
+            _commit_generation_result(db, record, job_id, worker_token)
             db.refresh(record)
             return _serialize(record, fingerprint)
         except Exception:

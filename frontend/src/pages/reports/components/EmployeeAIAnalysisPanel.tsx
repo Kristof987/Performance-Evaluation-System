@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AccessTokenGetter } from '../../../auth/authenticated-api';
-import { approveAIAnalysis, fetchAIAnalyses, generateAIAnalysis, saveAIAnalysis } from '../api/ai-analysis.api';
-import type { AIAnalysis, AIAnalysisHistory, AIAnalysisScope, AnalysisEvidence, AnalysisFinding, AnalysisVersion } from '../types/ai-analysis.types';
+import { approveAIAnalysis, fetchAIAnalyses, fetchGenerationJob, fetchLatestGenerationJob, generateAIAnalysis, generationErrorMessage, saveAIAnalysis } from '../api/ai-analysis.api';
+import type { AIAnalysis, AIAnalysisGenerationJob, AIAnalysisHistory, AIAnalysisScope, AnalysisEvidence, AnalysisFinding, AnalysisVersion } from '../types/ai-analysis.types';
 
 type Props = { scope: AIAnalysisScope; getAccessToken: AccessTokenGetter };
 
@@ -79,7 +79,16 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [reload, setReload] = useState(0);
+  const [jobReload, setJobReload] = useState(0);
+  const [job, setJob] = useState<AIAnalysisGenerationJob | null>(null);
+  const [jobReady, setJobReady] = useState(false);
+  const [jobError, setJobError] = useState('');
   const actionPending = useRef(false);
+  const actionController = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => { actionController.current?.abort(); };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -90,27 +99,111 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     return () => controller.abort();
   }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null, getAccessToken, reload]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    setJobReady(false);
+    setJobError('');
+    fetchLatestGenerationJob(getAccessToken, scope, controller.signal)
+      .then((latest) => {
+        if (controller.signal.aborted) return;
+        setJob(latest);
+        setJobReady(true);
+        if (latest?.status === 'succeeded') {
+          if (latest.analysis_id === null) setJobError('Completed generation has no analysis. Please check its status again.');
+          else {
+            setSelectedId(latest.analysis_id);
+            setReload((value) => value + 1);
+          }
+        }
+      })
+      .catch((cause) => {
+        if (!controller.signal.aborted) setJobError(cause instanceof Error ? cause.message : 'Generation status could not be loaded.');
+      });
+    return () => controller.abort();
+  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null, getAccessToken, jobReload]);
+
+  const jobActive = job?.status === 'queued' || job?.status === 'running';
+  useEffect(() => {
+    if (!jobReady || !jobActive || jobError || !job) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetchGenerationJob(getAccessToken, scope, job.id, controller.signal)
+        .then((latest) => {
+          if (controller.signal.aborted) return;
+          setJob(latest);
+          if (latest.status === 'succeeded') {
+            if (latest.analysis_id === null) setJobError('Completed generation has no analysis. Please check its status again.');
+            else {
+              setSelectedId(latest.analysis_id);
+              setReload((value) => value + 1);
+              setNotice('New Draft generated. Review it before approval.');
+            }
+          }
+        })
+        .catch((cause) => {
+          if (!controller.signal.aborted) setJobError(cause instanceof Error ? cause.message : 'Generation status could not be loaded.');
+        });
+    }, 2500);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [job, jobActive, jobReady, jobError, getAccessToken, scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null]);
+
   const selected = history?.versions.find((version) => version.id === selectedId) ?? history?.versions[0] ?? null;
-  async function perform(kind: 'generate' | 'save' | 'approve', task: () => Promise<AnalysisVersion>) {
+  async function perform(kind: 'save' | 'approve', task: () => Promise<AnalysisVersion>) {
     if (actionPending.current) return;
     actionPending.current = true;
+    const controller = new AbortController();
+    actionController.current = controller;
     setBusy(kind);
     setError('');
     setNotice('');
     try {
       const result = await task();
+      if (controller.signal.aborted) return;
       setEditing(null);
       setSelectedId(result.id);
       setHistory((current) => current && { ...current,
         versions: [result, ...current.versions.filter((version) => version.id !== result.id).map((version) => kind === 'approve' && version.is_current_approved ? { ...version, is_current_approved: false } : version)].sort((a, b) => b.version - a.version),
       });
-      setNotice(kind === 'approve' ? 'Analysis approved.' : kind === 'save' ? 'Edited Draft saved as a new version.' : 'New Draft generated. Review it before approval.');
+      setNotice(kind === 'approve' ? 'Analysis approved.' : 'Edited Draft saved as a new version.');
       setReload((value) => value + 1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Analysis request failed.');
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Analysis request failed.');
     } finally {
       actionPending.current = false;
-      setBusy(null);
+      if (actionController.current === controller) actionController.current = null;
+      if (!controller.signal.aborted) setBusy(null);
+    }
+  }
+
+  async function startGeneration() {
+    if (actionPending.current || !jobReady || jobError || jobActive) return;
+    actionPending.current = true;
+    const controller = new AbortController();
+    actionController.current = controller;
+    setBusy('generate');
+    setError('');
+    setNotice('');
+    try {
+      const started = await generateAIAnalysis(getAccessToken, scope, controller.signal);
+      if (controller.signal.aborted) return;
+      setJob(started);
+      if (started.status === 'succeeded') {
+        if (started.analysis_id === null) setJobError('Completed generation has no analysis. Please check its status again.');
+        else {
+          setSelectedId(started.analysis_id);
+          setReload((value) => value + 1);
+          setNotice('New Draft generated. Review it before approval.');
+        }
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setJobReady(false);
+        setJobError(cause instanceof Error ? cause.message : 'Generation request failed.');
+      }
+    } finally {
+      actionPending.current = false;
+      if (actionController.current === controller) actionController.current = null;
+      if (!controller.signal.aborted) setBusy(null);
     }
   }
 
@@ -136,15 +229,18 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     {!history && !error && <p className="reports-state">Loading saved analyses...</p>}
     {error && <div className="reports-state reports-error" role="alert">{error}<button type="button" className="btn btn-secondary btn-small" onClick={() => setReload((value) => value + 1)}>Retry</button></div>}
     {notice && <p className="reports-ai-notice" role="status">{notice}</p>}
+    {jobError && <div className="reports-state reports-error" role="alert">Generation status could not be checked: {jobError}<button type="button" className="btn btn-secondary btn-small" onClick={() => setJobReload((value) => value + 1)}>Retry status check</button></div>}
+    {jobReady && !jobError && jobActive && <p className="reports-ai-notice" role="status">AI analysis {job?.status === 'queued' ? 'queued' : 'running'}. You can leave this page; generation will continue.</p>}
+    {jobReady && !jobError && job?.status === 'failed' && <p className="reports-state reports-error" role="alert">{generationErrorMessage(job.error_code)} Use Retry generation to start a new attempt.</p>}
     {history && <>
       <div className="reports-ai-toolbar">
         {history.versions.length > 0 && <label>Analysis version<select className="form-control" value={selected?.id ?? ''} onChange={(event) => { setEditing(null); setSelectedId(Number(event.target.value)); setNotice(''); }}>
           {history.versions.map((version) => <option key={version.id} value={version.id}>Version {version.version} · {version.status === 'draft' ? 'Draft' : 'Approved'}{version.is_current_approved ? ' · Current approved' : ''}{version.outdated ? ' · Outdated' : ''}</option>)}
         </select></label>}
-        {history.can_manage && <button type="button" className="btn btn-primary" disabled={busy !== null || !history.has_eligible_evidence} onClick={() => {
-          if (history.versions.length > 0 && !window.confirm('Regenerate? This may incur API cost. A new Draft will be created; earlier versions remain available.')) return;
-           void perform('generate', () => generateAIAnalysis(getAccessToken, scope));
-        }}>{busy === 'generate' ? 'Generating analysis...' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
+         {history.can_manage && <button type="button" className="btn btn-primary" disabled={busy !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={() => {
+           if (history.versions.length > 0 && !window.confirm('Regenerate? This may incur API cost. A new Draft will be created; earlier versions remain available.')) return;
+           void startGeneration();
+         }}>{busy === 'generate' ? 'Starting generation...' : jobActive ? 'Generation in progress...' : job?.status === 'failed' ? 'Retry generation' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
       </div>
       {!history.has_eligible_evidence && <p className="reports-ai-warning">No reportable submitted evidence is available. Insufficient data is not an indication of low performance.</p>}
        {!selected && <p className="reports-ai-intro">{copy.intro} AI conclusions are not shown until explicitly generated, reviewed and approved by an authorized manager.</p>}

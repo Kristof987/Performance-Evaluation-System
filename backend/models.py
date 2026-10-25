@@ -198,6 +198,7 @@ class EmployeeAIAnalysis(Base):
     __tablename__ = "employee_ai_analyses"
 
     id = Column(Integer, primary_key=True)
+    generation_job_id = Column(Integer, ForeignKey("ai_analysis_generation_jobs.id", name="fk_employee_ai_generation_job"), nullable=True)
     campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
     evaluatee_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
     version = Column(Integer, nullable=False)
@@ -217,6 +218,7 @@ class EmployeeAIAnalysis(Base):
     schema_version = Column(Integer, nullable=False, default=1)
 
     __table_args__ = (
+        UniqueConstraint("generation_job_id", name="uq_employee_ai_generation_job"),
         UniqueConstraint("campaign_id", "evaluatee_employee_id", "version", name="uq_employee_ai_analysis_version"),
         Index("uq_employee_ai_current_approved", "campaign_id", "evaluatee_employee_id", unique=True,
               postgresql_where=text("is_current_approved")),
@@ -233,6 +235,7 @@ class AggregateAIAnalysis(Base):
     __tablename__ = "aggregate_ai_analyses"
 
     id = Column(Integer, primary_key=True)
+    generation_job_id = Column(Integer, ForeignKey("ai_analysis_generation_jobs.id", name="fk_aggregate_ai_generation_job"), nullable=True)
     campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
     scope_type = Column(String(16), nullable=False)
     scope_id = Column(Integer, nullable=True)
@@ -253,6 +256,7 @@ class AggregateAIAnalysis(Base):
     schema_version = Column(Integer, nullable=False, default=1)
 
     __table_args__ = (
+        UniqueConstraint("generation_job_id", name="uq_aggregate_ai_generation_job"),
         UniqueConstraint("campaign_id", "scope_type", "scope_id", "version", name="uq_aggregate_ai_version"),
         Index("ix_aggregate_ai_subject", "campaign_id", "scope_type", "scope_id"),
         Index("uq_aggregate_ai_current_approved", "campaign_id", "scope_type", "scope_id", unique=True,
@@ -270,6 +274,39 @@ class AggregateAIAnalysis(Base):
         CheckConstraint("(status = 'draft' AND approved_at IS NULL AND approved_by_user_id IS NULL) OR "
                         "(status = 'approved' AND approved_at IS NOT NULL AND approved_by_user_id IS NOT NULL)",
                         name="ck_aggregate_ai_approval_fields"),
+    )
+
+
+class AIAnalysisGenerationJob(Base):
+    __tablename__ = "ai_analysis_generation_jobs"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    scope_type = Column(String(16), nullable=False)
+    scope_id = Column(Integer, nullable=True)
+    status = Column(String(16), nullable=False)
+    requested_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    worker_token = Column(String(36), nullable=True)
+    analysis_id = Column(Integer, nullable=True)
+    error_code = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("(scope_type = 'campaign' AND scope_id IS NULL) OR "
+                        "(scope_type IN ('employee', 'group', 'role') AND scope_id IS NOT NULL AND scope_id > 0)",
+                        name="ck_ai_generation_scope"),
+        CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed')", name="ck_ai_generation_status"),
+        CheckConstraint("(status IN ('queued', 'running') AND finished_at IS NULL) OR "
+                        "(status IN ('succeeded', 'failed') AND finished_at IS NOT NULL)", name="ck_ai_generation_finished"),
+        CheckConstraint("status <> 'succeeded' OR analysis_id IS NOT NULL", name="ck_ai_generation_result"),
+        Index("ix_ai_generation_subject_latest", "campaign_id", "scope_type", "scope_id", "id"),
+        Index("uq_ai_generation_active_subject", "campaign_id", "scope_type", "scope_id", unique=True,
+              postgresql_where=text("status IN ('queued', 'running') AND scope_id IS NOT NULL")),
+        Index("uq_ai_generation_active_campaign", "campaign_id", unique=True,
+              postgresql_where=text("status IN ('queued', 'running') AND scope_type = 'campaign'")),
     )
 
 

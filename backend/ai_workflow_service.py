@@ -141,7 +141,32 @@ def _lock_campaign(db: Session, campaign_id: int) -> None:
     db.query(models.Campaign).filter(models.Campaign.id == campaign_id).populate_existing().with_for_update().one()
 
 
-def generate(db: Session, campaign_id: int, employee_id: int, *, actor: models.User) -> dict:
+def _commit_generation_result(db: Session, record, job_id: int | None, worker_token: str | None) -> None:
+    if job_id is not None:
+        job = db.query(models.AIAnalysisGenerationJob).filter(
+            models.AIAnalysisGenerationJob.id == job_id,
+        ).with_for_update().first()
+        record_scope = "employee" if isinstance(record, models.EmployeeAIAnalysis) else record.scope_type
+        record_id = record.evaluatee_employee_id if record_scope == "employee" else record.scope_id
+        if (job is None or job.status != "running" or job.worker_token != worker_token
+                or job.campaign_id != record.campaign_id or job.scope_type != record_scope
+                or job.scope_id != record_id or job.requested_by_user_id != record.generated_by_user_id):
+            raise HTTPException(status_code=409, detail="Generation job is no longer active")
+        record.generation_job_id = job_id
+        db.add(record)
+        db.flush()
+        job.status = "succeeded"
+        job.analysis_id = record.id
+        job.finished_at = datetime.now(timezone.utc)
+        job.lease_expires_at = None
+        job.worker_token = None
+    else:
+        db.add(record)
+    db.commit()
+
+
+def generate(db: Session, campaign_id: int, employee_id: int, *, actor: models.User,
+             job_id: int | None = None, worker_token: str | None = None) -> dict:
     context = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
     _writable(context, db, actor)
     # Phase 1's shared campaign lock must not remain held while waiting on OpenAI.
@@ -177,8 +202,7 @@ def generate(db: Session, campaign_id: int, employee_id: int, *, actor: models.U
                 evidence_summary=_evidence_summary(context, analysis), model_identifier=model,
                 generated_at=now, generated_by_user_id=actor.id, source_fingerprint=fingerprint, schema_version=1,
             )
-            db.add(record)
-            db.commit()
+            _commit_generation_result(db, record, job_id, worker_token)
             db.refresh(record)
             return _serialize(record, fingerprint)
         except Exception:
