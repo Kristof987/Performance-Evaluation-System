@@ -74,7 +74,8 @@ export function Auth0AppAuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return;
     const recheck = () => {
-      setResolution(null);
+      // Keep the linked identity mounted while a focus-triggered refresh runs.
+      // A failed recheck still replaces it with an error in the fetch effect.
       setAttempt((current) => current + 1);
     };
     window.addEventListener('focus', recheck);

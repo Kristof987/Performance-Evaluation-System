@@ -119,6 +119,33 @@ class NumericClaim(AnalysisModel):
     value: str = Field(min_length=1, max_length=32)
 
 
+class ComparisonClaim(AnalysisModel):
+    fact_id: str = Field(min_length=1, max_length=160)
+    direction: Literal["left_higher", "right_higher"]
+
+
+class ObservationClaim(AnalysisModel):
+    fact_id: str = Field(min_length=1, max_length=160)
+
+
+class GeneratedFinding(AnalysisModel):
+    assessment: str = Field(min_length=1, max_length=1200)
+    reasoning: str = Field(min_length=1, max_length=2000)
+    fact_ids: list[str] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def unique_facts(self):
+        if len(set(self.fact_ids)) != len(self.fact_ids):
+            raise ValueError("Fact references must be unique")
+        return self
+
+
+class GeneratedAnalysis(AnalysisModel):
+    overall_assessment: GeneratedFinding
+    strengths: list[GeneratedFinding] = Field(max_length=5)
+    development_areas: list[GeneratedFinding] = Field(max_length=5)
+
+
 class AnalysisFinding(AnalysisModel):
     assessment: str = Field(min_length=1, max_length=1200)
     reasoning: str = Field(min_length=1, max_length=2000)
@@ -126,6 +153,11 @@ class AnalysisFinding(AnalysisModel):
     # each cited aggregate before this persisted contract is validated.
     supporting_evidence_ids: list[str] = Field(min_length=1, max_length=1000)
     numeric_claims: list[NumericClaim] = Field(default_factory=list, max_length=20)
+    # Absent in historical versions; new claims bind qualitative prose to released facts.
+    comparison_claims: list[ComparisonClaim] = Field(default_factory=list, max_length=20)
+    observation_claims: list[ObservationClaim] = Field(default_factory=list, max_length=20)
+    # Present on new resolved analyses; legacy Drafts have no unified fact list.
+    fact_ids: list[str] | None = Field(default=None, max_length=20)
 
     @field_validator("assessment", "reasoning")
     @classmethod
@@ -138,6 +170,8 @@ class AnalysisFinding(AnalysisModel):
     def unique_references(self):
         if any(not item.strip() for item in self.supporting_evidence_ids) or len(set(self.supporting_evidence_ids)) != len(self.supporting_evidence_ids):
             raise ValueError("Evidence references must be nonempty and unique")
+        if self.fact_ids is not None and (not self.fact_ids or len(set(self.fact_ids)) != len(self.fact_ids)):
+            raise ValueError("Fact references must be nonempty and unique")
         return self
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { fetchEmployeeReportDetail, fetchEmployeeReportsOverview } from './api/reports.api';
 import EmployeeReportDetailView from './EmployeeReportDetailView';
@@ -91,20 +91,23 @@ export function EmployeeReportDetailPage() {
 
 function EmployeeReportDetailContent({ campaignId, employeeId, getAccessToken }: { campaignId: number; employeeId: number; getAccessToken: AccessTokenGetter | undefined }) {
   const navigate = useNavigate();
+  const accessTokenRef = useRef(getAccessToken);
+  accessTokenRef.current = getAccessToken;
   const [data, setData] = useState<EmployeeReportDetail | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    if (!getAccessToken) return undefined;
+    const tokenGetter = accessTokenRef.current;
+    if (!tokenGetter) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
-    fetchEmployeeReportDetail(getAccessToken, campaignId, employeeId, controller.signal)
+    fetchEmployeeReportDetail(tokenGetter, campaignId, employeeId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Employee report could not be loaded.'); });
     return () => controller.abort();
-  }, [campaignId, employeeId, getAccessToken, reload]);
+  }, [campaignId, employeeId, !!getAccessToken, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.employee.id !== employeeId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
   if (!getAccessToken) return <div className="reports-state">Waiting for authentication...</div>;

@@ -16,7 +16,7 @@ from ai_analysis_models import AggregateAnalysisContext, EmployeeAIAnalysis
 from ai_generation_service import (
     AnalysisGenerationError, generate_aggregate_ai_analysis_from_context, validate_aggregate_ai_analysis,
 )
-from ai_workflow_service import _commit_generation_result, _lock_campaign, can_manage
+from ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, _requires_fact_contract, _requires_unified_facts, can_manage
 
 
 def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
@@ -157,7 +157,7 @@ def generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | Non
                 raise HTTPException(status_code=409, detail="Please wait before regenerating this analysis")
             fingerprint = context.source_fingerprint
             db.rollback()  # Never retain Reports' campaign lock during a paid provider call.
-            analysis, model = generate_aggregate_ai_analysis_from_context(context)
+            analysis, model = generate_aggregate_ai_analysis_from_context(context, job_id=job_id)
             _lock_campaign(db, campaign_id)
             fresh = _context(db, campaign_id, scope_type, scope_id, actor)
             _writable(db, campaign_id, actor)
@@ -196,11 +196,13 @@ def edit(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, a
         raise HTTPException(status_code=409, detail="Only the latest Draft version can be edited")
     if record.source_fingerprint != context.source_fingerprint or not context.evidence:
         raise HTTPException(status_code=409, detail="Outdated analysis; regenerate before editing")
-    validated = validate_aggregate_ai_analysis(context, content)
+    legacy = not _requires_fact_contract(record.analysis)
+    validated = validate_aggregate_ai_analysis(context, content, require_contract=not legacy,
+                                               require_fact_ids=_requires_unified_facts(record.analysis))
     new_record = models.AggregateAIAnalysis(
         campaign_id=campaign_id, scope_type=scope_type, scope_id=scope_id,
         version=_version(db, context), parent_analysis_id=record.id, status="draft", is_current_approved=False,
-        analysis=validated.model_dump(mode="json"), evidence_summary=_evidence_summary(context, validated),
+        analysis=_analysis_json(validated, legacy=legacy), evidence_summary=_evidence_summary(context, validated),
         model_identifier=record.model_identifier, generated_at=record.generated_at,
         generated_by_user_id=record.generated_by_user_id, edited_at=datetime.now(timezone.utc),
         edited_by_user_id=actor.id, source_fingerprint=context.source_fingerprint, schema_version=1,
@@ -225,7 +227,9 @@ def approve(db: Session, campaign_id: int, scope_type: str, scope_id: int | None
     if record.source_fingerprint != context.source_fingerprint or not context.evidence:
         raise HTTPException(status_code=409, detail="Outdated analysis; regenerate before approval")
     try:
-        validate_aggregate_ai_analysis(context, EmployeeAIAnalysis.model_validate(record.analysis))
+        validate_aggregate_ai_analysis(context, EmployeeAIAnalysis.model_validate(record.analysis),
+                                       require_contract=_requires_fact_contract(record.analysis),
+                                       require_fact_ids=_requires_unified_facts(record.analysis))
     except (AnalysisGenerationError, ValueError):
         raise HTTPException(status_code=409, detail="Analysis evidence is no longer valid; regenerate") from None
     prior = _query(db, context).filter(models.AggregateAIAnalysis.is_current_approved.is_(True)).first()

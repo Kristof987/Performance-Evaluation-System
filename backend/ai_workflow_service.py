@@ -74,7 +74,24 @@ def _record(db: Session, campaign_id: int, employee_id: int, analysis_id: int) -
 
 def _citations(analysis: EmployeeAIAnalysis) -> set[str]:
     return {evidence_id for finding in [analysis.overall_assessment, *analysis.strengths, *analysis.development_areas]
-            for evidence_id in finding.supporting_evidence_ids}
+             for evidence_id in finding.supporting_evidence_ids}
+
+
+def _requires_fact_contract(content: dict) -> bool:
+    return "observation_claims" in content.get("overall_assessment", {})
+
+
+def _requires_unified_facts(content: dict) -> bool:
+    return content.get("overall_assessment", {}).get("fact_ids") is not None
+
+
+def _analysis_json(analysis: EmployeeAIAnalysis, *, legacy: bool = False) -> dict:
+    content = analysis.model_dump(mode="json")
+    if legacy:
+        for finding in [content["overall_assessment"], *content["strengths"], *content["development_areas"]]:
+            finding.pop("observation_claims", None)
+            finding.pop("fact_ids", None)
+    return content
 
 
 def _evidence_summary(context: EmployeeAnalysisContext, analysis: EmployeeAIAnalysis) -> dict:
@@ -189,7 +206,7 @@ def generate(db: Session, campaign_id: int, employee_id: int, *, actor: models.U
                 raise HTTPException(status_code=409, detail="Please wait before regenerating this analysis")
             fingerprint = _fingerprint(db, campaign_id, employee_id)
             db.rollback()
-            analysis, model = generate_employee_ai_analysis_from_context(context)
+            analysis, model = generate_employee_ai_analysis_from_context(context, job_id=job_id)
             _lock_campaign(db, campaign_id)
             fresh = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
             _writable(fresh, db, actor)
@@ -230,12 +247,14 @@ def edit(db: Session, campaign_id: int, employee_id: int, analysis_id: int,
     if record.source_fingerprint != fingerprint:
         raise HTTPException(status_code=409, detail="Outdated analysis; regenerate before editing")
     _payload, categories, statistics = _prompt_data(context)
-    validated = _verify_analysis(content, categories, context, statistics)
+    legacy = not _requires_fact_contract(record.analysis)
+    validated = _verify_analysis(content, categories, context, statistics, require_contract=not legacy,
+                                 require_fact_ids=_requires_unified_facts(record.analysis))
     now = datetime.now(timezone.utc)
     new_record = models.EmployeeAIAnalysis(
         campaign_id=campaign_id, evaluatee_employee_id=employee_id, version=_version(db, campaign_id, employee_id),
         parent_analysis_id=record.id, status="draft", is_current_approved=False,
-        analysis=validated.model_dump(mode="json"), evidence_summary=_evidence_summary(context, validated),
+        analysis=_analysis_json(validated, legacy=legacy), evidence_summary=_evidence_summary(context, validated),
         model_identifier=record.model_identifier, generated_at=record.generated_at,
         generated_by_user_id=record.generated_by_user_id, edited_at=now, edited_by_user_id=actor.id,
         source_fingerprint=fingerprint, schema_version=1,
@@ -262,7 +281,9 @@ def approve(db: Session, campaign_id: int, employee_id: int, analysis_id: int, *
     try:
         content = EmployeeAIAnalysis.model_validate(record.analysis)
         _payload, categories, statistics = _prompt_data(context)
-        _verify_analysis(content, categories, context, statistics)
+        _verify_analysis(content, categories, context, statistics,
+                         require_contract=_requires_fact_contract(record.analysis),
+                         require_fact_ids=_requires_unified_facts(record.analysis))
     except Exception as error:
         if isinstance(error, (AnalysisGenerationError, ValueError)):
             raise HTTPException(status_code=409, detail="Analysis evidence is no longer valid; regenerate") from None

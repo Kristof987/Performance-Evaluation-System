@@ -642,23 +642,26 @@
 .reports-ai-warning { background: var(--color-surface-muted); border-left: 3px solid var(--color-primary); color: var(--color-text); padding: 12px 15px; }
 .reports-ai-notice { color: var(--color-primary); font-weight: 700; }
 .reports-ai-intro { color: var(--color-text-secondary); line-height: 1.6; max-width: 750px; }
-.reports-ai-sections { display: grid; gap: 24px; }
+.reports-ai-sections { display: grid; gap: 22px; }
 .reports-ai-sections h3 { font-size: 18px; margin: 0 0 12px; }
-.reports-ai-finding { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: 12px; margin-bottom: 12px; overflow-wrap: anywhere; padding: 18px; }
-.reports-ai-finding h4 { margin: 0 0 10px; }
-.reports-ai-finding p { line-height: 1.6; white-space: pre-wrap; }
+.reports-ai-finding { border-bottom: 1px solid var(--color-border); margin-bottom: 14px; overflow-wrap: anywhere; padding: 4px 0 16px; }
+.reports-ai-finding h4 { font-size: 16px; line-height: 1.45; margin: 0 0 6px; }
+.reports-ai-finding p { line-height: 1.6; margin: 0; white-space: pre-wrap; }
 .reports-ai-finding > label { display: grid; font-weight: 700; gap: 6px; margin-bottom: 14px; }
 .reports-ai-finding textarea { min-height: 90px; resize: vertical; }
 .reports-ai-finding small { color: var(--color-text-secondary); display: block; margin-bottom: 12px; }
 .reports-ai-citations { border: 1px solid var(--color-border); border-radius: 8px; display: grid; gap: 8px; margin: 0 0 14px; max-height: 180px; overflow: auto; padding: 12px; }
 .reports-ai-citations label { align-items: start; display: flex; gap: 8px; overflow-wrap: anywhere; }
-.reports-ai-citation-list { border-top: 1px solid var(--color-border); display: grid; gap: 8px; margin-top: 16px; padding-top: 12px; }
-.reports-ai-evidence { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 8px 12px; }
+.reports-ai-citation-list { display: grid; gap: 6px; margin-top: 12px; }
+.reports-ai-citation-list > strong { color: var(--color-text-secondary); font-size: 12px; font-weight: 700; }
+.reports-ai-evidence { border: 1px solid var(--color-border); border-radius: 6px; padding: 6px 10px; }
 .reports-ai-evidence summary { cursor: pointer; line-height: 1.4; }
-.reports-ai-evidence-body { border-top: 1px solid var(--color-border); margin-top: 10px; padding-top: 8px; }
+.reports-ai-evidence-body { border-top: 1px solid var(--color-border); margin-top: 8px; padding-top: 8px; }
 .reports-ai-evidence-body p { margin: 6px 0; }
 .reports-ai-evidence-body small { overflow-wrap: anywhere; }
 .reports-ai-quote { border-left: 2px solid var(--color-primary); padding-left: 12px; white-space: pre-wrap; }
+.reports-ai-show-evidence { background: none; border: 0; color: var(--color-primary); cursor: pointer; font: inherit; justify-self: start; padding: 4px 0; text-decoration: underline; }
+.reports-ai-show-evidence:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 @media (max-width: 700px) {
   .reports-question-filters { grid-template-columns: minmax(0, 1fr); }

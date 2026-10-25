@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router';
 import AppLayout from '../layout/AppLayout';
 import { useAppAuth } from '../../auth/AppAuth';
@@ -30,6 +30,8 @@ export default function ReportsLayout({ selectedCampaignId, children }: { select
   const navigate = useNavigate();
   const location = useLocation();
   const { getAccessToken, retryAuth0 } = useAppAuth();
+  const accessTokenRef = useRef(getAccessToken);
+  accessTokenRef.current = getAccessToken;
   const [campaigns, setCampaigns] = useState<ReportCampaignOption[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(true);
   const [campaignsError, setCampaignsError] = useState('');
@@ -38,14 +40,15 @@ export default function ReportsLayout({ selectedCampaignId, children }: { select
   const selectedStatus = selectedCampaign?.campaign_status ?? null;
 
   useEffect(() => {
-    if (!getAccessToken) {
+    const tokenGetter = accessTokenRef.current;
+    if (!tokenGetter) {
       setLoadingCampaigns(false);
       setCampaignsError('Auth0 sign-in is required to view reports.');
       return undefined;
     }
     const controller = new AbortController();
     setLoadingCampaigns(true);
-    fetchReportCampaigns(getAccessToken, controller.signal)
+    fetchReportCampaigns(tokenGetter, controller.signal)
       .then((items) => {
         if (controller.signal.aborted) return;
         setCampaigns(items);
@@ -63,7 +66,7 @@ export default function ReportsLayout({ selectedCampaignId, children }: { select
         if (!controller.signal.aborted) setLoadingCampaigns(false);
       });
     return () => controller.abort();
-  }, [navigate, getAccessToken, reloadKey, selectedCampaignId]);
+  }, [navigate, !!getAccessToken, reloadKey, selectedCampaignId]);
 
   function campaignPath(campaignId: number) {
     if (location.pathname.includes('/groups')) return `/reports/campaigns/${campaignId}/groups`;

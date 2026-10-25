@@ -36,6 +36,8 @@ services:
       APP_TIMEZONE: Europe/Budapest
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_ANALYSIS_MODEL: ${OPENAI_ANALYSIS_MODEL}
+      COMPASS_RUNTIME_ENV: local
+      COMPASS_AI_DIAGNOSTICS: "1"
 
     depends_on:
       - db

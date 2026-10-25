@@ -25,21 +25,43 @@ function dateLabel(value: string | null) {
   return value ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Not recorded';
 }
 
-function EvidenceDetail({ id, item, employeeScope }: { id: string; item: AnalysisEvidence | undefined; employeeScope: boolean }) {
+type EvidenceGroup = { key: string; entries: Array<{ id: string; item: AnalysisEvidence | undefined }> };
+
+function groupedEvidence(ids: string[], evidence: Record<string, AnalysisEvidence>, employeeScope: boolean): EvidenceGroup[] {
+  const groups = new Map<string, EvidenceGroup>();
+  for (const id of ids) {
+    const source = employeeScope ? /^form:\d+:question:(.+):(rating|text)$/.exec(id) : null;
+    const item = evidence[id];
+    const key = source && item ? `${item.category}:${source[1]}:${source[2]}` : id;
+    if (!groups.has(key)) groups.set(key, { key, entries: [] });
+    groups.get(key)!.entries.push({ id, item });
+  }
+  return [...groups.values()];
+}
+
+function EvidenceDetail({ group, employeeScope }: { group: EvidenceGroup; employeeScope: boolean }) {
+  const item = group.entries.find((entry) => entry.item)?.item;
+  const questions = [...new Map(group.entries.flatMap((entry) => entry.item?.question_statistics ?? []).map((stat) => [JSON.stringify(stat), stat])).values()];
+  const sections = [...new Map(group.entries.flatMap((entry) => entry.item?.section_statistics ?? []).map((stat) => [JSON.stringify(stat), stat])).values()];
+  const completion = [...new Map(group.entries.flatMap((entry) => entry.item?.completion_statistics ?? []).map((stat) => [JSON.stringify(stat), stat])).values()];
+  const category = item?.category === 'self' ? employeeScope ? 'Self-evaluation' : 'Aggregated self-evaluations' : item?.category === 'peer' ? 'Peer feedback' : 'Aggregated results';
+  const label = item?.question_text ?? 'Evidence unavailable';
   return <details className="reports-ai-evidence">
-    <summary>{item ? `${item.category === 'self' ? employeeScope ? 'Self-evaluation' : 'Aggregated self-evaluations' : item.category === 'peer' ? 'Aggregated peer feedback' : 'Aggregated results'} · ${item.section_name ?? 'Other questions'} · ${item.question_text}` : 'Evidence unavailable'}</summary>
+    <summary>{item ? `${label} · ${category}` : label}</summary>
     {item && <div className="reports-ai-evidence-body">
-      {item.question_statistics?.map((stat, index) => <div key={`${stat.question_text}-${index}`}>
-        <strong>{stat.question_text}</strong>
+      {item.section_name && item.section_name !== label && <p>Section: {item.section_name}</p>}
+      {questions.map((stat, index) => <div key={index}>
+        {stat.question_text !== label && <strong>{stat.question_text}</strong>}
         <p>Normalized average: {stat.average_normalized?.toFixed(2) ?? 'Unavailable'} / 5 · Submitted answers: {stat.answer_count ?? 'Unavailable'}</p>
         {stat.scale_min != null && stat.scale_max != null && <p>Issued scale: {stat.scale_min}–{stat.scale_max}{stat.min_label ? ` · ${stat.min_label}` : ''}{stat.max_label ? ` to ${stat.max_label}` : ''}</p>}
         {!!stat.original_distribution?.length && <p>Original rating distribution: {stat.original_distribution.map((bin) => `${bin.original_value}: ${bin.count}`).join(' · ')}</p>}
       </div>)}
-      {item.section_statistics?.map((stat, index) => <p key={`${stat.section_name}-${index}`}>{stat.section_name}: {stat.average_normalized?.toFixed(2) ?? 'Unavailable'} / 5 · {stat.contributor_count ?? 'Unavailable'} {employeeScope && item.category === 'peer' ? 'reviewers' : employeeScope && item.category === 'self' ? 'self-evaluations' : 'contributors'}</p>)}
-      {item.completion_statistics?.map((stat, index) => <p key={`${stat.label}-${index}`}>{stat.label}: {stat.value ?? 'Unavailable'}{stat.count != null ? ` · Count: ${stat.count}` : ''}</p>)}
-      {employeeScope && item.category === 'self' && item.original_value !== null && item.original_value !== undefined && <p>Original self-rating: {item.original_value}; normalized: {item.normalized_value?.toFixed(2)} / 5</p>}
-      {employeeScope && item.category === 'self' && item.response_text && <p className="reports-ai-quote">{item.response_text}</p>}
-      <small>Reference: {id}</small>
+      {sections.map((stat, index) => <p key={index}>{stat.section_name}: {stat.average_normalized?.toFixed(2) ?? 'Unavailable'} / 5 · {stat.contributor_count ?? 'Unavailable'} {employeeScope && item.category === 'peer' ? 'reviewers' : employeeScope && item.category === 'self' ? 'self-evaluations' : 'contributors'}</p>)}
+      {completion.map((stat, index) => <p key={index}>{stat.label}: {stat.value ?? 'Unavailable'}{stat.count != null ? ` · Count: ${stat.count}` : ''}</p>)}
+      {employeeScope && group.entries.map(({ id, item: source }) => <div key={id}>
+        {source?.category === 'self' && source.original_value != null && <p>Original self-rating: {source.original_value}; normalized: {source.normalized_value?.toFixed(2)} / 5</p>}
+        {source?.category === 'self' && source.response_text && <p className="reports-ai-quote">{source.response_text}</p>}
+      </div>)}
     </div>}
   </details>;
 }
@@ -49,23 +71,30 @@ function FindingCard({ finding, evidence, employeeScope, edit, onChange, onRemov
   employeeScope: boolean; edit: boolean; onChange?: (next: AnalysisFinding) => void; onRemove?: () => void;
 }) {
   const available = Object.keys(evidence);
+  const [showAll, setShowAll] = useState(false);
+  const groups = groupedEvidence(finding.supporting_evidence_ids, evidence, employeeScope);
   return <article className="reports-ai-finding">
     {edit && onChange ? <>
       <label>Assessment<textarea className="form-control" value={finding.assessment} maxLength={1200} onChange={(event) => onChange({ ...finding, assessment: event.target.value })} /></label>
       <label>Reasoning<textarea className="form-control" value={finding.reasoning} maxLength={2000} onChange={(event) => onChange({ ...finding, reasoning: event.target.value })} /></label>
-      <fieldset className="reports-ai-citations"><legend>Supporting evidence (required)</legend>
-        {available.map((id) => <label key={id}><input type="checkbox" checked={finding.supporting_evidence_ids.includes(id)} onChange={(event) => onChange({ ...finding, supporting_evidence_ids: event.target.checked ? [...finding.supporting_evidence_ids, id] : finding.supporting_evidence_ids.filter((candidate) => candidate !== id) })} />{evidence[id].question_text} · {evidence[id].category}</label>)}
-      </fieldset>
-      {finding.numeric_claims.length > 0 && <small>Keep labeled numbers unchanged; their values and all associated citations are checked when saving.</small>}
+      {finding.fact_ids != null ? <small>Supporting evidence is determined by the selected facts and cannot be changed independently.</small>
+        : <fieldset className="reports-ai-citations"><legend>Supporting evidence (required)</legend>
+          {available.map((id) => <label key={id}><input type="checkbox" checked={finding.supporting_evidence_ids.includes(id)} onChange={(event) => onChange({ ...finding, supporting_evidence_ids: event.target.checked ? [...finding.supporting_evidence_ids, id] : finding.supporting_evidence_ids.filter((candidate) => candidate !== id) })} />{evidence[id].question_text} · {evidence[id].category}</label>)}
+        </fieldset>}
+      {finding.numeric_claims.length > 0 && <small>Keep verified numbers unchanged; their values and all associated citations are checked when saving.</small>}
+      {!!finding.comparison_claims?.length && <small>Keep comparisons aligned with the cited areas and direction; supporting facts are checked when saving.</small>}
+      {!!finding.observation_claims?.length && <small>Keep assessments aligned with their cited observations; fact references are checked when saving.</small>}
+      {!!finding.fact_ids?.length && <small>Keep assessments aligned with their cited facts; evidence is resolved and checked when saving.</small>}
       {onRemove && <button type="button" className="btn btn-secondary btn-small" onClick={onRemove}>Remove finding</button>}
     </> : <><h4>{finding.assessment}</h4><p>{finding.reasoning}</p></>}
-    <div className="reports-ai-citation-list"><strong>Supporting evidence</strong>
-      {finding.supporting_evidence_ids.map((id) => <EvidenceDetail key={id} id={id} item={evidence[id]} employeeScope={employeeScope} />)}
+    <div className="reports-ai-citation-list"><strong>Supporting Evidence</strong>
+      {(showAll ? groups : groups.slice(0, 3)).map((group) => <EvidenceDetail key={group.key} group={group} employeeScope={employeeScope} />)}
+      {groups.length > 3 && <button type="button" className="reports-ai-show-evidence" aria-expanded={showAll} onClick={() => setShowAll((current) => !current)}>{showAll ? 'Show less' : `Show all evidence (${groups.length})`}</button>}
     </div>
   </article>;
 }
 
-const blankFinding = (evidenceId: string): AnalysisFinding => ({ assessment: '', reasoning: '', supporting_evidence_ids: [evidenceId], numeric_claims: [] });
+const blankFinding = (evidenceId: string): AnalysisFinding => ({ assessment: '', reasoning: '', supporting_evidence_ids: [evidenceId], numeric_claims: [], comparison_claims: [], observation_claims: [] });
 
 export default function EmployeeAIAnalysisPanel({ scope, getAccessToken }: Props) {
   return <AIAnalysisPanel key={scopeKey(scope)} scope={scope} getAccessToken={getAccessToken} />;
@@ -85,6 +114,15 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   const [jobError, setJobError] = useState('');
   const actionPending = useRef(false);
   const actionController = useRef<AbortController | null>(null);
+  const jobRequestEpoch = useRef(0);
+  const acceptedJobId = useRef(0);
+  const handledSuccessJobId = useRef(0);
+  const accessTokenRef = useRef(getAccessToken);
+  const historyRef = useRef(history);
+  const editingRef = useRef(editing);
+  accessTokenRef.current = getAccessToken;
+  historyRef.current = history;
+  editingRef.current = editing;
 
   useEffect(() => {
     return () => { actionController.current?.abort(); };
@@ -93,59 +131,64 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   useEffect(() => {
     const controller = new AbortController();
     setError('');
-    fetchAIAnalyses(getAccessToken, scope, controller.signal)
+    fetchAIAnalyses(accessTokenRef.current, scope, controller.signal)
       .then((result) => { if (!controller.signal.aborted) { setHistory(result); setSelectedId((previous) => previous !== null && result.versions.some((version) => version.id === previous) ? previous : result.versions[0]?.id ?? null); } })
-      .catch((cause) => { if (!controller.signal.aborted) { setHistory(null); setEditing(null); setError(cause instanceof Error ? cause.message : 'Analysis could not be loaded.'); } });
+      .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Analysis could not be loaded.'); });
     return () => controller.abort();
-  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null, getAccessToken, reload]);
+  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null, reload]);
 
   useEffect(() => {
     const controller = new AbortController();
+    const epoch = jobRequestEpoch.current;
     setJobReady(false);
     setJobError('');
-    fetchLatestGenerationJob(getAccessToken, scope, controller.signal)
+    fetchLatestGenerationJob(accessTokenRef.current, scope, controller.signal)
       .then((latest) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || epoch !== jobRequestEpoch.current || (latest && latest.id < acceptedJobId.current)) return;
+        if (latest) acceptedJobId.current = latest.id;
         setJob(latest);
         setJobReady(true);
         if (latest?.status === 'succeeded') {
           if (latest.analysis_id === null) setJobError('Completed generation has no analysis. Please check its status again.');
-          else {
-            setSelectedId(latest.analysis_id);
+          else if (handledSuccessJobId.current !== latest.id && !historyRef.current?.versions.some((version) => version.id === latest.analysis_id)) {
+            handledSuccessJobId.current = latest.id;
+            if (!editingRef.current) setSelectedId(latest.analysis_id);
             setReload((value) => value + 1);
           }
         }
       })
       .catch((cause) => {
-        if (!controller.signal.aborted) setJobError(cause instanceof Error ? cause.message : 'Generation status could not be loaded.');
+        if (!controller.signal.aborted && epoch === jobRequestEpoch.current) setJobError(cause instanceof Error ? cause.message : 'Generation status could not be loaded.');
       });
     return () => controller.abort();
-  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null, getAccessToken, jobReload]);
+  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null, jobReload]);
 
   const jobActive = job?.status === 'queued' || job?.status === 'running';
   useEffect(() => {
     if (!jobReady || !jobActive || jobError || !job) return;
     const controller = new AbortController();
+    const epoch = jobRequestEpoch.current;
     const timer = window.setTimeout(() => {
-      fetchGenerationJob(getAccessToken, scope, job.id, controller.signal)
+      fetchGenerationJob(accessTokenRef.current, scope, job.id, controller.signal)
         .then((latest) => {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || epoch !== jobRequestEpoch.current || latest.id < acceptedJobId.current) return;
           setJob(latest);
           if (latest.status === 'succeeded') {
             if (latest.analysis_id === null) setJobError('Completed generation has no analysis. Please check its status again.');
-            else {
-              setSelectedId(latest.analysis_id);
+            else if (handledSuccessJobId.current !== latest.id) {
+              handledSuccessJobId.current = latest.id;
+              if (!editingRef.current) setSelectedId(latest.analysis_id);
               setReload((value) => value + 1);
               setNotice('New Draft generated. Review it before approval.');
             }
           }
         })
         .catch((cause) => {
-          if (!controller.signal.aborted) setJobError(cause instanceof Error ? cause.message : 'Generation status could not be loaded.');
+          if (!controller.signal.aborted && epoch === jobRequestEpoch.current) setJobError(cause instanceof Error ? cause.message : 'Generation status could not be loaded.');
         });
     }, 2500);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [job, jobActive, jobReady, jobError, getAccessToken, scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null]);
+  }, [job, jobActive, jobReady, jobError, scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null]);
 
   const selected = history?.versions.find((version) => version.id === selectedId) ?? history?.versions[0] ?? null;
   async function perform(kind: 'save' | 'approve', task: () => Promise<AnalysisVersion>) {
@@ -178,6 +221,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   async function startGeneration() {
     if (actionPending.current || !jobReady || jobError || jobActive) return;
     actionPending.current = true;
+    jobRequestEpoch.current += 1;
     const controller = new AbortController();
     actionController.current = controller;
     setBusy('generate');
@@ -186,11 +230,15 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     try {
       const started = await generateAIAnalysis(getAccessToken, scope, controller.signal);
       if (controller.signal.aborted) return;
+      acceptedJobId.current = started.id;
+      setJobReady(true);
+      setJobError('');
       setJob(started);
       if (started.status === 'succeeded') {
         if (started.analysis_id === null) setJobError('Completed generation has no analysis. Please check its status again.');
         else {
-          setSelectedId(started.analysis_id);
+          handledSuccessJobId.current = started.id;
+          if (!editingRef.current) setSelectedId(started.analysis_id);
           setReload((value) => value + 1);
           setNotice('New Draft generated. Review it before approval.');
         }
@@ -199,6 +247,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
       if (!controller.signal.aborted) {
         setJobReady(false);
         setJobError(cause instanceof Error ? cause.message : 'Generation request failed.');
+        setJobReload((value) => value + 1);
       }
     } finally {
       actionPending.current = false;
@@ -219,7 +268,14 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   }
   function addFinding(section: 'strengths' | 'development_areas') {
     const firstEvidence = Object.keys(selected?.evidence ?? {})[0];
-    if (firstEvidence) setEditing((current) => current && { ...current, [section]: [...current[section], blankFinding(firstEvidence)] });
+    if (firstEvidence) setEditing((current) => {
+      if (!current) return current;
+      const source = current.overall_assessment;
+      const next = source.fact_ids != null
+        ? { ...blankFinding(firstEvidence), fact_ids: [...source.fact_ids], supporting_evidence_ids: [...source.supporting_evidence_ids] }
+        : blankFinding(firstEvidence);
+      return { ...current, [section]: [...current[section], next] };
+    });
   }
 
   const mayWrite = history?.can_manage && !selected?.outdated;
@@ -237,7 +293,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
         {history.versions.length > 0 && <label>Analysis version<select className="form-control" value={selected?.id ?? ''} onChange={(event) => { setEditing(null); setSelectedId(Number(event.target.value)); setNotice(''); }}>
           {history.versions.map((version) => <option key={version.id} value={version.id}>Version {version.version} · {version.status === 'draft' ? 'Draft' : 'Approved'}{version.is_current_approved ? ' · Current approved' : ''}{version.outdated ? ' · Outdated' : ''}</option>)}
         </select></label>}
-         {history.can_manage && <button type="button" className="btn btn-primary" disabled={busy !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={() => {
+         {history.can_manage && <button type="button" className="btn btn-primary" disabled={busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={() => {
            if (history.versions.length > 0 && !window.confirm('Regenerate? This may incur API cost. A new Draft will be created; earlier versions remain available.')) return;
            void startGeneration();
          }}>{busy === 'generate' ? 'Starting generation...' : jobActive ? 'Generation in progress...' : job?.status === 'failed' ? 'Retry generation' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
@@ -248,10 +304,10 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
         {selected.outdated && <p className="reports-ai-warning" role="alert">Outdated analysis: submitted evaluation data has changed. This version remains historical; regenerate before editing or approval.</p>}
         <div className="reports-ai-meta"><span>{selected.status === 'approved' ? 'Approved' : 'Draft'}{selected.is_current_approved ? ' · Current approved' : ''}</span><span>Generated {dateLabel(selected.generated_at)} by user #{selected.generated_by_user_id} · {selected.model_identifier}</span>{selected.edited_at && <span>Edited {dateLabel(selected.edited_at)} by user #{selected.edited_by_user_id}</span>}{selected.approved_at && <span>Approved {dateLabel(selected.approved_at)} by user #{selected.approved_by_user_id}</span>}</div>
         <div className="reports-ai-sections">
-           <div><h3>Overall Assessment</h3><FindingCard finding={editing?.overall_assessment ?? selected.analysis.overall_assessment} evidence={selected.evidence} employeeScope={scope.type === 'employee'} edit={editing !== null} onChange={(next) => updateFinding('overall_assessment', null, next)} /></div>
+            <div><h3>Overall Assessment</h3><FindingCard key={selected.id} finding={editing?.overall_assessment ?? selected.analysis.overall_assessment} evidence={selected.evidence} employeeScope={scope.type === 'employee'} edit={editing !== null} onChange={(next) => updateFinding('overall_assessment', null, next)} /></div>
           {(['strengths', 'development_areas'] as const).map((section) => <div key={section}><h3>{section === 'strengths' ? 'Strengths' : 'Development Areas'}</h3>
             {(editing?.[section] ?? selected.analysis[section]).length === 0 && <p>No evidence-backed findings in this section.</p>}
-             {(editing?.[section] ?? selected.analysis[section]).map((finding, index) => <FindingCard key={`${section}-${index}`} finding={finding} evidence={selected.evidence} employeeScope={scope.type === 'employee'} edit={editing !== null} onChange={(next) => updateFinding(section, index, next)} onRemove={editing ? () => removeFinding(section, index) : undefined} />)}
+              {(editing?.[section] ?? selected.analysis[section]).map((finding, index) => <FindingCard key={`${selected.id}-${section}-${index}`} finding={finding} evidence={selected.evidence} employeeScope={scope.type === 'employee'} edit={editing !== null} onChange={(next) => updateFinding(section, index, next)} onRemove={editing ? () => removeFinding(section, index) : undefined} />)}
             {editing && (editing[section].length < 5) && Object.keys(selected.evidence).length > 0 && <button type="button" className="btn btn-secondary btn-small" onClick={() => addFinding(section)}>Add finding</button>}
           </div>)}
         </div>

@@ -1,10 +1,15 @@
 export type NumericClaim = { marker: string; statistic_id: string; value: string };
+export type ComparisonClaim = { fact_id: string; direction: 'left_higher' | 'right_higher' };
+export type ObservationClaim = { fact_id: string };
 
 export type AnalysisFinding = {
   assessment: string;
   reasoning: string;
   supporting_evidence_ids: string[];
   numeric_claims: NumericClaim[];
+  comparison_claims?: ComparisonClaim[];
+  observation_claims?: ObservationClaim[];
+  fact_ids?: string[] | null;
 };
 
 export type AIAnalysisScope =
