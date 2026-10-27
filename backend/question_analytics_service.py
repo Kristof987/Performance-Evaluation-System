@@ -267,3 +267,36 @@ def build_question_report(campaign_id: int, actor: models.User, db: Session, *, 
     return {"evaluation_type": evaluation_type, "questions": questions, "notes": {"weighting": "Each valid submitted answer is one observation; self responses are separate from peer distributions.",
             "rating_bins": "Exact issued integer ratings are shown; normalized averages use 1 + 4 * (answer - minimum) / (maximum - minimum).",
             "privacy": "Peer counts and distributions are withheld when contributor or complementary cohort thresholds are not met."}}
+
+
+def build_rating_distribution_report(campaign_id: int, actor: models.User, db: Session) -> dict:
+    """Re-bin only already-released peer-question counts; never infer suppressed answers."""
+    questions = build_question_report(campaign_id, actor, db, evaluation_type="peer")["questions"]
+    bins = ((0, 1), (1, 2), (2, 3), (3, 4), (4, 5))
+
+    def release(items: list[dict], section_id: int | None) -> dict:
+        counts = [0] * len(bins)
+        released = False
+        for question in items:
+            if question["availability"] != "available" or question["distribution_kind"] != "original":
+                continue
+            released = True
+            for bucket in question["distribution"]:
+                value = normalize_rating(int(bucket["label"]), question["scale_min"], question["scale_max"])
+                if value is not None:
+                    counts[min(4, int(value))] += bucket["count"]
+        total = sum(counts)
+        if not released or total == 0:
+            return {"section_id": section_id, "availability": "suppressed" if items else "no_data",
+                    "response_count": None, "bins": None}
+        return {"section_id": section_id, "availability": "available", "response_count": total,
+                "bins": [{"label": f"{low}-<{high}" if high < 5 else "4-5", "count": count,
+                          "percentage": round(100 * count / total, 1)}
+                         for (low, high), count in zip(bins, counts)]}
+
+    ratings = [question for question in questions if question["category"] == "rating"]
+    section_ids = sorted({question["section_id"] for question in ratings if question["section_id"] is not None})
+    return {"campaign": release(ratings, None),
+            "sections": [release([question for question in ratings if question["section_id"] == section_id], section_id)
+                         for section_id in section_ids],
+            "notes": "Only privacy-released peer rating questions contribute. Each valid response counts once; campaign includes standalone rating questions, while section views use issued section IDs. Values use the issued range normalized to 1-5 on a 0-5 axis. Bins are [0,1), [1,2), [2,3), [3,4), [4,5]; percentages use released rating responses as the denominator. Section scores use different weighting."}

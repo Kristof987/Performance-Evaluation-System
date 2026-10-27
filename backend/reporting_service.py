@@ -158,6 +158,7 @@ def _section_score_rows(aggregate, scored, names: dict[int, str]):
 
 def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     import section_scoring_service
+    from question_analytics_service import _definition
 
     campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
@@ -176,6 +177,21 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
     group_roles = {employee_id: role.id for employee_id, (_employee, role) in users_by_id(db).items()}
     group_performance = section_scoring_service.group_scores(scored, campaign.id, group_roles)
     section_scores = _section_score_rows(campaign_performance, scored, names)
+    issued_questions: dict[int, set[str]] = defaultdict(set)
+    seen_assignments: set[int] = set()
+    for assignment, _form, _status in rows:
+        if assignment.id in seen_assignments:
+            continue
+        seen_assignments.add(assignment.id)
+        for section_id, questions in section_scoring_service.iter_snapshot_sections(assignment.form_snapshot):
+            for question in questions:
+                if not isinstance(question, dict):
+                    continue
+                definition = _definition(question, section_id)
+                if definition is not None:
+                    issued_questions[section_id].add(definition[0])
+    for section in section_scores:
+        section["question_count"] = len(issued_questions[section["id"]])
     overall = campaign_performance.overall
 
     assigned_group_rows = db.execute(
@@ -248,6 +264,32 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
             "confidentiality": f"Section scores require at least {MIN_AGGREGATE_EVALUATEES} evaluated employees; group slices with a smaller complementary cohort are also suppressed.",
         },
     }
+
+
+def build_section_cohort_comparison(campaign_id: int, section_id: int, actor: models.User, db: Session) -> dict[str, Any]:
+    import section_scoring_service
+
+    require_reports_access(campaign_id, actor, db)
+    rows = campaign_report_rows(campaign_id, db)
+    scored, _names = _section_report_data(rows, db)
+    if not any(section_id in evaluation.section_ids for evaluation in scored):
+        raise HTTPException(status_code=404, detail="Section not found in campaign report")
+    role_map = {employee_id: role.id for employee_id, (_employee, role) in users_by_id(db).items()}
+    groups = section_scoring_service.group_scores(scored, campaign_id, role_map)
+    roles = section_scoring_service.role_scores(scored, campaign_id, role_map)
+    group_names = {group.id: group.name for group in assigned_campaign_groups(campaign_id, db)}
+    role_names = {role.id: role.name for role in db.query(models.CompanyRole).all()}
+    group_rows = [{"id": group_id, "name": group_names[group_id], "average_score": result.sections[section_id].score}
+                  for group_id, result in groups.items() if group_id in group_names and section_id in result.sections
+                  and result.sections[section_id].availability == "available"]
+    # Match the role overview's all-or-nothing release for a Section with any suppressed role cell.
+    role_safe = not any(section_id in result.sections and result.sections[section_id].availability == "suppressed" for result in roles.values())
+    role_rows = ([{"id": role_id, "name": role_names[role_id], "average_score": result.sections[section_id].score}
+                  for role_id, result in roles.items() if role_id in role_names and section_id in result.sections
+                  and result.sections[section_id].availability == "available"] if role_safe else [])
+    return {"section_id": section_id,
+            "groups": sorted(group_rows, key=lambda item: item["name"].casefold()),
+            "roles": sorted(role_rows, key=lambda item: item["name"].casefold()) if len(role_rows) >= 2 else []}
 
 
 def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:

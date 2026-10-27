@@ -1,5 +1,5 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, RolePerspective, RoleReportDetail, RolesReport } from '../types/reports.types';
+import type { CampaignRatingDistribution, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, ReportSectionComparison, RolePerspective, RoleReportDetail, RolesReport } from '../types/reports.types';
 
 async function requestReports<T>(getAccessToken: AccessTokenGetter, path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, `/reports${path}`, { signal });
@@ -27,6 +27,14 @@ export function fetchCampaignReportOverview(getAccessToken: AccessTokenGetter, c
     signal,
     'Campaign report could not be loaded.',
   );
+}
+
+export function fetchCampaignRatingDistribution(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {
+  return requestReports<CampaignRatingDistribution>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/rating-distribution`, signal, 'Rating distribution could not be loaded.');
+}
+
+export function fetchSectionComparison(getAccessToken: AccessTokenGetter, campaignId: number, sectionId: number, signal: AbortSignal) {
+  return requestReports<ReportSectionComparison>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/sections/${encodeURIComponent(sectionId)}/comparison`, signal, 'Section comparison could not be loaded.');
 }
 
 export function fetchReportQuestions(getAccessToken: AccessTokenGetter, campaignId: number, scope: { group_id?: number; role_id?: number; employee_id?: number; perspective?: RolePerspective }, evaluationType: 'peer' | 'self', signal: AbortSignal) {

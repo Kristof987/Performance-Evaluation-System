@@ -15,6 +15,8 @@ import Forms from './pages/forms/Forms'
 import { CampaignDetails, Campaigns } from './pages/campaigns/Campaigns'
 import CompletionStatus from './pages/completion-status/CompletionStatus'
 import CampaignOverviewPage, { ReportsIndexPage } from './pages/reports/CampaignOverviewPage'
+import DetailedResultsPage from './pages/reports/DetailedResultsPage'
+import AIAnalysisPage from './pages/reports/AIAnalysisPage'
 import QuestionAnalyticsPage from './pages/reports/QuestionAnalyticsPage'
 import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/reports/GroupsRolesPage'
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
@@ -115,6 +117,8 @@ function AppRoutes() {
         <Route path="/campaigns/:id/completion" element={<ProtectedPage hrOnly><CompletionStatus /></ProtectedPage>} />
         <Route path="/reports" element={<ProtectedPage hrOnly><ReportsIndexPage /></ProtectedPage>} />
         <Route path="/reports/campaigns/:campaignId" element={<ProtectedPage hrOnly><CampaignOverviewPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/detailed" element={<ProtectedPage hrOnly><DetailedResultsPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/ai-analysis" element={<ProtectedPage hrOnly><AIAnalysisPage /></ProtectedPage>} />
         <Route path="/reports/campaigns/:campaignId/questions" element={<ProtectedPage hrOnly><QuestionAnalyticsPage /></ProtectedPage>} />
         <Route path="/reports/campaigns/:campaignId/groups" element={<ProtectedPage hrOnly><GroupsRolesPage /></ProtectedPage>} />
         <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={<ProtectedPage hrOnly><GroupDetailPage /></ProtectedPage>} />

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import EmployeeAIAnalysisPanel from './components/EmployeeAIAnalysisPanel';
+import QuestionAnalytics from './components/QuestionAnalytics';
+import { ChartCard, SeriesBars } from './components/ReportCharts';
 import type { EmployeeReportDetail } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 
@@ -61,6 +62,7 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
       <p>{data.employee.company_role}{data.employee.groups.length > 0 ? ` · ${data.employee.groups.join(', ')}` : ''}</p>
       <p>{data.campaign.name} · Employee performance analysis</p>
     </header>
+    <a className="campaign-details-link" href="#employee-ai-analysis">Go to Employee AI Performance Analysis ↓</a>
     <section className="reports-kpi-panel reports-kpi-panel-compact">
       {[
         ['Completed peer reviews', data.kpis.peer_reviews_received],
@@ -71,7 +73,6 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
         ['Overall self score', formatScore(data.kpis.overall_self_score)],
       ].map(([label, value], index) => <div className={index === 0 ? 'reports-kpi-segment reports-kpi-primary' : 'reports-kpi-segment'} key={label as string}><span>{label}</span><strong>{value}</strong>{index === 1 && <small>{data.kpis.peer_completion_rate === null ? 'No reviews assigned' : `${data.kpis.peer_completion_rate}% complete`}</small>}</div>)}
     </section>
-    <EmployeeAIAnalysisPanel scope={{ type: 'employee', campaignId: data.campaign.id, employeeId: data.employee.id }} getAccessToken={getAccessToken} />
     <section className="reports-card">
       <div className="reports-section-heading"><h2>Performance by section</h2><p>Aggregated peer feedback by rated section on a 1-5 scale.</p></div>
       {data.sections.length === 0 ? <ReportsEmptyState title={emptyState.title} message={emptyState.message} /> : <div className="reports-dimension-chart">{data.sections.map((section) => <div className="reports-bar-row" key={section.id}>
@@ -80,7 +81,8 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
         <strong className="reports-bar-value">{availabilityLabel(section.peer_availability, section.peer_score)}</strong>
       </div>)}</div>}
     </section>
-    <Link className="campaign-details-link" to={`/reports/campaigns/${data.campaign.id}/questions?employee_id=${data.employee.id}`}>Explore employee questions →</Link>
+    <div className="reports-chart-grid"><ChartCard title="Peer rating by section" description="Reportable section scores only."><SeriesBars series={data.sections.map((section, index) => ({ id: String(section.id), label: section.name, value: section.peer_availability === 'available' ? section.peer_score : null, color: ['#3468cc', '#8061cb', '#1a9d7b'][index % 3] }))} /></ChartCard><ChartCard title="Self vs. Peer" description="Only comparable sections with available peer and self scores."><SeriesBars series={data.self_peer_comparison.flatMap((section) => [{ id: `${section.section_id}-peer`, label: `${section.section_name} · Peer`, color: '#3468cc', value: section.peer_average }, { id: `${section.section_id}-self`, label: `${section.section_name} · Self`, color: '#8061cb', value: section.self_average }])} /></ChartCard></div>
+    <QuestionAnalytics campaignId={data.campaign.id} getAccessToken={getAccessToken} scope={{ employee_id: data.employee.id }} />
     <section className="reports-card">
       <div className="reports-section-heading"><h2>Self-evaluation vs peer feedback</h2><p>Comparisons require submitted self-evaluation and reportable peer feedback in the same section.</p></div>
       {message ? <ReportsEmptyState title={message} message="Comparison is unavailable for the current evaluation data." /> : <div className="reports-simple-table"><table><thead><tr><th>Section</th><th>Peer feedback</th><th>Self-evaluation</th><th>Difference</th><th>Interpretation</th></tr></thead><tbody>{data.self_peer_comparison.map((item) => <tr key={item.section_id}><td>{item.section_name}</td><td>{formatScore(item.peer_average)}</td><td>{formatScore(item.self_average)}</td><td>{item.difference.toFixed(2)}</td><td>{item.interpretation}</td></tr>)}</tbody></table></div>}
@@ -99,5 +101,6 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
       <div className="reports-section-heading"><h2>Performance over time</h2><p>Historical reportable section and overall peer scores.</p>{historyOptions.length > 0 && <select className="form-control reports-source-select" aria-label="Select history series" value={selectedHistory?.key ?? ''} onChange={(event) => setHistoryKey(event.target.value)}>{historyOptions.map(({ series, key }) => <option key={key} value={key}>{series.section_id === null ? 'Overall' : series.section_name}</option>)}</select>}</div>
       {selectedHistory && selectedHistory.series.points.length > 0 ? <div className="reports-history-points">{selectedHistory.series.points.map((point) => <div className="reports-history-point" key={point.campaign_id}><span>{point.campaign_name}</span><strong>{formatScore(point.average_score)}</strong><small>{formatDate(point.campaign_start_date)} · {point.evaluator_count} evaluators · {point.reportable_sections} {point.reportable_sections === 1 ? 'section' : 'sections'}</small></div>)}</div> : <ReportsEmptyState title="No historical results available." message="Reportable results for this series will appear when available." />}
     </section>
+    <div id="employee-ai-analysis"><EmployeeAIAnalysisPanel scope={{ type: 'employee', campaignId: data.campaign.id, employeeId: data.employee.id }} getAccessToken={getAccessToken} /></div>
   </div>;
 }

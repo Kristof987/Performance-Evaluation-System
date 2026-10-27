@@ -573,6 +573,7 @@ class ReportSectionScore(BaseModel):
     availability: Literal["available", "no_data", "suppressed"]
     evaluatee_count: int
     evaluator_count: int
+    question_count: int = 0
 
 
 class ReportGroupSummary(BaseModel):
@@ -616,6 +617,18 @@ class CampaignReportOverviewResponse(BaseModel):
     notes: ReportDataNotes
 
 
+class ReportSectionCohortScore(BaseModel):
+    id: int
+    name: str
+    average_score: float
+
+
+class ReportSectionCohortComparison(BaseModel):
+    section_id: int
+    groups: list[ReportSectionCohortScore]
+    roles: list[ReportSectionCohortScore]
+
+
 class ReportQuestionBucket(BaseModel):
     label: str
     count: int
@@ -644,6 +657,19 @@ class ReportQuestionsResponse(BaseModel):
     evaluation_type: Literal["peer", "self"]
     questions: list[ReportQuestionResult]
     notes: dict[str, str]
+
+
+class ReportRatingDistribution(BaseModel):
+    section_id: int | None
+    availability: Literal["available", "no_data", "suppressed"]
+    response_count: int | None
+    bins: list[ReportQuestionBucket] | None
+
+
+class ReportRatingDistributionResponse(BaseModel):
+    campaign: ReportRatingDistribution
+    sections: list[ReportRatingDistribution]
+    notes: str
 
 
 class SectionCreate(BaseModel):

@@ -1682,6 +1682,29 @@ def get_campaign_report_overview(
     return reporting_service.build_campaign_report_overview(campaign_id, actor, db)
 
 
+@app.get("/reports/campaigns/{campaign_id}/sections/{section_id}/comparison", response_model=schemas.ReportSectionCohortComparison)
+def get_report_section_cohort_comparison(
+    campaign_id: int,
+    section_id: int,
+    requester_user_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_section_cohort_comparison(campaign_id, section_id, actor, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/rating-distribution", response_model=schemas.ReportRatingDistributionResponse)
+def get_campaign_rating_distribution(
+    campaign_id: int,
+    requester_user_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    reject_conflicting_requester(requester_user_id, actor)
+    return question_analytics_service.build_rating_distribution_report(campaign_id, actor, db)
+
+
 @app.get("/reports/campaigns/{campaign_id}/questions", response_model=schemas.ReportQuestionsResponse)
 def get_campaign_report_questions(
     campaign_id: int,

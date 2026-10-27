@@ -149,6 +149,10 @@
   gap: 2px;
   width: 100%;
 }
+.sidebar-report-links { border-left: 1px solid var(--color-border); display: grid; gap: 2px; margin: 0 0 5px 19px; padding-left: 13px; width: calc(100% - 19px); }
+.sidebar-report-links a { border-radius: 7px; color: var(--color-text-secondary); font-size: 12px; font-weight: 600; padding: 7px 9px; text-decoration: none; white-space: nowrap; }
+.sidebar-report-links a.active { background: #eef3ff; color: var(--color-primary); }
+.sidebar-report-links a:hover { color: var(--color-primary); }
 .nav-item {
   align-items: center;
   background: none;

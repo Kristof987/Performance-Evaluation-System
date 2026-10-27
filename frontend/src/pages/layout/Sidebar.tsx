@@ -1,5 +1,5 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
-import { Link } from 'react-router';
+import { Link, NavLink, useLocation } from 'react-router';
 import { useNavigate } from 'react-router';
 import {
   ChartNoAxesCombined,
@@ -69,6 +69,9 @@ export default function Sidebar({
   const auth0User = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
   const sidebarUser = auth0User ? null : getSidebarUser();
   const navigate = useNavigate();
+  const location = useLocation();
+  const reportCampaignId = /^\/reports\/campaigns\/(\d+)/.exec(location.pathname)?.[1];
+  const reportBase = reportCampaignId ? `/reports/campaigns/${reportCampaignId}` : '/reports';
   const sidebarUserName = auth0User?.employee.full_name ?? (
     sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser));
   const dashboardPath = auth0User
@@ -228,6 +231,12 @@ export default function Sidebar({
               <ChartNoAxesCombined size={17} />
               <span className="nav-item-label">Reports</span>
             </Link>}
+            {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && <div className="sidebar-report-links" aria-label="Reports pages">
+              <NavLink end to={reportBase}>Overview</NavLink>
+              <NavLink to={`${reportBase}/detailed`} className={({ isActive }) => isActive || location.pathname.includes('/questions') || location.pathname.includes('/groups') || location.pathname.includes('/roles') ? 'active' : ''}>Detailed Results</NavLink>
+              <NavLink to={`${reportBase}/employees`}>Employees</NavLink>
+              <NavLink to={`${reportBase}/ai-analysis`}>AI Analysis</NavLink>
+            </div>}
             {(!auth0User || hasPermission('settings.read')) && <Link
               className={activePage === 'settings' ? 'nav-item active' : 'nav-item'}
               aria-current={activePage === 'settings' ? 'page' : undefined}

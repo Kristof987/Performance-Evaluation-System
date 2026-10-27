@@ -31,6 +31,17 @@ export type ReportQuestion = QuestionResult & {
 
 export type ReportQuestions = { evaluation_type: 'peer' | 'self'; questions: ReportQuestion[]; notes: Record<string, string> };
 
+export type RatingDistribution = {
+  section_id: number | null;
+  availability: 'available' | 'no_data' | 'suppressed';
+  response_count: number | null;
+  bins: Array<{ label: string; count: number; percentage: number }> | null;
+};
+
+export type CampaignRatingDistribution = { campaign: RatingDistribution; sections: RatingDistribution[]; notes: string };
+
+export type ReportSectionComparison = { section_id: number; groups: Array<{ id: number; name: string; average_score: number }>; roles: Array<{ id: number; name: string; average_score: number }> };
+
 export type ReportKpiSummary = {
   total_evaluations: number;
   completed_evaluations: number;
@@ -51,6 +62,7 @@ export type ReportSectionScore = {
   availability: 'available' | 'no_data' | 'suppressed';
   evaluatee_count: number;
   evaluator_count: number;
+  question_count?: number;
 };
 
 export type ReportGroupSummary = {
