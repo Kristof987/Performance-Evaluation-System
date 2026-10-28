@@ -139,9 +139,12 @@ export default function Sidebar({
   }
 
   return (
+    <div
+      className={dragWidth !== null ? 'sidebar-slot is-dragging' : 'sidebar-slot'}
+      style={{ '--sidebar-width': `${currentWidth}px` } as CSSProperties}
+    >
     <aside
       className={dragWidth !== null ? 'sidebar is-dragging' : 'sidebar'}
-      style={{ '--sidebar-width': `${currentWidth}px` } as CSSProperties}
     >
       <button
         className="sidebar-toggle"
@@ -271,42 +274,43 @@ export default function Sidebar({
         )}
       </nav>
 
-      <div className="sidebar-spacer" />
+      <div className="sidebar-footer">
+        <button className="nav-item sidebar-logout" type="button" onClick={handleLogout}>
+          <LogOut size={17} />
+          <span className="nav-item-label">Log out</span>
+        </button>
 
-      <button className="nav-item sidebar-logout" type="button" onClick={handleLogout}>
-        <LogOut size={17} />
-        <span className="nav-item-label">Log out</span>
-      </button>
-
-      <div className="user-menu">
-        <div className="user-avatar">
-          {sidebarUser?.profile_image_url ? (
-            <img src={sidebarUser.profile_image_url} alt={sidebarUserName} />
-          ) : (
-            <div className="user-initials">
-              {getUserInitials(sidebarUserName)}
+        <div className="user-menu">
+          <div className="user-avatar">
+            {sidebarUser?.profile_image_url ? (
+              <img src={sidebarUser.profile_image_url} alt={sidebarUserName} />
+            ) : (
+              <div className="user-initials">
+                {getUserInitials(sidebarUserName)}
+              </div>
+            )}
+          </div>
+          <div className="user-info">
+            <div className="user-name">{sidebarUserName}</div>
+            <div className="user-role">{auth0User?.system_role_name ?? sidebarUser?.role_name ?? 'Employee'}</div>
+          </div>
+          <button
+            className="user-menu-toggle"
+            type="button"
+            aria-label="Open user menu"
+            aria-expanded={isUserMenuOpen}
+            onClick={() => setIsUserMenuOpen((current) => !current)}
+          >
+            <ChevronDown size={15} color="#8B91A8" />
+          </button>
+          {isUserMenuOpen && (
+            <div className="user-settings-menu open">
+              <Link to="/settings/profile">Settings</Link>
             </div>
           )}
         </div>
-        <div className="user-info">
-          <div className="user-name">{sidebarUserName}</div>
-          <div className="user-role">{auth0User?.system_role_name ?? sidebarUser?.role_name ?? 'Employee'}</div>
-        </div>
-        <button
-          className="user-menu-toggle"
-          type="button"
-          aria-label="Open user menu"
-          aria-expanded={isUserMenuOpen}
-          onClick={() => setIsUserMenuOpen((current) => !current)}
-        >
-          <ChevronDown size={15} color="#8B91A8" />
-        </button>
-        {isUserMenuOpen && (
-          <div className="user-settings-menu open">
-            <Link to="/settings/profile">Settings</Link>
-          </div>
-        )}
       </div>
     </aside>
+    </div>
   );
 }

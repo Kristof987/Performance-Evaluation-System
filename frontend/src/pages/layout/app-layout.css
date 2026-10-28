@@ -16,6 +16,13 @@
   min-height: 100vh;
   width: 100%;
 }
+.sidebar-slot {
+  flex: 0 0 var(--sidebar-width, 234px);
+  transition: flex-basis 0.2s ease;
+}
+.sidebar-slot.is-dragging {
+  transition: none;
+}
 .sidebar {
   align-items: flex-start;
   background-color: var(--color-surface);
@@ -24,11 +31,13 @@
   border-width: 0 1px 0 0;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
   gap: 20px;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  left: 0;
   padding: 20px 12px;
-  position: relative;
+  position: fixed;
+  top: 0;
   transition:
     width 0.2s ease,
     padding 0.2s ease;
@@ -145,8 +154,11 @@
   align-items: flex-start;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  flex: 1 1 0;
   gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   width: 100%;
 }
 .sidebar-report-links { border-left: 1px solid var(--color-border); display: grid; gap: 2px; margin: 0 0 5px 19px; padding-left: 13px; width: calc(100% - 19px); }
@@ -203,9 +215,22 @@
   color: var(--color-surface);
   font-weight: 600;
 }
-.sidebar-spacer {
-  flex: 1 1 0;
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 20px;
   width: 100%;
+}
+.layout.sidebar-collapsed .user-menu {
+  gap: 0;
+}
+.layout.sidebar-collapsed .user-avatar {
+  height: 30px;
+  width: 30px;
+}
+.layout.sidebar-collapsed .user-menu-toggle {
+  width: 20px;
 }
 .user-menu {
   align-items: center;
@@ -341,13 +366,17 @@
   .layout {
     flex-direction: column;
   }
+  .sidebar-slot {
+    display: contents;
+  }
   .sidebar {
     align-items: center;
     border-width: 0 0 1px 0;
     flex-direction: row;
     gap: 12px;
-    min-height: auto;
+    height: auto;
     padding: 12px;
+    position: relative;
     width: 100%;
   }
   .company {
@@ -359,14 +388,15 @@
     flex-direction: row;
     min-width: 0;
     overflow-x: auto;
+    overflow-y: hidden;
     width: auto;
   }
   .nav-item {
     flex-shrink: 0;
     width: auto;
   }
-  .sidebar-spacer {
-    display: none;
+  .sidebar-footer {
+    display: contents;
   }
   .user-menu {
     flex-shrink: 0;
@@ -411,5 +441,15 @@
   .layout.sidebar-collapsed .nav-item {
     justify-content: flex-start;
     padding: 9px 10px;
+  }
+  .layout.sidebar-collapsed .user-menu {
+    gap: 10px;
+  }
+  .layout.sidebar-collapsed .user-avatar {
+    height: 34px;
+    width: 34px;
+  }
+  .layout.sidebar-collapsed .user-menu-toggle {
+    width: 28px;
   }
 }
