@@ -151,6 +151,7 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
         answers, duplicates = _answers(assignment.answers)
         structure = []
         form_sections: dict[int, list[float]] = defaultdict(list)
+        form_question_keys: dict[int, set[str]] = defaultdict(set)
         for question, section_id, section_name in issued:
             if section_id is not None:
                 if section_id in section_names and section_names[section_id] != section_name:
@@ -191,6 +192,7 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
                 references[evidence_id] = reference
                 if section_id is not None:
                     form_sections[section_id].append(normalized)
+                    form_question_keys[section_id].add(key)
                     section_refs[(section_id, category)].add(evidence_id)
             elif metadata["category"] == "text" and isinstance(value, str) and value.strip() and category == "self":
                 references[evidence_id] = reference
@@ -202,6 +204,7 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
             assignment.id, campaign_id, assignment.evaluator_id, employee_id, assignment.company_group_id,
             assignment.finish_date, frozenset(section_id for _, section_id, _ in issued if section_id is not None),
             {section_id: mean(values) for section_id, values in form_sections.items()},
+            {section_id: frozenset(keys) for section_id, keys in form_question_keys.items()},
         ))
         for section_id in form_sections:
             key = (section_id, category, assignment.evaluator_id)
@@ -214,13 +217,18 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
     if not sources:
         warnings.append(DataQualityWarning(code="no_submitted_evaluations", message="No submitted evaluation has a valid issued snapshot."))
     results = section_scoring_service.employee_scores(scored, campaign_id, employee_id)
+    released_peer_keys = {item["key"] for item in question_analytics_service.build_question_report(
+        campaign_id, actor, db, employee_id=employee_id, evaluation_type="peer")["questions"]
+        if item["availability"] == "available"}
     questions = []
     released_ids: set[str] = set()
     for key, definition in sorted(definitions.items()):
         peer_items = observations[(key, "peer")]
         peer_reviewers = {evaluator_by_form[references[item[2]].filled_form_id] for item in peer_items}
         peer = _statistics(peer_items, minimum=reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS
-                           if len(peer_reviewers) >= reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS else len(peer_items) + 1)
+                            if len(peer_reviewers) >= reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS else len(peer_items) + 1)
+        if peer.availability == "available" and key not in released_peer_keys:
+            peer = QuantitativeStatistics(availability="suppressed")
         self_result = _statistics(observations[(key, "self")])
         released_ids.update(peer.evidence_ids + self_result.evidence_ids)
         if definition["category"] != "rating":

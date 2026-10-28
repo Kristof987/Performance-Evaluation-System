@@ -2,6 +2,7 @@
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from fractions import Fraction
 from hashlib import sha256
 import json
 from statistics import mean
@@ -89,14 +90,15 @@ def _definition(question: dict, section_id: int | None) -> tuple[str, dict] | No
 def _collect(rows: list[Any], db: Session):
     definitions: dict[str, dict] = {}
     observations: list[Observation] = []
-    issued_scopes: dict[str, set[tuple[int | None, int | None, int | None, int]]] = defaultdict(set)
+    issued_scopes: dict[str, set[tuple[int | None, int | None, int | None, int, str]]] = defaultdict(set)
     section_ids: set[int] = set()
     roles = {employee_id: role.id for employee_id, (_employee, role) in reporting_service.users_by_id(db).items()}
     seen_assignments: set[int] = set()
     for assignment, _form, status in rows:
-        if assignment.id in seen_assignments or reporting_service.status_key(status, assignment.finish_date) != "completed":
+        if assignment.id in seen_assignments:
             continue
         seen_assignments.add(assignment.id)
+        completed = reporting_service.status_key(status, assignment.finish_date) == "completed"
         snapshot = assignment.form_snapshot
         if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 2 or not isinstance(snapshot.get("questions"), list):
             continue
@@ -121,7 +123,7 @@ def _collect(rows: list[Any], db: Session):
         ids = Counter(question.get("id") for question, _ in issued if isinstance(question.get("id"), str))
         answers: dict[str, Any] = {}
         repeated: set[str] = set()
-        for answer in assignment.answers if isinstance(assignment.answers, list) else []:
+        for answer in assignment.answers if completed and isinstance(assignment.answers, list) else []:
             if not isinstance(answer, dict) or not isinstance(answer.get("question_id"), str):
                 continue
             question_id = answer["question_id"]
@@ -146,7 +148,8 @@ def _collect(rows: list[Any], db: Session):
             if mode not in definitions[key]["required_modes"]:
                 definitions[key]["required_modes"].append(mode)
             issued_scopes[key].add((assignment.company_group_id, roles.get(assignment.evaluatee_id),
-                                    roles.get(assignment.evaluator_id), assignment.evaluatee_id))
+                                    roles.get(assignment.evaluator_id), assignment.evaluatee_id,
+                                    "self" if assignment.evaluator_id == assignment.evaluatee_id else "peer"))
             if question_id not in answers or question_id in repeated:
                 continue
             value = answers[question_id]
@@ -196,10 +199,86 @@ def _released(metadata: dict, items: list[Observation], availability: str) -> di
     return result
 
 
+def _rank(rows: list[set[int]], columns: set[int]) -> int:
+    """Exact row rank of published, additive observation counts on selected columns."""
+    basis: dict[int, dict[int, Fraction]] = {}
+    for row in rows:
+        vector = {column: Fraction(1) for column in row & columns}
+        while vector:
+            pivot = min(vector)
+            if pivot not in basis:
+                divisor = vector[pivot]
+                basis[pivot] = {column: value / divisor for column, value in vector.items()}
+                break
+            factor = vector[pivot]
+            for column, value in basis[pivot].items():
+                remaining = vector.get(column, 0) - factor * value
+                if remaining:
+                    vector[column] = remaining
+                else:
+                    vector.pop(column, None)
+    return len(basis)
+
+
+def _coordinated_peer_release(population: list[Observation], rows: list[set[int]], candidate: set[int]) -> bool:
+    """No combination of released exact buckets may isolate one reviewer or evaluatee."""
+    proposed = [*rows, candidate]
+    all_ids = {item.assignment_id for item in population}
+    dimension = _rank(proposed, all_ids)
+    for attribute in ("evaluatee_id", "evaluator_id"):
+        for person in {getattr(item, attribute) for item in population}:
+            other_ids = {item.assignment_id for item in population if getattr(item, attribute) != person}
+            if _rank(proposed, other_ids) != dimension:
+                return False
+    return True
+
+
+def _release_plan(population: list[Observation], *, stable: bool, evaluation_type: str) -> set[tuple[str, int | None]]:
+    """One deterministic release set for every request scope, independent of request order.
+
+    Roles are deliberately excluded: their current membership is not snapshotted, so
+    successive role reports could difference populations even with fixed answers.
+    """
+    if not stable:
+        return ({("employee", item.evaluatee_id) for item in population}
+                if evaluation_type == "self" else set())
+    minimum = reporting_service.MIN_AGGREGATE_EVALUATEES
+    evaluatees = {item.evaluatee_id for item in population}
+    evaluators = {item.evaluator_id for item in population}
+    selected: set[tuple[str, int | None]] = set()
+    rows: list[set[int]] = []
+
+    def add(scope: tuple[str, int | None], items: list[Observation]) -> None:
+        candidate = {item.assignment_id for item in items}
+        if candidate and (evaluation_type == "self" or _coordinated_peer_release(population, rows, candidate)):
+            selected.add(scope)
+            rows.append(candidate)
+
+    if len(evaluatees) >= minimum and len(evaluators) >= minimum:
+        add(("campaign", None), population)
+    for group_id in sorted({item.group_id for item in population if item.group_id is not None}):
+        items = [item for item in population if item.group_id == group_id]
+        if (len({item.evaluatee_id for item in items}) >= minimum
+                and len({item.evaluator_id for item in items}) >= minimum):
+            add(("group", group_id), items)
+    # An employee-specific peer result is not compatible with a released total:
+    # it is itself a one-evaluatee row. Prefer the campaign/group releases.
+    if evaluation_type == "self" or not rows:
+        for employee_id in sorted(evaluatees):
+            items = [item for item in population if item.evaluatee_id == employee_id]
+            if evaluation_type == "self" or len({item.evaluator_id for item in items}) >= reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS:
+                if evaluation_type == "self":
+                    add(("employee", employee_id), items)
+                else:
+                    selected.add(("employee", employee_id))
+    return selected
+
+
 def build_question_report(campaign_id: int, actor: models.User, db: Session, *, group_id: int | None = None,
                           role_id: int | None = None, employee_id: int | None = None,
                           perspective: str = "evaluatee", evaluation_type: str = "peer") -> dict:
-    reporting_service.require_reports_access(campaign_id, actor, db)
+    campaign = reporting_service.require_reports_access(campaign_id, actor, db)
+    aggregate_access = reporting_service.aggregate_reporting_access(campaign_id, actor, db)
     if group_id is not None and group_id not in {group.id for group in reporting_service.assigned_campaign_groups(campaign_id, db)}:
         raise HTTPException(status_code=404, detail="Group report not found")
     if role_id is not None and db.query(models.CompanyRole).filter(models.CompanyRole.id == role_id).first() is None:
@@ -208,65 +287,36 @@ def build_question_report(campaign_id: int, actor: models.User, db: Session, *, 
     if employee_id is not None and employee_id not in reporting_service.campaign_participant_ids(campaign_id, rows, db):
         raise HTTPException(status_code=404, detail="Employee is not part of this campaign report")
     definitions, observations, issued_scopes = _collect(rows, db)
+    # In Review, reporting is stable only once every issued assignment has a finish
+    # date. Closed questionnaires cannot be edited, including historical status-only rows.
+    stable = campaign.status == models.CampaignStatus.CLOSED.value or all(
+        assignment.finish_date is not None for assignment, _form, _status in rows)
     by_question: dict[str, list[Observation]] = defaultdict(list)
     for item in observations:
         by_question[item.key].append(item)
     questions = []
-    minimum = reporting_service.MIN_AGGREGATE_EVALUATEES
     for key, metadata in definitions.items():
+        issued = [scope for scope in issued_scopes[key] if scope[4] == evaluation_type
+                  and (group_id is None or scope[0] == group_id)
+                  and (role_id is None or (scope[2] if perspective == "evaluator" else scope[1]) == role_id)
+                  and (employee_id is None or scope[3] == employee_id)]
+        if not issued:
+            continue
         population = [item for item in by_question[key]
-                      if (item.evaluator_id == item.evaluatee_id) == (evaluation_type == "self")]
-        if not population:
-            continue
-        if not any((group_id is None or issued_group == group_id)
-                   and (role_id is None or (evaluator_role if perspective == "evaluator" else issued_role) == role_id)
-                   and (employee_id is None or issued_employee == employee_id)
-                   for issued_group, issued_role, evaluator_role, issued_employee in issued_scopes[key]):
-            continue
-        if employee_id is not None:
-            employee_items = [item for item in population if item.evaluatee_id == employee_id]
-            if not employee_items:
-                continue
-            available = (evaluation_type == "self" or
-                         len({item.evaluator_id for item in employee_items}) >= reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS)
-            questions.append(_released(metadata, employee_items, "available" if available else "suppressed"))
-            continue
+                       if (item.evaluator_id == item.evaluatee_id) == (evaluation_type == "self")]
         cohort = [item for item in population if (group_id is None or item.group_id == group_id)
-                  and (role_id is None or (item.evaluator_role_id if perspective == "evaluator" else item.role_id) == role_id)]
-        if not cohort:
-            continue
-        contributors = {item.evaluatee_id for item in cohort}
-        reviewers = {item.evaluator_id for item in cohort}
-        cohort_assignments = {item.assignment_id for item in cohort}
-        remaining = {item.evaluatee_id for item in population if item.assignment_id not in cohort_assignments}
-        # A released total and a released slice must not disclose a one-person complement.
-        unsafe_partition = False
-        # All released group/role marginals share this population. A singleton
-        # intersection can otherwise be recovered by overlapping those filters.
-        intersections: dict[tuple[int | None, int | None], set[int]] = defaultdict(set)
-        groups_by_employee: dict[int, set[int | None]] = defaultdict(set)
-        for item in population:
-            intersections[(item.group_id, item.evaluator_role_id if perspective == "evaluator" else item.role_id)].add(item.evaluatee_id)
-            groups_by_employee[item.evaluatee_id].add(item.group_id)
-        if any(0 < len(part) < minimum for part in intersections.values()):
-            unsafe_partition = True
-        if group_id is not None and any(len(groups) > 1 for groups in groups_by_employee.values()):
-            unsafe_partition = True
-        if group_id is None and role_id is None:
-            for attribute in ("group_id", "evaluator_role_id" if perspective == "evaluator" else "role_id"):
-                partitions: dict[Any, set[int]] = defaultdict(set)
-                for item in population:
-                    partitions[getattr(item, attribute)].add(item.evaluatee_id)
-                if any(0 < len(part) < minimum for part in partitions.values()):
-                    unsafe_partition = True
-        availability = ("no_data" if not cohort else "suppressed" if len(contributors) < minimum or len(reviewers) < minimum else "available")
-        if availability == "available" and (unsafe_partition or (group_id is not None or role_id is not None) and 0 < len(remaining) < minimum):
-            availability = "suppressed"
+                  and (role_id is None or (item.evaluator_role_id if perspective == "evaluator" else item.role_id) == role_id)
+                  and (employee_id is None or item.evaluatee_id == employee_id)]
+        scope = (("employee", employee_id) if employee_id is not None else
+                 ("group", group_id) if group_id is not None else
+                 ("role", role_id) if role_id is not None else ("campaign", None))
+        plan = _release_plan(population, stable=stable, evaluation_type=evaluation_type)
+        availability = "no_data" if not cohort else "available" if aggregate_access or scope in plan else "suppressed"
         questions.append(_released(metadata, cohort, availability))
     questions.sort(key=lambda item: (item["section_id"] is None, item["section_name"].casefold(), item["text"].casefold(), item["key"]))
     return {"evaluation_type": evaluation_type, "questions": questions, "notes": {"weighting": "Each valid submitted answer is one observation; self responses are separate from peer distributions.",
-            "rating_bins": "Exact issued integer ratings are shown; normalized averages use 1 + 4 * (answer - minimum) / (maximum - minimum).",
-            "privacy": "Peer counts and distributions are withheld when contributor or complementary cohort thresholds are not met."}}
+             "rating_bins": "Exact issued integer ratings are shown; normalized averages use 1 + 4 * (answer - minimum) / (maximum - minimum).",
+              "privacy": "Managed aggregate reports are available to authorized campaign managers. Other peer releases are coordinated across campaign, groups and employees; current-role slices and in-progress populations remain restricted."}}
 
 
 def build_rating_distribution_report(campaign_id: int, actor: models.User, db: Session) -> dict:
@@ -287,7 +337,7 @@ def build_rating_distribution_report(campaign_id: int, actor: models.User, db: S
                     counts[min(4, int(value))] += bucket["count"]
         total = sum(counts)
         if not released or total == 0:
-            return {"section_id": section_id, "availability": "suppressed" if items else "no_data",
+            return {"section_id": section_id, "availability": "suppressed" if any(item["availability"] == "suppressed" for item in items) else "no_data",
                     "response_count": None, "bins": None}
         return {"section_id": section_id, "availability": "available", "response_count": total,
                 "bins": [{"label": f"{low}-<{high}" if high < 5 else "4-5", "count": count,
@@ -299,4 +349,4 @@ def build_rating_distribution_report(campaign_id: int, actor: models.User, db: S
     return {"campaign": release(ratings, None),
             "sections": [release([question for question in ratings if question["section_id"] == section_id], section_id)
                          for section_id in section_ids],
-            "notes": "Only privacy-released peer rating questions contribute. Each valid response counts once; campaign includes standalone rating questions, while section views use issued section IDs. Values use the issued range normalized to 1-5 on a 0-5 axis. Bins are [0,1), [1,2), [2,3), [3,4), [4,5]; percentages use released rating responses as the denominator. Section scores use different weighting."}
+             "notes": "Only authorized, available peer rating questions contribute. Each valid response counts once; campaign includes standalone rating questions, while section views use issued section IDs. Values use the issued range normalized to 1-5 on a 0-5 axis. Bins are [0,1), [1,2), [2,3), [3,4), [4,5]; percentages use available rating responses as the denominator. Section scores use different weighting."}

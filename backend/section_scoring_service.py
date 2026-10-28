@@ -5,7 +5,7 @@ and unsuppressed employee means are intermediate calculations, not API payloads.
 """
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from math import isfinite
 from statistics import mean
@@ -38,6 +38,7 @@ class EvaluationSections:
     finish_date: date | None
     section_ids: frozenset[int]
     sections: dict[int, float]
+    question_keys: dict[int, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -166,14 +167,25 @@ def score_evaluation(assignment: models.FilledForm, *, status_name: str | None =
     """A draft or a record without an issued v2 snapshot has no Section score."""
     if reporting_service.status_key(status_name, assignment.finish_date) != "completed":
         return None
+    from question_analytics_service import _definition
+
     ratings = extract_section_ratings(assignment.form_snapshot, assignment.answers)
     by_section: dict[int, list[float]] = defaultdict(list)
+    issued_keys = {(section_id, question.get("id")): definition[0]
+                   for section_id, questions in iter_snapshot_sections(assignment.form_snapshot)
+                   for question in questions if isinstance(question, dict) and isinstance(question.get("id"), str)
+                   if (definition := _definition(question, section_id)) is not None}
+    question_keys: dict[int, set[str]] = defaultdict(set)
     for rating in ratings:
         by_section[rating.section_id].append(rating.normalized)
+        key = issued_keys.get((rating.section_id, rating.question_id))
+        if key is not None:
+            question_keys[rating.section_id].add(key)
     return EvaluationSections(
         assignment.id, assignment.campaign_id, assignment.evaluator_id, assignment.evaluatee_id,
         assignment.company_group_id, assignment.finish_date, snapshot_section_ids(assignment.form_snapshot),
         {section_id: mean(values) for section_id, values in by_section.items()},
+        {section_id: frozenset(keys) for section_id, keys in question_keys.items()},
     )
 
 
@@ -203,6 +215,24 @@ def _reviewer_sections(evaluations: Sequence[EvaluationSections], evaluatee_id: 
             {section_id: {reviewer: item[2] for reviewer, item in reviewers.items()} for section_id, reviewers in self_scores.items()})
 
 
+def _sparse_question_sections(evaluations: Sequence[EvaluationSections], evaluatee_id: int) -> set[int]:
+    """Withhold a Section if one reviewer may be the sole source of a rated question."""
+    latest: dict[tuple[int, int], tuple[date, int, frozenset[str]]] = {}
+    for evaluation in evaluations:
+        if evaluation.evaluatee_id != evaluatee_id or evaluation.evaluator_id == evaluatee_id:
+            continue
+        for section_id in evaluation.sections:
+            candidate = (evaluation.finish_date or date.min, evaluation.assignment_id,
+                         evaluation.question_keys.get(section_id, frozenset()))
+            key = section_id, evaluation.evaluator_id
+            if key not in latest or candidate[:2] > latest[key][:2]:
+                latest[key] = candidate
+    by_section: dict[int, set[frozenset[str]]] = defaultdict(set)
+    for (section_id, _reviewer), (_date, _id, ids) in latest.items():
+        by_section[section_id].add(ids)
+    return {section_id for section_id, sets in by_section.items() if len(sets) != 1 or not next(iter(sets))}
+
+
 def _release(value: float | None, count: int, minimum: int) -> ScoreResult:
     if value is None:
         return ScoreResult(None, "no_data")
@@ -226,28 +256,40 @@ def _section_results(section_ids: set[int], values: Mapping[int, Collection[floa
     return results
 
 
-def employee_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluatee_id: int) -> EmployeeScores:
+def employee_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluatee_id: int, *, aggregate_access: bool = False) -> EmployeeScores:
     scoped = [evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id and evaluation.evaluatee_id == evaluatee_id]
     section_ids = set().union(*(evaluation.section_ids for evaluation in scoped)) if scoped else set()
     peer, self_values = _reviewer_sections(scoped, evaluatee_id)
-    peer_sections = _section_results(section_ids, {section_id: list(reviewers.values()) for section_id, reviewers in peer.items()}, reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS)
+    peer_sections = _section_results(section_ids, {section_id: list(reviewers.values()) for section_id, reviewers in peer.items()}, 1 if aggregate_access else reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS)
+    sparse = set() if aggregate_access else _sparse_question_sections(scoped, evaluatee_id)
+    peer_sections = {section_id: ScoreResult(None, "suppressed") if section_id in sparse and result.availability == "available" else result
+                     for section_id, result in peer_sections.items()}
     self_sections = _section_results(section_ids, {section_id: list(reviewers.values()) for section_id, reviewers in self_values.items()}, 1)
     return EmployeeScores(evaluatee_id, peer_sections, self_sections, _overall(peer_sections), _overall(self_sections))
 
 
-def _aggregate(evaluations: Sequence[EvaluationSections], minimum_evaluatees: int) -> AggregateScores:
+def _aggregate(evaluations: Sequence[EvaluationSections], minimum_evaluatees: int, *, aggregate_access: bool = False) -> AggregateScores:
     values: dict[int, list[float]] = defaultdict(list)
+    unsafe_sections: set[int] = set()
     section_ids = set().union(*(evaluation.section_ids for evaluation in evaluations)) if evaluations else set()
     for evaluatee_id in {evaluation.evaluatee_id for evaluation in evaluations}:
         peer, _self = _reviewer_sections(evaluations, evaluatee_id)
+        if not aggregate_access:
+            unsafe_sections.update(_sparse_question_sections(evaluations, evaluatee_id))
         for section_id, reviewers in peer.items():
             values[section_id].append(mean(reviewers.values()))
+            # An aggregate and all other employee scores could otherwise recover
+            # an individual Section score withheld for having only one reviewer.
+            if not aggregate_access and len(reviewers) < reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS:
+                unsafe_sections.add(section_id)
     sections = _section_results(section_ids, values, minimum_evaluatees)
+    sections = {section_id: ScoreResult(None, "suppressed") if section_id in unsafe_sections and result.availability == "available" else result
+                for section_id, result in sections.items()}
     return AggregateScores(sections, _overall(sections))
 
 
-def campaign_scores(evaluations: Sequence[EvaluationSections], campaign_id: int) -> AggregateScores:
-    return _aggregate([evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id], reporting_service.MIN_AGGREGATE_EVALUATEES)
+def campaign_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, *, aggregate_access: bool = False) -> AggregateScores:
+    return _aggregate([evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id], 1 if aggregate_access else reporting_service.MIN_AGGREGATE_EVALUATEES, aggregate_access=aggregate_access)
 
 
 def _unsafe_role_group_sections(evaluations: Sequence[EvaluationSections], roles: Mapping[int, int], *, evaluator: bool = False) -> set[int]:
@@ -270,17 +312,18 @@ def _withhold_sections(aggregate: AggregateScores, section_ids: set[int]) -> Agg
     return AggregateScores(sections, _overall(sections))
 
 
-def group_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluatee_roles: Mapping[int, int] | None = None) -> dict[int, AggregateScores]:
+def group_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluatee_roles: Mapping[int, int] | None = None, *, aggregate_access: bool = False) -> dict[int, AggregateScores]:
     """Attribute evaluations to their recorded assignment group, not current memberships."""
     scoped = [evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id]
     group_ids = {evaluation.company_group_id for evaluation in scoped if evaluation.company_group_id is not None}
-    results = {
-        group_id: suppress_small_complements(
-            _aggregate([evaluation for evaluation in scoped if evaluation.company_group_id == group_id], reporting_service.MIN_AGGREGATE_EVALUATEES),
-            scoped,
-            [evaluation for evaluation in scoped if evaluation.company_group_id == group_id],
-        ) for group_id in group_ids
-    }
+    results = {}
+    for group_id in group_ids:
+        cohort = [evaluation for evaluation in scoped if evaluation.company_group_id == group_id]
+        result = _aggregate(cohort, 1 if aggregate_access else reporting_service.MIN_AGGREGATE_EVALUATEES,
+                            aggregate_access=aggregate_access)
+        results[group_id] = result if aggregate_access else suppress_small_complements(result, scoped, cohort)
+    if aggregate_access:
+        return results
     # A person scored in multiple assignment groups creates overlapping published
     # cohorts; combinations of otherwise eligible group means can isolate them.
     groups_by_contributor: dict[tuple[int, int], set[int]] = defaultdict(set)
@@ -296,34 +339,43 @@ def group_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, ev
     return results
 
 
-def role_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluatee_roles: Mapping[int, int]) -> dict[int, AggregateScores]:
+def role_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluatee_roles: Mapping[int, int], *, aggregate_access: bool = False) -> dict[int, AggregateScores]:
     """Use the evaluated employee's company role, never the evaluator's role."""
     scoped = [evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id]
     role_ids = {evaluatee_roles[evaluation.evaluatee_id] for evaluation in scoped if evaluation.evaluatee_id in evaluatee_roles}
-    unsafe = _unsafe_role_group_sections(scoped, evaluatee_roles)
-    return {
-        role_id: _withhold_sections(suppress_small_complements(
-            _aggregate([evaluation for evaluation in scoped if evaluatee_roles.get(evaluation.evaluatee_id) == role_id], reporting_service.MIN_AGGREGATE_EVALUATEES),
-            scoped,
-            [evaluation for evaluation in scoped if evaluatee_roles.get(evaluation.evaluatee_id) == role_id],
-        ), unsafe) for role_id in role_ids
-    }
+    unsafe = set() if aggregate_access else _unsafe_role_group_sections(scoped, evaluatee_roles)
+    results = {}
+    for role_id in role_ids:
+        role_evaluations = [evaluation for evaluation in scoped if evaluatee_roles.get(evaluation.evaluatee_id) == role_id]
+        if aggregate_access:
+            results[role_id] = _aggregate(role_evaluations, 1, aggregate_access=True)
+            continue
+        aggregate = _withhold_sections(suppress_small_complements(
+            _aggregate(role_evaluations, reporting_service.MIN_AGGREGATE_EVALUATEES), scoped, role_evaluations), unsafe)
+        # Current roles are mutable after answers are final; successive role
+        # breakdowns could otherwise isolate a person moved between roles.
+        results[role_id] = _withhold_sections(aggregate, set(aggregate.sections))
+    return results
 
 
-def evaluator_role_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluator_roles: Mapping[int, int]) -> dict[int, AggregateScores]:
+def evaluator_role_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluator_roles: Mapping[int, int], *, aggregate_access: bool = False) -> dict[int, AggregateScores]:
     """Explicit evaluator-role perspective: require both cohort and reviewer privacy."""
     scoped = [evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id and evaluation.evaluator_id != evaluation.evaluatee_id]
     role_ids = {evaluator_roles[evaluation.evaluator_id] for evaluation in scoped if evaluation.evaluator_id in evaluator_roles}
     results = {}
-    unsafe = _unsafe_role_group_sections(scoped, evaluator_roles, evaluator=True)
+    unsafe = set() if aggregate_access else _unsafe_role_group_sections(scoped, evaluator_roles, evaluator=True)
     for role_id in role_ids:
         role_evaluations = [evaluation for evaluation in scoped if evaluator_roles.get(evaluation.evaluator_id) == role_id]
+        if aggregate_access:
+            results[role_id] = _aggregate(role_evaluations, 1, aggregate_access=True)
+            continue
         aggregate = _aggregate(role_evaluations, reporting_service.MIN_AGGREGATE_EVALUATEES)
         sections = dict(aggregate.sections)
         for section_id, result in sections.items():
             if result.availability == "available" and len({evaluation.evaluator_id for evaluation in role_evaluations if section_id in evaluation.sections}) < reporting_service.MIN_AGGREGATE_EVALUATEES:
                 sections[section_id] = ScoreResult(None, "suppressed")
-        results[role_id] = _withhold_sections(suppress_small_complements(AggregateScores(sections, _overall(sections)), scoped, role_evaluations), unsafe)
+        aggregate = _withhold_sections(suppress_small_complements(AggregateScores(sections, _overall(sections)), scoped, role_evaluations), unsafe)
+        results[role_id] = _withhold_sections(aggregate, set(aggregate.sections))
     return results
 
 

@@ -46,6 +46,7 @@ def _fingerprint(db: Session, campaign_id: int, report: dict, questions: list[di
 
 def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, actor: models.User) -> AggregateAnalysisContext:
     reporting_service.require_reports_access(campaign_id, actor, db)
+    aggregate_access = reporting_service.aggregate_reporting_access(campaign_id, actor, db)
     if scope_type == "campaign":
         report = reporting_service.build_campaign_report_overview(campaign_id, actor, db)
         label = report["campaign"]["name"]
@@ -78,7 +79,7 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
         cohort_count = len({row[0].evaluatee_id for row in role_rows})
 
     minimum = reporting_service.MIN_AGGREGATE_EVALUATEES
-    if cohort_count < minimum:
+    if cohort_count < minimum and not aggregate_access:
         return AggregateAnalysisContext(
             campaign_id=campaign_id, scope_type=scope_type, scope_id=scope_id, scope_label=label,
             payload={"scope": scope_type, "reportable_metrics": []}, evidence=[], statistics=[],
@@ -118,7 +119,7 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
 
     section_rows = report["sections"]
     available_sections = [row for row in section_rows if row["availability"] == "available"
-                          and row["average_score"] is not None and row["evaluator_count"] >= minimum]
+                          and row["average_score"] is not None and (aggregate_access or row["evaluator_count"] >= minimum)]
     for row in available_sections:
         add_metric(f"section:{row['id']}:peer", "peer", "section", row["name"], row["name"],
                    {"average_normalized": round(row["average_score"], 2),
@@ -158,7 +159,7 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
                   and (scope_type != "role" or item.role_id == scope_id)]
         peer_subjects = {item.evaluatee_id for item in scoped if item.evaluator_id != item.evaluatee_id}
         self_subjects = {item.evaluatee_id for item in scoped if item.evaluator_id == item.evaluatee_id}
-        if peer_subjects != self_subjects or len(peer_subjects) < minimum:
+        if peer_subjects != self_subjects or not peer_subjects or (len(peer_subjects) < minimum and not aggregate_access):
             continue
         peer, self_result = peer_by_key[key], self_by_key[key]
         peer_id, self_id = f"{scope_key}:question:{key}:peer", f"{scope_key}:question:{key}:self"
@@ -171,11 +172,11 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
         payload["reportable_metrics"].append({"type": "comparison", "title": peer["text"],
                                                 "evidence_ids": [peer_id, self_id], "self_minus_peer": delta,
                                                 "statistic_ids": {"self_minus_peer": statistic_id}})
-    # Counts can reveal a singleton complement. Section/question aggregates above
-    # still follow their own stricter released-result gates.
+    # Non-manager releases still guard singleton complements; the management
+    # grant permits aggregate counts but does not authorize individual answers.
     assignments = reporting_service.campaign_report_rows(campaign_id, db)
     all_participants = {row[0].evaluatee_id for row in assignments}
-    if evidence and (scope_type == "campaign" or len(all_participants - (
+    if evidence and (aggregate_access or scope_type == "campaign" or len(all_participants - (
         {row[0].evaluatee_id for row in assignments if row[0].company_group_id == scope_id} if scope_type == "group"
         else {row[0].evaluatee_id for row in assignments if row[0].evaluatee_id in cohort}
     )) != 1):

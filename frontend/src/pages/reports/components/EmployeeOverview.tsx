@@ -1,10 +1,10 @@
-import type { ReportEmployeeOverview } from '../types/reports.types';
+import type { EmployeeReportsOverview } from '../types/reports.types';
 
-export default function EmployeeOverview({ employees }: { employees: ReportEmployeeOverview }) {
-  return <section className="reports-card reports-employee-overview"><div className="reports-section-heading"><h2>Employees overview</h2><p>Coverage metrics only. Employee rankings are intentionally not shown.</p></div><div className="reports-employee-grid">
-    <div><span>Participating employees</span><strong>{employees.participating_employees}</strong></div>
-    <div><span>Received peer feedback</span><strong>{employees.employees_with_completed_peer_feedback}</strong></div>
-    <div><span>Awaiting peer feedback</span><strong>{employees.employees_awaiting_peer_feedback}</strong></div>
-    <div><span>Self-evaluations completed</span><strong>{employees.completed_self_evaluations}/{employees.configured_self_evaluations}</strong><small>assigned</small></div>
-  </div></section>;
+export default function EmployeeOverview({ report }: { report: EmployeeReportsOverview }) {
+  return <section className="reports-kpi-panel reports-employee-kpis" aria-label="Employee reporting summary">
+    <div className="reports-kpi-segment"><span>Participating employees</span><strong>{report.kpis.participating_employees}</strong><small>Distinct campaign participants</small></div>
+    <div className="reports-kpi-segment"><span>Peer reviews completed</span><strong>{report.kpis.peer_reviews_completed} / {report.kpis.peer_reviews_assigned}</strong><small>Submitted of assigned peer reviews</small></div>
+    <div className="reports-kpi-segment"><span>Employees with peer feedback</span><strong>{report.kpis.employees_with_peer_feedback}</strong><small>Distinct evaluated employees</small></div>
+    <div className="reports-kpi-segment"><span>Self-evaluations completed</span><strong>{report.kpis.completed_self_evaluations} / {report.kpis.assigned_self_evaluations}</strong><small>Submitted of assigned self-evaluations</small></div>
+  </section>;
 }

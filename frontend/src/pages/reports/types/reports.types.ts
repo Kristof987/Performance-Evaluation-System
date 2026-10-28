@@ -161,6 +161,8 @@ export type EmployeeReportsOverview = {
   campaign: ReportCampaignOption;
   kpis: {
     participating_employees: number;
+    peer_reviews_assigned: number;
+    peer_reviews_completed: number;
     employees_with_peer_feedback: number;
     awaiting_peer_feedback: number;
     completed_self_evaluations: number;
