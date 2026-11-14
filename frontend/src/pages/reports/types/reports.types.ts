@@ -31,6 +31,24 @@ export type ReportQuestion = QuestionResult & {
 
 export type ReportQuestions = { evaluation_type: 'peer' | 'self'; questions: ReportQuestion[]; notes: Record<string, string> };
 
+export type WrittenFeedbackResponse = {
+  question_key: string;
+  question_type: 'Text';
+  section_id: number | null;
+  evaluation_type: 'peer' | 'self';
+  scope: 'campaign' | 'employee';
+  availability: 'available' | 'no_data' | 'suppressed' | 'not_applicable';
+  response_count: number | null;
+  responses: string[];
+};
+
+export type WrittenFeedbackIndex = {
+  evaluation_type: 'peer' | 'self';
+  scope: 'campaign' | 'employee';
+  questions: Array<{ key: string; text: string; section_id: number | null; section_name: string; response_count: number }>;
+  evaluatees: Array<{ evaluatee_id: number; evaluatee_name: string }>;
+};
+
 export type RatingDistribution = {
   section_id: number | null;
   availability: 'available' | 'no_data' | 'suppressed';
@@ -39,6 +57,52 @@ export type RatingDistribution = {
 };
 
 export type CampaignRatingDistribution = { campaign: RatingDistribution; sections: RatingDistribution[]; notes: string };
+
+export type EvaluationQualityCategory =
+  | 'uniform_rating_pattern'
+  | 'higher_rating_tendency'
+  | 'lower_rating_tendency'
+  | 'peer_rating_disagreement'
+  | 'rating_distribution_concentration';
+
+export type EvaluationQualityFinding = {
+  category: EvaluationQualityCategory;
+  title: string;
+  description: string;
+  scope: string;
+  section_name: string | null;
+  eligible_observations: number | null;
+  statistics: Record<string, number>;
+  method: string;
+  rule: string;
+  informational: boolean;
+};
+
+export type EvaluationQualityReport = {
+  campaign: ReportCampaignOption;
+  analysis_status: 'preliminary' | 'final' | 'unavailable';
+  data_status: 'no_data' | 'insufficient_data' | 'analyzed';
+  completed_peer_reviews: number;
+  assigned_peer_reviews: number;
+  peer_reviews_analyzed: number;
+  rating_observations: number | null;
+  findings_count: number;
+  findings_by_category: Partial<Record<EvaluationQualityCategory, EvaluationQualityFinding[]>>;
+  statistics: {
+    mean_normalized: number | null;
+    standard_deviation: number | null;
+    maximum_percentage: number | null;
+    modal_percentage: number | null;
+    distribution: Array<{ label: string; count: number; percentage: number }>;
+  };
+  coverage: {
+    status: 'no_completed' | 'insufficient' | 'analyzed';
+    message: string;
+    matched_observations: number | null;
+    comparable_employees: number | null;
+    detectors: Record<EvaluationQualityCategory, 'analyzed' | 'insufficient'>;
+  };
+};
 
 export type ReportSectionComparison = { section_id: number; groups: Array<{ id: number; name: string; average_score: number }>; roles: Array<{ id: number; name: string; average_score: number }> };
 

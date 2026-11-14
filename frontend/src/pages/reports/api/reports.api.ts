@@ -1,5 +1,5 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { CampaignRatingDistribution, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, ReportSectionComparison, RolePerspective, RoleReportDetail, RolesReport } from '../types/reports.types';
+import type { CampaignRatingDistribution, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, ReportSectionComparison, RolePerspective, RoleReportDetail, RolesReport, WrittenFeedbackIndex, WrittenFeedbackResponse } from '../types/reports.types';
 
 async function requestReports<T>(getAccessToken: AccessTokenGetter, path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, `/reports${path}`, { signal });
@@ -33,6 +33,10 @@ export function fetchCampaignRatingDistribution(getAccessToken: AccessTokenGette
   return requestReports<CampaignRatingDistribution>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/rating-distribution`, signal, 'Rating distribution could not be loaded.');
 }
 
+export function fetchEvaluationQuality(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {
+  return requestReports<EvaluationQualityReport>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/evaluation-quality`, signal, 'Evaluation quality analysis could not be loaded.');
+}
+
 export function fetchSectionComparison(getAccessToken: AccessTokenGetter, campaignId: number, sectionId: number, signal: AbortSignal) {
   return requestReports<ReportSectionComparison>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/sections/${encodeURIComponent(sectionId)}/comparison`, signal, 'Section comparison could not be loaded.');
 }
@@ -43,6 +47,26 @@ export function fetchReportQuestions(getAccessToken: AccessTokenGetter, campaign
     if (value !== undefined) params.set(key, String(value));
   }
   return requestReports<ReportQuestions>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/questions?${params}`, signal, 'Question analytics could not be loaded.');
+}
+
+export function fetchWrittenFeedback(getAccessToken: AccessTokenGetter, campaignId: number, questionKey: string,
+                                     evaluationType: 'peer' | 'self', scope: { section_id?: number; employee_id?: number }, signal: AbortSignal) {
+  const params = new URLSearchParams({ question_key: questionKey, evaluation_type: evaluationType });
+  if (scope.section_id !== undefined) params.set('section_id', String(scope.section_id));
+  if (scope.employee_id !== undefined) params.set('employee_id', String(scope.employee_id));
+  return requestReports<WrittenFeedbackResponse>(getAccessToken,
+    `/campaigns/${encodeURIComponent(campaignId)}/written-feedback?${params}`, signal,
+    'Written feedback could not be loaded.');
+}
+
+export function fetchWrittenFeedbackIndex(getAccessToken: AccessTokenGetter, campaignId: number,
+                                          evaluationType: 'peer' | 'self', scope: { section_id?: number; employee_id?: number }, signal: AbortSignal) {
+  const params = new URLSearchParams({ evaluation_type: evaluationType });
+  if (scope.section_id !== undefined) params.set('section_id', String(scope.section_id));
+  if (scope.employee_id !== undefined) params.set('employee_id', String(scope.employee_id));
+  return requestReports<WrittenFeedbackIndex>(getAccessToken,
+    `/campaigns/${encodeURIComponent(campaignId)}/written-feedback?${params}`, signal,
+    'Written feedback questions could not be loaded.');
 }
 
 export function fetchGroupsReport(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {
