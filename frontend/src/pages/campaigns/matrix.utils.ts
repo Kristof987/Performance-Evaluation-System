@@ -22,7 +22,7 @@ export function matrixCell(
   _rules: CampaignEvaluationRules,
   evaluatorId: number,
   evaluateeId: number,
-  selfForms: Record<number, number | null> = {},
+  _selfForms: Record<number, number | null> = {},
 ) {
   const evaluator = group.employees.find((employee) => employee.id === evaluatorId);
   const evaluatee = group.employees.find((employee) => employee.id === evaluateeId);
@@ -35,15 +35,13 @@ export function matrixCell(
       ? 'This evaluation is in progress and cannot be changed.'
       : `This evaluation has already been issued (${issued.statusName || 'Issued'}) and cannot be changed.`, issued: true };
   if (!evaluator || !evaluatee || evaluator.active === false || evaluatee.active === false) return { editable: false, reason: 'Employee is not in this group.', issued: false };
-  if (evaluatorId === evaluateeId && selfForms[evaluatorId] == null) {
-    return { editable: false, reason: 'Choose a self-evaluation form in the Self-evaluations section first.', issued: false };
-  }
   return { editable: true, reason: '', issued: false };
 }
 
 export function matrixSelectedCount(selection: MatrixSelection, groupId?: number) {
-  return Object.entries(selection).filter(([key, selected]) => selected &&
-    (groupId === undefined || key.startsWith(`${groupId}:`))).length;
+  const keys = Object.entries(selection).filter(([key, selected]) => selected &&
+    (groupId === undefined || key.startsWith(`${groupId}:`))).map(([key]) => key);
+  return groupId === undefined ? new Set(keys.map((key) => key.split(':').slice(1).join(':'))).size : keys.length;
 }
 
 export function matrixDirty(selection: MatrixSelection, saved: MatrixSelection) {

@@ -101,6 +101,7 @@ export type CampaignRolePairRule = {
   formId: number | null;
   ruleId: number | null;
   locked?: boolean;
+  required: boolean;
 };
 
 export type CampaignGroupRuleMatrix = {
@@ -127,6 +128,7 @@ export type CampaignEvaluationRulesResponse = {
       form_id: number | null;
       rule_id: number | null;
       locked?: boolean;
+      required: boolean;
     }>;
   }>;
 };
@@ -142,7 +144,7 @@ export type CampaignEvaluationMatrixEmployee = {
 export type CampaignEvaluationMatrixAssignment = {
   evaluatorId: number;
   evaluateeId: number;
-  formId: number;
+  formId: number | null;
   filledFormId: number | null;
   issued: boolean;
   isCompleted: boolean;
@@ -177,7 +179,7 @@ export type CampaignEvaluationMatrixResponse = {
     assignments: Array<{
       evaluator_id: number;
       evaluatee_id: number;
-      form_id: number;
+      form_id: number | null;
       filled_form_id: number | null;
       issued: boolean;
       is_completed: boolean;

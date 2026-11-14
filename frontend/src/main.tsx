@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router'
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router'
 import { Auth0Provider } from '@auth0/auth0-react'
 import './styles/index.css'
 import Login from './pages/login/Login'
@@ -22,13 +22,19 @@ import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/report
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import './styles/shared.css'
-import { getDashboardPath, getAuthenticatedDashboardPath, isHrOrManagerRole } from './pages/layout/sidebar-user'
+import { getAuthenticatedDashboardPath } from './pages/layout/sidebar-user'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
 import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './auth/AppAuth'
-import { Auth0Unavailable, Auth0PersonalResultsUnavailable, DevelopmentPeopleUnavailable, DevelopmentManagementUnavailable, DevelopmentEvaluationUnavailable, DevelopmentDashboardUnavailable, DevelopmentReportsUnavailable, Auth0PermissionDenied } from './pages/layout/Auth0Transition'
+import { Auth0Unavailable, Auth0PersonalResultsUnavailable, Auth0PermissionDenied } from './pages/layout/Auth0Transition'
 
 function RoleHome() {
-  return getDashboardPath() === '/hr-home' ? <HrHome /> : <EmployeeHome />
+  const { state } = useAppAuth()
+  return state.status === 'authenticated' && state.user.permissions.includes('campaigns.read') ? <HrHome /> : <EmployeeHome />
+}
+
+function EvaluationQualityRedirect() {
+  const { campaignId } = useParams()
+  return <Navigate to={`/reports/campaigns/${campaignId}`} replace />
 }
 
 function ProtectedPage({ children, hrOnly = false }: {
@@ -41,61 +47,46 @@ function ProtectedPage({ children, hrOnly = false }: {
   if (state.status !== 'authenticated') {
     return <Navigate to="/" state={{ from: location.pathname + location.search + location.hash }} replace />
   }
-  if (state.mode === 'auth0') {
-    const canReadCampaigns = state.user.permissions.includes('campaigns.read')
-    if (location.pathname === '/hr-home') {
-      return canReadCampaigns ? <HrHome /> : <Navigate to="/employee-home" replace />
-    }
-    if (location.pathname === '/employee-home' && canReadCampaigns) {
-      return <Navigate to="/hr-home" replace />
-    }
-    if (location.pathname === '/people') {
-      if (!state.user.permissions.includes('employees.read') || !state.user.permissions.includes('groups.read')) {
-        return <Auth0PermissionDenied />
-      }
-      return children
-    }
-    if (location.pathname === '/campaigns' || (location.pathname.startsWith('/campaigns/') && !location.pathname.endsWith('/completion'))) {
-      return state.user.permissions.includes('campaigns.read')
-        ? children : <Auth0PermissionDenied feature="Campaigns" required="campaigns.read" activePage="campaigns" />
-    }
-    if (location.pathname === '/forms') {
-      return state.user.permissions.includes('forms.read') && state.user.permissions.includes('sections.read')
-        ? children : <Auth0PermissionDenied feature="Forms" required="forms.read and sections.read" activePage="forms" />
-    }
-    if (location.pathname.startsWith('/campaigns/') && location.pathname.endsWith('/completion')) {
-      return canReadCampaigns ? children
-        : <Auth0PermissionDenied feature="Completion status" required="campaigns.read" activePage="campaigns" />
-    }
-    if (location.pathname === '/reports' || location.pathname.startsWith('/reports/')) {
-      return state.user.permissions.includes('reports.read') ? children
-        : <Auth0PermissionDenied feature="Reports" required="reports.read" activePage="reports" />
-    }
-    if (location.pathname === '/results' || location.pathname === '/employee-review-preview') {
-      return <Auth0PersonalResultsUnavailable />
-    }
-    if (location.pathname === '/my-evaluations' || location.pathname === '/employee-home'
-      || location.pathname.startsWith('/employee-home/evaluations/') || location.pathname.startsWith('/evaluations/')) {
-      return state.user.permissions.includes('evaluations.read_assigned')
-        ? children : <Auth0PermissionDenied feature="Evaluations" required="evaluations.read_assigned" activePage="my-evaluations" />
-    }
-    if (hrOnly && !canReadCampaigns) return <Navigate to={getAuthenticatedDashboardPath(state.user.permissions)} replace />
-    return <Auth0Unavailable />
+  const canReadCampaigns = state.user.permissions.includes('campaigns.read')
+  if (location.pathname === '/hr-home') {
+    return canReadCampaigns ? <HrHome /> : <Navigate to="/employee-home" replace />
   }
-  if (location.pathname === '/hr-home') return <DevelopmentDashboardUnavailable />
-  if (location.pathname === '/reports' || location.pathname.startsWith('/reports/')) return <DevelopmentReportsUnavailable />
-  if (location.pathname === '/people') return <DevelopmentPeopleUnavailable />
-  if (location.pathname === '/forms' || location.pathname === '/campaigns' || location.pathname.startsWith('/campaigns/')) {
-    return <DevelopmentManagementUnavailable />
+  if (location.pathname === '/employee-home' && canReadCampaigns) {
+    return <Navigate to="/hr-home" replace />
+  }
+  if (location.pathname === '/people') {
+    if (!state.user.permissions.includes('employees.read') || !state.user.permissions.includes('groups.read')) {
+      return <Auth0PermissionDenied />
+    }
+    return children
+  }
+  if (location.pathname === '/campaigns' || (location.pathname.startsWith('/campaigns/') && !location.pathname.endsWith('/completion'))) {
+    return state.user.permissions.includes('campaigns.read')
+      ? children : <Auth0PermissionDenied feature="Campaigns" required="campaigns.read" activePage="campaigns" />
+  }
+  if (location.pathname === '/forms') {
+    return state.user.permissions.includes('forms.read') && state.user.permissions.includes('sections.read')
+      ? children : <Auth0PermissionDenied feature="Forms" required="forms.read and sections.read" activePage="forms" />
+  }
+  if (location.pathname.startsWith('/campaigns/') && location.pathname.endsWith('/completion')) {
+    return canReadCampaigns ? children
+      : <Auth0PermissionDenied feature="Completion status" required="campaigns.read" activePage="campaigns" />
+  }
+  if (location.pathname === '/reports' || location.pathname.startsWith('/reports/')) {
+    return state.user.permissions.includes('reports.read') ? children
+      : <Auth0PermissionDenied feature="Reports" required="reports.read" activePage="reports" />
+  }
+  if (location.pathname === '/results' || location.pathname === '/employee-review-preview') {
+    return state.mode === 'development' ? children : <Auth0PersonalResultsUnavailable />
   }
   if (location.pathname === '/my-evaluations' || location.pathname === '/employee-home'
     || location.pathname.startsWith('/employee-home/evaluations/') || location.pathname.startsWith('/evaluations/')) {
-    return <DevelopmentEvaluationUnavailable />
+    return state.user.permissions.includes('evaluations.read_assigned')
+      ? children : <Auth0PermissionDenied feature="Evaluations" required="evaluations.read_assigned" activePage="my-evaluations" />
   }
-  if (location.pathname === '/my-evaluations' && !isHrOrManagerRole(state.user.role_name)) {
-    return <Navigate to={getDashboardPath()} replace />
-  }
-  return children
+  if (hrOnly && !canReadCampaigns) return <Navigate to={getAuthenticatedDashboardPath(state.user.permissions)} replace />
+  if (state.mode === 'development' && location.pathname.startsWith('/settings')) return children
+  return <Auth0Unavailable />
 }
 
 function AppRoutes() {
@@ -119,6 +110,7 @@ function AppRoutes() {
         <Route path="/reports/campaigns/:campaignId" element={<ProtectedPage hrOnly><CampaignOverviewPage /></ProtectedPage>} />
         <Route path="/reports/campaigns/:campaignId/detailed" element={<ProtectedPage hrOnly><DetailedResultsPage /></ProtectedPage>} />
         <Route path="/reports/campaigns/:campaignId/ai-analysis" element={<ProtectedPage hrOnly><AIAnalysisPage /></ProtectedPage>} />
+        <Route path="/reports/campaigns/:campaignId/evaluation-quality" element={<EvaluationQualityRedirect />} />
         <Route path="/reports/campaigns/:campaignId/questions" element={<ProtectedPage hrOnly><QuestionAnalyticsPage /></ProtectedPage>} />
         <Route path="/reports/campaigns/:campaignId/groups" element={<ProtectedPage hrOnly><GroupsRolesPage /></ProtectedPage>} />
         <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={<ProtectedPage hrOnly><GroupDetailPage /></ProtectedPage>} />

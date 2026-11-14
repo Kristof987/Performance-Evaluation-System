@@ -180,6 +180,10 @@ class UserResponse(BaseModel):
     }
 
 
+class DevelopmentLoginResponse(UserResponse):
+    access_token: str
+
+
 class AuthEmployeeResponse(BaseModel):
     id: int
     full_name: str
@@ -553,6 +557,58 @@ class ReportCampaignOption(BaseModel):
         return business_date(value)
 
 
+class EvaluationQualityFinding(BaseModel):
+    category: Literal[
+        "uniform_rating_pattern", "higher_rating_tendency", "lower_rating_tendency",
+        "peer_rating_disagreement", "rating_distribution_concentration",
+    ]
+    title: str
+    description: str
+    scope: Literal["campaign"]
+    section_name: str | None
+    eligible_observations: int | None
+    statistics: dict[str, float]
+    method: str
+    rule: str
+    informational: Literal[True]
+
+
+class EvaluationQualityDistributionBucket(BaseModel):
+    label: str
+    count: int
+    percentage: float
+
+
+class EvaluationQualityStatistics(BaseModel):
+    mean_normalized: float | None
+    standard_deviation: float | None
+    maximum_percentage: float | None
+    modal_percentage: float | None
+    distribution: list[EvaluationQualityDistributionBucket]
+
+
+class EvaluationQualityCoverage(BaseModel):
+    status: Literal["no_completed", "insufficient", "analyzed"]
+    message: str
+    matched_observations: int | None
+    comparable_employees: int | None
+    detectors: dict[str, Literal["analyzed", "insufficient"]]
+
+
+class EvaluationQualityResponse(BaseModel):
+    campaign: ReportCampaignOption
+    analysis_status: Literal["preliminary", "final", "unavailable"]
+    data_status: Literal["no_data", "insufficient_data", "analyzed"]
+    completed_peer_reviews: int
+    assigned_peer_reviews: int
+    peer_reviews_analyzed: int
+    rating_observations: int | None
+    findings_count: int
+    findings_by_category: dict[str, list[EvaluationQualityFinding]]
+    statistics: EvaluationQualityStatistics
+    coverage: EvaluationQualityCoverage
+
+
 class ReportKpiSummary(BaseModel):
     total_evaluations: int
     completed_evaluations: int
@@ -659,6 +715,37 @@ class ReportQuestionsResponse(BaseModel):
     notes: dict[str, str]
 
 
+class ReportWrittenFeedbackResponse(BaseModel):
+    question_key: str
+    question_type: Literal["Text"]
+    section_id: int | None
+    evaluation_type: Literal["peer", "self"]
+    scope: Literal["campaign", "employee"]
+    availability: Literal["available", "no_data", "suppressed", "not_applicable"]
+    response_count: int | None
+    responses: list[str]
+
+
+class ReportWrittenFeedbackQuestion(BaseModel):
+    key: str
+    text: str
+    section_id: int | None
+    section_name: str
+    response_count: int
+
+
+class ReportWrittenFeedbackEvaluatee(BaseModel):
+    evaluatee_id: int
+    evaluatee_name: str
+
+
+class ReportWrittenFeedbackIndexResponse(BaseModel):
+    evaluation_type: Literal["peer", "self"]
+    scope: Literal["campaign", "employee"]
+    questions: list[ReportWrittenFeedbackQuestion]
+    evaluatees: list[ReportWrittenFeedbackEvaluatee]
+
+
 class ReportRatingDistribution(BaseModel):
     section_id: int | None
     availability: Literal["available", "no_data", "suppressed"]
@@ -745,12 +832,15 @@ class CampaignRolePairRule(BaseModel):
     form_id: int | None = None
     rule_id: int | None = None
     locked: bool = False
+    required: bool = False
 
 
 class CampaignGroupRuleMatrix(BaseModel):
     group_id: int
     group_name: str
     role_pairs: list[CampaignRolePairRule]
+    required_count: int = 0
+    configured_required_count: int = 0
 
 
 class CampaignEvaluationRulesResponse(BaseModel):
@@ -780,7 +870,7 @@ class CampaignEvaluationMatrixEmployee(BaseModel):
 class CampaignEvaluationMatrixAssignment(BaseModel):
     evaluator_id: int
     evaluatee_id: int
-    form_id: int
+    form_id: int | None
     filled_form_id: int
     issued: bool = False
     is_completed: bool = False
@@ -873,3 +963,37 @@ class FormTemplateResponse(BaseModel):
 class FormValidationResponse(BaseModel):
     valid_for_issuance: bool
     errors: list[str] = Field(default_factory=list)
+
+
+class FormAIGenerateRequest(BaseModel):
+    description: str = Field(min_length=1, max_length=3000)
+    evaluation_type: Literal["peer", "self", "manager"]
+    length: Literal["short", "standard", "detailed"]
+    language: str | None = Field(default=None, max_length=40)
+
+
+class FormAIDraftQuestion(BaseModel):
+    id: str
+    text: str
+    type: Literal["Scale", "Single choice", "Multiple choice", "Text"]
+    required: bool
+    helpText: str
+    scale_direction: Literal["higher_is_better"] | None = None
+    scale_min: int | None = None
+    scale_max: int | None = None
+    min_label: str | None = None
+    max_label: str | None = None
+    options: list[dict[str, str]] | None = None
+
+
+class FormAIDraftSection(BaseModel):
+    name: str
+    section_id: int | None
+    questions: list[FormAIDraftQuestion]
+
+
+class FormAIGenerateResponse(BaseModel):
+    name: str
+    description: str
+    sections: list[FormAIDraftSection]
+    standalone_questions: list[FormAIDraftQuestion]

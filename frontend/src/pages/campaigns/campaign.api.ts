@@ -95,6 +95,7 @@ function mapCampaignEvaluationRules(
         formId: rule.form_id,
         ruleId: rule.rule_id,
         locked: rule.locked ?? false,
+        required: rule.required,
       })),
     })),
   };
@@ -338,6 +339,13 @@ export async function fetchCampaignEvaluationMatrix(
       'Campaign evaluation matrix could not be loaded.',
     ),
   );
+}
+
+export async function issueCampaignPlannedEvaluations(getAccessToken: AccessTokenGetter, id: string): Promise<CampaignEvaluationMatrix> {
+  return mapCampaignEvaluationMatrix(await requestCampaigns<CampaignEvaluationMatrixResponse>(
+    getAccessToken, `/${encodeURIComponent(id)}/issue-planned`, { method: 'POST' },
+    'Planned evaluations could not be issued.',
+  ));
 }
 
 export async function fetchCampaignSetupPreview(getAccessToken: AccessTokenGetter, id: string, groupIds: number[], signal: AbortSignal) {
