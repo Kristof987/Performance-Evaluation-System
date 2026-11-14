@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import date
+from hashlib import sha256
 from typing import Any
 
 from fastapi import HTTPException
@@ -98,6 +99,78 @@ def campaign_report_rows(campaign_id: int, db: Session) -> list[Any]:
         .filter(models.FilledForm.campaign_id == campaign_id)
         .all()
     )
+
+
+def build_written_feedback(campaign_id: int, question_key: str | None, evaluation_type: str,
+                           actor: models.User, db: Session, *, employee_id: int | None = None,
+                           section_id: int | None = None) -> dict[str, Any]:
+    """Release submitted issued Text answers to HR without reviewer metadata.
+
+    Identity-hidden presentation does not make raw prose anonymous: its content
+    and comparison across campaign/employee views may reveal its author.
+    """
+    import question_analytics_service
+
+    require_reports_access(None, actor, db)
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update(read=True).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if models.CampaignStatus(campaign.status) not in (models.CampaignStatus.ACTIVE, models.CampaignStatus.REVIEW,
+                                                      models.CampaignStatus.PAUSED, models.CampaignStatus.CLOSED):
+        raise HTTPException(status_code=409, detail="Written feedback is available only after questionnaires are issued")
+    if not _has_permission(actor, db, "campaigns.manage"):
+        raise HTTPException(status_code=403, detail="Campaign management permission is required")
+    rows = campaign_report_rows(campaign_id, db)
+    if employee_id is not None and employee_id not in campaign_participant_ids(campaign_id, rows, db):
+        raise HTTPException(status_code=404, detail="Employee is not part of this campaign report")
+    metadata, observations, issued_scopes = question_analytics_service._collect(rows, db, include_text=question_key is not None)
+    if question_key is None:
+        questions = []
+        for key, definition in metadata.items():
+            if definition["category"] != "text" or (section_id is not None and definition["section_id"] != section_id):
+                continue
+            if evaluation_type == "self" and employee_id is None:
+                continue
+            if not any(issued_type == evaluation_type and (employee_id is None or target == employee_id)
+                       for _group, _target_role, _reviewer_role, target, issued_type in issued_scopes[key]):
+                continue
+            count = sum(1 for item in observations if item.key == key
+                        and (item.evaluator_id == item.evaluatee_id) == (evaluation_type == "self")
+                        and (employee_id is None or item.evaluatee_id == employee_id))
+            questions.append({"key": key, "text": definition["text"], "section_id": definition["section_id"],
+                              "section_name": definition["section_name"], "response_count": count})
+        questions.sort(key=lambda item: (item["section_id"] is None, item["section_name"].casefold(),
+                                         item["text"].casefold(), item["key"]))
+        # This target directory identifies evaluatees, never who authored a response.
+        target_ids = {row[0].evaluatee_id for row in rows} if employee_id is None else set()
+        evaluatees = sorted(({"evaluatee_id": person.id, "evaluatee_name": person.full_name}
+                            for person in db.query(models.Employee).filter(models.Employee.id.in_(target_ids)).all()),
+                           key=lambda person: (person["evaluatee_name"].casefold(), person["evaluatee_id"])) if target_ids else []
+        return {"evaluation_type": evaluation_type, "scope": "employee" if employee_id is not None else "campaign",
+                "questions": questions, "evaluatees": evaluatees}
+    question = metadata.get(question_key)
+    if question is None or question["category"] != "text" or (section_id is not None and question["section_id"] != section_id):
+        raise HTTPException(status_code=404, detail="Issued Text question not found")
+
+    scope = "employee" if employee_id is not None else "campaign"
+    response = {"question_key": question_key, "question_type": "Text", "section_id": question["section_id"],
+                "evaluation_type": evaluation_type, "scope": scope,
+                "availability": "not_applicable", "response_count": None, "responses": []}
+    issued = any(issued_type == evaluation_type and (employee_id is None or target == employee_id)
+                 for _group, _target_role, _reviewer_role, target, issued_type in issued_scopes[question_key])
+    if not issued or (evaluation_type == "self" and employee_id is None):
+        return response
+    # The canonical collector checks completion, schema-v2 issued snapshots,
+    # unique issued question IDs, duplicate answers and nonempty Text values.
+    text_items = [item for item in observations if item.key == question_key and isinstance(item.value, str)
+                  and (item.evaluator_id == item.evaluatee_id) == (evaluation_type == "self")]
+    cohort = [item for item in text_items if employee_id is None or item.evaluatee_id == employee_id]
+    if not cohort:
+        return {**response, "availability": "no_data", "response_count": 0}
+
+    # Content-only ordering carries no submission, rating or person ordering.
+    bodies = sorted((item.value for item in cohort), key=lambda text: (sha256(text.encode("utf-8")).digest(), text))
+    return {**response, "availability": "available", "response_count": len(bodies), "responses": bodies}
 
 
 def assigned_campaign_groups(campaign_id: int, db: Session) -> list[models.CompanyGroup]:

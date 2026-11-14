@@ -158,7 +158,7 @@ class FilledForm(Base):
     form_id = Column(
         Integer,
         ForeignKey("forms.id"),
-        nullable=False,
+        nullable=True,
     )
 
     status_id = Column(

@@ -87,7 +87,7 @@ def _definition(question: dict, section_id: int | None) -> tuple[str, dict] | No
                  "options": [{"label": option["label"], "value": option["value"]} for option in options] if category == "choice" else []}
 
 
-def _collect(rows: list[Any], db: Session):
+def _collect(rows: list[Any], db: Session, *, include_text: bool = False):
     definitions: dict[str, dict] = {}
     observations: list[Observation] = []
     issued_scopes: dict[str, set[tuple[int | None, int | None, int | None, int, str]]] = defaultdict(set)
@@ -166,7 +166,8 @@ def _collect(rows: list[Any], db: Session):
             else:
                 valid = isinstance(value, str) and bool(value.strip())
                 if valid:
-                    value = True  # Count availability without retaining written feedback in analytics observations.
+                    if not include_text:
+                        value = True  # Ordinary analytics retains availability, not written feedback.
             if valid:
                 observations.append(Observation(assignment.id, assignment.evaluatee_id, assignment.evaluator_id,
                                                 assignment.company_group_id, roles.get(assignment.evaluatee_id),

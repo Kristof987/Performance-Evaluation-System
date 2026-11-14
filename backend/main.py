@@ -1,11 +1,15 @@
 from copy import deepcopy
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import os
+import secrets
 from uuid import uuid4
 from typing import Callable, Literal
 
+import jwt
+from jwt.exceptions import InvalidTokenError
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
 from pydantic import TypeAdapter, ValidationError
@@ -15,16 +19,18 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, aliased
 
 from database import engine, Base, SessionLocal
-from auth0 import get_verified_auth0_sub
+from auth0 import bearer_scheme, get_verified_auth0_sub
 from business_calendar import business_today as campaign_today, business_date, campaign_instant
 import campaign_lifecycle
 import models
 import form_snapshot_service
 import reporting_service
 import question_analytics_service
+import evaluation_quality_service
 import ai_workflow_service
 import ai_aggregate_workflow_service
 import ai_generation_jobs
+import ai_form_generation_service
 from ai_analysis_models import EmployeeAIAnalysis
 from ai_generation_service import AnalysisGenerationError
 import schemas
@@ -63,6 +69,7 @@ app.add_middleware(
 )
 
 email_validator = TypeAdapter(schemas.EmailStr)
+development_token_key = secrets.token_bytes(32)
 EMPLOYEE_IMPORT_HEADERS = [
     "Employee Name",
     "Employee Email Address",
@@ -80,8 +87,29 @@ def get_db():
         db.close()
 
 
-def get_current_user(sub: str = Depends(get_verified_auth0_sub), db: Session = Depends(get_db)) -> models.User:
-    user = db.query(models.User).filter(models.User.auth0_user_id == sub).first()
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+                     db: Session = Depends(get_db)) -> models.User:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Bearer credentials required", headers={"WWW-Authenticate": "Bearer"})
+    try:
+        algorithm = jwt.get_unverified_header(credentials.credentials).get("alg")
+    except InvalidTokenError:
+        algorithm = None
+    if algorithm == "HS256" and development_login_enabled():
+        try:
+            claims = jwt.decode(credentials.credentials, development_token_key, algorithms=["HS256"],
+                                issuer="compass-development", options={"require": ["exp", "iss", "sub"]})
+            subject = claims["sub"]
+            if not isinstance(subject, str) or not subject.isdecimal() or int(subject) <= 0:
+                raise InvalidTokenError("Invalid development identity")
+        except InvalidTokenError:
+            raise HTTPException(status_code=401, detail="Invalid bearer credentials", headers={"WWW-Authenticate": "Bearer"}) from None
+        user = db.query(models.User).filter(models.User.id == int(subject)).first()
+    elif algorithm == "RS256":
+        sub = get_verified_auth0_sub(credentials)
+        user = db.query(models.User).filter(models.User.auth0_user_id == sub).first()
+    else:
+        raise HTTPException(status_code=401, detail="Invalid bearer credentials", headers={"WWW-Authenticate": "Bearer"})
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Invalid bearer credentials", headers={"WWW-Authenticate": "Bearer"})
     return user
@@ -181,13 +209,17 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db),
             "profile_image_url": new_user.employee.profile_image_url if new_user.employee else None}
 
 
+def development_login_enabled() -> bool:
+    return os.getenv("COMPASS_ENV", "production").lower() == "development" and os.getenv("COMPASS_DEV_LOGIN_ENABLED", "false").lower() == "true"
+
+
 def require_development_login():
     # Both settings must be explicitly enabled on the backend; neither is a credential.
-    if os.getenv("COMPASS_ENV", "production").lower() != "development" or os.getenv("COMPASS_DEV_LOGIN_ENABLED", "false").lower() != "true":
+    if not development_login_enabled():
         raise HTTPException(status_code=404, detail="Development login is unavailable")
 
 
-@app.post("/login", response_model=schemas.UserResponse)
+@app.post("/login", response_model=schemas.DevelopmentLoginResponse)
 def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
     require_development_login()
     name = " ".join(user_login.name.split()).lower()
@@ -214,6 +246,8 @@ def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Multiple users match. Enter your unique username or email")
 
     user, employee, role_name, system_role_name = matches[0]
+    if employee is None or not employee.is_active:
+        raise HTTPException(status_code=403, detail="An active employee profile is required for development access")
 
     user.last_login = func.now()
     db.commit()
@@ -221,6 +255,9 @@ def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
 
     return {
         **user.__dict__,
+        "access_token": jwt.encode({"sub": str(user.id), "iss": "compass-development",
+                                    "exp": datetime.now(timezone.utc) + timedelta(hours=8)},
+                                   development_token_key, algorithm="HS256"),
         "employee_id": employee.id if employee else None,
         "full_name": employee.full_name if employee else None,
         "company_role_id": employee.company_role_id if employee else None,
@@ -879,7 +916,7 @@ def get_campaign_form_ids(campaign_id: int, db: Session):
         .all()
     }
 
-    return sorted(rule_form_ids | filled_form_ids)
+    return sorted((rule_form_ids | filled_form_ids) - {None})
 
 
 def get_campaign_participant_count(campaign_id: int, db: Session):
@@ -976,6 +1013,11 @@ def require_mutable_campaign_configuration(campaign: models.Campaign) -> None:
         raise HTTPException(status_code=409, detail="Campaign configuration is locked in this lifecycle status")
 
 
+def require_mutable_campaign_plan(campaign: models.Campaign) -> None:
+    if campaign.is_archived or campaign.status == models.CampaignStatus.CLOSED.value:
+        raise HTTPException(status_code=409, detail="Campaign plan is locked in this lifecycle status")
+
+
 def unissued_snapshot_filter():
     # Older planned rows may contain JSON null; new rows use SQL NULL.
     return or_(models.FilledForm.form_snapshot.is_(None), models.FilledForm.form_snapshot == JSONB.NULL)
@@ -990,22 +1032,33 @@ def ensure_campaign_issued(campaign_id: int, db: Session, *, commit: bool = True
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     now = datetime.now(timezone.utc)
     if (campaign is None or campaign.legacy_issuance_blocked
-            or campaign.status != models.CampaignStatus.ACTIVE.value
+            or campaign.status not in {models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value}
             or campaign.is_archived or campaign.start_date > now
-            or (campaign.end_date is not None and campaign.end_date <= now)):
+            or (campaign.status == models.CampaignStatus.ACTIVE.value
+                and campaign.end_date is not None and campaign.end_date <= now)):
         return []
 
-    errors = issue_activation_snapshots(campaign, db, actor_user_id=actor_user_id)
+    errors = issue_activation_snapshots(campaign, db, actor_user_id=actor_user_id, require_all=False)
     if commit:
         db.commit()
     return errors
 
 
+def unschedule_if_incomplete(campaign: models.Campaign, db: Session, actor_user_id: int) -> None:
+    if campaign.status == models.CampaignStatus.SCHEDULED.value and validate_campaign_configuration(campaign, db):
+        campaign_lifecycle.transition_campaign(
+            db, campaign.id, models.CampaignStatus.DRAFT,
+            now=datetime.now(timezone.utc), actor_user_id=actor_user_id,
+        )
+
+
 def issue_activation_snapshots(campaign: models.Campaign, db: Session,
-                               *, actor_user_id: int | None = None) -> list[str]:
+                               *, actor_user_id: int | None = None, require_all: bool = True) -> list[str]:
     """Issue only untouched planned rows; caller owns the campaign lock and transaction."""
     errors = []
     issued_count = 0
+    group_members = {}
+    self_form_ids = None
     for assignment in db.query(models.FilledForm).filter(
         models.FilledForm.campaign_id == campaign.id,
         unissued_snapshot_filter(),
@@ -1013,6 +1066,32 @@ def issue_activation_snapshots(campaign: models.Campaign, db: Session,
         # Historical answers cannot be reconstructed from today's editable form.
         if assignment.finish_date is not None or assignment.answers:
             continue
+        if assignment.form_id is None:
+            if require_all:
+                errors.append(f"Assignment {assignment.id}: select a form before issuance")
+            continue
+        if not require_all:
+            if assignment.company_group_id not in group_members:
+                group_members[assignment.company_group_id] = {
+                    person.id: person for person, _role in get_group_employees(assignment.company_group_id, db)
+                } if assignment.company_group_id is not None else {}
+            members = group_members[assignment.company_group_id]
+            evaluator = members.get(assignment.evaluator_id)
+            evaluatee = members.get(assignment.evaluatee_id)
+            if evaluator is None or evaluatee is None:
+                errors.append(f"Assignment {assignment.id}: employees are not active members of the selected group")
+                continue
+            if assignment.evaluator_id == assignment.evaluatee_id:
+                if self_form_ids is None:
+                    self_form_ids = {row.employee_id: row.form_id for row in db.query(models.CampaignEmployeeSelfEvaluation)
+                                     .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign.id)}
+                expected = self_form_ids.get(assignment.evaluator_id)
+            else:
+                expected = get_form_id_for_employee_pair(
+                    campaign.id, assignment.company_group_id, evaluator, evaluatee, db)
+            if expected != assignment.form_id:
+                errors.append(f"Assignment {assignment.id}: saved questionnaire no longer matches the pair's role assignment")
+                continue
         form = db.query(models.Form).filter(models.Form.id == assignment.form_id).first()
         if form is None:
             errors.append(f"Assignment {assignment.id}: source form no longer exists")
@@ -1272,8 +1351,9 @@ def get_employee_dashboard(user_id: int, db: Session = Depends(get_db),
                             .filter(models.FilledForm.evaluator_id == employee.id,
                                     models.Campaign.status.in_([
                                         models.CampaignStatus.PAUSED.value, models.CampaignStatus.CLOSED.value,
-                                    ]))
-                            .distinct().all())
+                                     ]))
+                             .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
+                             .distinct().all())
     open_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is None]
     completed_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is not None]
     active_campaign = (
@@ -1284,6 +1364,7 @@ def get_employee_dashboard(user_id: int, db: Session = Depends(get_db),
             models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value,
         ]))
         .filter(models.Campaign.is_archived.is_(False))
+        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
         .order_by((models.Campaign.status == models.CampaignStatus.ACTIVE.value).desc(),
                   models.Campaign.end_date.asc().nullslast(), models.Campaign.start_date.asc())
         .first()
@@ -1297,6 +1378,7 @@ def get_employee_dashboard(user_id: int, db: Session = Depends(get_db),
             .filter(models.Campaign.start_date >= datetime.now(timezone.utc))
             .filter(models.Campaign.status == models.CampaignStatus.ACTIVE.value)
             .filter(models.Campaign.is_archived.is_(False))
+            .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
             .order_by(models.Campaign.start_date.asc())
             .first()
         )
@@ -1566,6 +1648,7 @@ def get_campaign_completion_status(
         .join(models.Form, models.Form.id == models.FilledForm.form_id)
         .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
         .filter(models.FilledForm.campaign_id == campaign.id)
+        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
         .all()
     )
 
@@ -1682,6 +1765,17 @@ def get_campaign_report_overview(
     return reporting_service.build_campaign_report_overview(campaign_id, actor, db)
 
 
+@app.get("/reports/campaigns/{campaign_id}/evaluation-quality", response_model=schemas.EvaluationQualityResponse)
+def get_campaign_evaluation_quality(
+    campaign_id: int,
+    requester_user_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    reject_conflicting_requester(requester_user_id, actor)
+    return evaluation_quality_service.build_evaluation_quality(campaign_id, actor, db)
+
+
 @app.get("/reports/campaigns/{campaign_id}/sections/{section_id}/comparison", response_model=schemas.ReportSectionCohortComparison)
 def get_report_section_cohort_comparison(
     campaign_id: int,
@@ -1725,6 +1819,24 @@ def get_campaign_report_questions(
     return question_analytics_service.build_question_report(
         campaign_id, actor, db, group_id=group_id, role_id=role_id, employee_id=employee_id,
         perspective=perspective, evaluation_type=evaluation_type,
+    )
+
+
+@app.get("/reports/campaigns/{campaign_id}/written-feedback", response_model=schemas.ReportWrittenFeedbackResponse | schemas.ReportWrittenFeedbackIndexResponse)
+def get_campaign_written_feedback(
+    campaign_id: int,
+    question_key: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    evaluation_type: Literal["peer", "self"] = Query(default="peer"),
+    section_id: int | None = Query(default=None, gt=0),
+    employee_id: int | None = Query(default=None, gt=0),
+    requester_user_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    reject_conflicting_requester(requester_user_id, actor)
+    return reporting_service.build_written_feedback(
+        campaign_id, question_key, evaluation_type, actor, db,
+        employee_id=employee_id, section_id=section_id,
     )
 
 
@@ -2151,9 +2263,8 @@ def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> l
              for rule in db.query(models.CampaignEvaluationRule).filter(models.CampaignEvaluationRule.campaign_id == campaign.id)}
     self_forms = {row.employee_id: row.form_id for row in db.query(models.CampaignEmployeeSelfEvaluation)
                   .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign.id)}
-    form_ids = set(self_forms.values()) | set(rules.values())
     assignments = db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign.id).all()
-    form_ids.update(row.form_id for row in assignments)
+    form_ids = {row.form_id for row in assignments if row.form_id is not None}
     forms = {form.id: form for form in db.query(models.Form).filter(models.Form.id.in_(form_ids)).all()} if form_ids else {}
     for form_id in form_ids:
         form = forms.get(form_id)
@@ -2164,14 +2275,6 @@ def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> l
     for group_id, people in members.items():
         if not people:
             errors.append(f"Group {group_names.get(group_id, group_id)} has no active employees")
-        roles = {person.company_role_id for person in people.values()}
-        for evaluator_role in roles:
-            for evaluatee_role in roles:
-                if (group_id, evaluator_role, evaluatee_role) not in rules:
-                    errors.append(
-                        f"{group_names.get(group_id, f'Group {group_id}')}: No questionnaire assigned for "
-                        f"{role_names.get(evaluator_role, f'Role {evaluator_role}')} → "
-                        f"{role_names.get(evaluatee_role, f'Role {evaluatee_role}')}")
     participants = {employee_id for people in members.values() for employee_id in people}
     for employee_id in self_forms:
         if employee_id not in participants:
@@ -2191,7 +2294,12 @@ def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> l
         evaluatee = members[row.company_group_id][row.evaluatee_id]
         expected = (self_forms.get(row.evaluator_id) if row.evaluator_id == row.evaluatee_id else
                     rules.get((row.company_group_id, evaluator.company_role_id, evaluatee.company_role_id)))
-        if expected is None or expected != row.form_id:
+        if expected is None:
+            errors.append(
+                f"Assignment {row.id} needs a saved questionnaire for "
+                f"{role_names.get(evaluator.company_role_id, evaluator.company_role_id)} → "
+                f"{role_names.get(evaluatee.company_role_id, evaluatee.company_role_id)}")
+        elif expected != row.form_id and not assignment_is_immutable(row):
             errors.append(f"Assignment {row.id} does not match its saved form selection")
     return errors
 
@@ -2257,6 +2365,7 @@ def resume_campaign(campaign_id: int, db: Session = Depends(get_db),
         target = (models.CampaignStatus.REVIEW if campaign.paused_from_status == models.CampaignStatus.REVIEW.value
                   or (campaign.end_date is not None and now >= campaign.end_date) else models.CampaignStatus.ACTIVE)
         campaign = campaign_lifecycle.transition_campaign(db, campaign_id, target, now=now, actor_user_id=actor.id)
+        ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=actor.id)
         db.commit()
     except campaign_lifecycle.CampaignLifecycleError as error:
         db.rollback()
@@ -2424,9 +2533,6 @@ def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, d
     try:
         db.flush()
         validate_scheduled_campaign(campaign, db)
-        issuance_errors = ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=manager.id)
-        if campaign.status == models.CampaignStatus.ACTIVE.value and campaign.start_date <= datetime.now(timezone.utc) and issuance_errors:
-            raise HTTPException(status_code=409, detail="Campaign cannot issue planned evaluations until their forms are ready: " + "; ".join(issuance_errors))
         db.commit()
     except IntegrityError as error:
         db.rollback()
@@ -2469,7 +2575,7 @@ def get_campaign_groups(campaign_id: int, db: Session = Depends(get_db),
 
 @app.put("/campaigns/{campaign_id}/groups", response_model=schemas.CampaignGroupsResponse)
 def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpdate, db: Session = Depends(get_db),
-                           _manager: models.User = Depends(require_permission("campaigns.manage"))):
+                           manager: models.User = Depends(require_permission("campaigns.manage"))):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -2500,11 +2606,26 @@ def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpda
             raise HTTPException(status_code=409, detail="Groups with issued evaluations cannot be removed")
         if has_rules:
             raise HTTPException(status_code=409, detail="Remove saved form rules before deselecting these groups")
-        db.query(models.FilledForm).filter(
+        remaining_members = {group_id: {person.id: person for person, _ in get_group_employees(group_id, db)}
+                             for group_id in unique_group_ids}
+        occupied = {(row.evaluator_id, row.evaluatee_id) for row in db.query(models.FilledForm).filter(
             models.FilledForm.campaign_id == campaign_id,
-            models.FilledForm.company_group_id.in_(removed_ids),
-            unissued_snapshot_filter(),
-        ).delete(synchronize_session=False)
+            ~models.FilledForm.company_group_id.in_(removed_ids),
+        ).all()}
+        for record in group_assignments:
+            pair = (record.evaluator_id, record.evaluatee_id)
+            if pair in occupied:
+                raise HTTPException(status_code=409, detail="Overlapping groups already contain this evaluation pair")
+            target = next((group_id for group_id, members in remaining_members.items()
+                           if record.evaluator_id in members and record.evaluatee_id in members), None)
+            if target is None:
+                raise HTTPException(status_code=409, detail="Selected pairs must remain in a campaign group; use setup to replan them")
+            record.company_group_id = target
+            occupied.add(pair)
+            if record.evaluator_id != record.evaluatee_id:
+                record.form_id = get_form_id_for_employee_pair(
+                    campaign_id, target, remaining_members[target][record.evaluator_id],
+                    remaining_members[target][record.evaluatee_id], db)
 
     db.execute(
         models.campaign_company_groups.delete().where(
@@ -2519,7 +2640,7 @@ def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpda
             )
         )
     db.flush()
-    validate_scheduled_campaign(campaign, db)
+    unschedule_if_incomplete(campaign, db, manager.id)
     db.commit()
 
     groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
@@ -2620,7 +2741,7 @@ def update_campaign_self_evaluations(campaign_id: int, payload: schemas.Campaign
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    require_mutable_campaign_configuration(campaign)
+    require_mutable_campaign_plan(campaign)
     participants = get_self_evaluation_participants(campaign_id, db)
     form_ids = {form_id for (form_id,) in db.query(models.Form.id).all()}
     desired = {}
@@ -2660,23 +2781,13 @@ def update_campaign_self_evaluations(campaign_id: int, payload: schemas.Campaign
             db.add(models.CampaignEmployeeSelfEvaluation(
                 campaign_id=campaign_id, employee_id=employee_id, form_id=form_id,
             ))
-    changed_ids = set()
     for record in issued:
         if assignment_is_immutable(record) or record.evaluator_id not in participants:
             continue
         form_id = desired.get(record.evaluator_id)
-        if form_id is None:
-            db.delete(record)
-        else:
-            if record.form_id != form_id:
-                changed_ids.add(record.id)
-            record.form_id = form_id
+        record.form_id = form_id
     db.flush()
-    validate_scheduled_campaign(campaign, db)
-    errors = ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=manager.id)
-    blocking_errors = [error for error in errors if any(error.startswith(f"Assignment {record_id}:") or error.startswith(f"Assignment {record_id} (") for record_id in changed_ids)]
-    if business_date(campaign.start_date) <= campaign_today() and blocking_errors:
-        raise HTTPException(status_code=409, detail="Cannot issue self-evaluation: " + "; ".join(blocking_errors))
+    unschedule_if_incomplete(campaign, db, manager.id)
     db.commit()
     return build_campaign_self_evaluations(campaign_id, db)
 
@@ -2699,6 +2810,19 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session, group_ids: list[in
         .all()
     }
     locked_role_pairs = issued_role_pair_keys(campaign_id, db)
+    planned = db.query(models.FilledForm).filter(
+        models.FilledForm.campaign_id == campaign_id,
+        models.FilledForm.company_group_id.in_(assigned_group_ids),
+        models.FilledForm.evaluator_id != models.FilledForm.evaluatee_id,
+    ).all() if assigned_group_ids else []
+    employee_ids = {employee_id for row in planned for employee_id in (row.evaluator_id, row.evaluatee_id)}
+    employee_roles = dict(db.query(models.Employee.id, models.Employee.company_role_id).filter(
+        models.Employee.id.in_(employee_ids)).all()) if employee_ids else {}
+    required_pairs = {
+        (row.company_group_id, employee_roles[row.evaluator_id], employee_roles[row.evaluatee_id])
+        for row in planned if not assignment_is_immutable(row)
+        and row.evaluator_id in employee_roles and row.evaluatee_id in employee_roles
+    }
 
     matrices = []
     for group in groups:
@@ -2715,11 +2839,14 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session, group_ids: list[in
                     "form_id": rule.form_id if rule is not None else None,
                     "rule_id": rule.id if rule is not None else None,
                     "locked": rule is not None and (group.id, evaluator_role.id, evaluatee_role.id) in locked_role_pairs,
+                    "required": (group.id, evaluator_role.id, evaluatee_role.id) in required_pairs,
                 })
         matrices.append({
             "group_id": group.id,
             "group_name": group.name,
             "role_pairs": role_pairs,
+            "required_count": sum(pair["required"] for pair in role_pairs),
+            "configured_required_count": sum(pair["required"] and pair["form_id"] is not None for pair in role_pairs),
         })
 
     forms = db.query(models.Form).order_by(models.Form.name.asc()).all()
@@ -2859,7 +2986,7 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    require_mutable_campaign_configuration(campaign)
+    require_mutable_campaign_plan(campaign)
 
     assigned_group_ids = set(get_campaign_assigned_group_ids(campaign_id, db))
     form_ids = {form_id for (form_id,) in db.query(models.Form.id).all()}
@@ -2921,13 +3048,9 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
         evaluator = db.query(models.Employee).filter(models.Employee.id == assignment.evaluator_id).first()
         evaluatee = db.query(models.Employee).filter(models.Employee.id == assignment.evaluatee_id).first()
         form_id = selected_rules.get((assignment.company_group_id, evaluator.company_role_id, evaluatee.company_role_id)) if evaluator and evaluatee else None
-        if form_id is None:
-            db.delete(assignment)
-        else:
-            assignment.form_id = form_id
+        assignment.form_id = form_id
     db.flush()
-    validate_scheduled_campaign(campaign, db)
-    ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=manager.id)
+    unschedule_if_incomplete(campaign, db, manager.id)
     db.commit()
 
     return build_campaign_rule_matrix(campaign_id, db)
@@ -2949,48 +3072,13 @@ def validate_matrix_issued_assignments(existing_by_pair, scoped_pairs, selected_
         raise HTTPException(status_code=409, detail="Issued evaluations cannot be removed from the matrix. Reload and keep their selections")
 
     new_tasks = set()
-    for group_id, evaluator_id, evaluatee_id, form_id in requested_tasks:
+    for group_id, evaluator_id, evaluatee_id, _form_id in requested_tasks:
         if (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
             continue
-        task = (evaluator_id, evaluatee_id, form_id)
+        task = (evaluator_id, evaluatee_id)
         if task in existing_tasks or task in new_tasks:
             raise HTTPException(status_code=409, detail="This evaluation already exists in another group; select it in only one group")
         new_tasks.add(task)
-
-
-def validate_matrix_form_readiness(rule_matrix):
-    valid_form_ids = {form["id"] for form in rule_matrix["forms"]}
-    groups = []
-    for group in rule_matrix["groups"]:
-        missing_pairs = [
-            {"evaluator_role_id": pair["evaluator_role_id"], "evaluatee_role_id": pair["evaluatee_role_id"]}
-            for pair in group["role_pairs"]
-            if pair["form_id"] not in valid_form_ids
-        ]
-        required = len(group["role_pairs"])
-        groups.append({
-            "group_id": group["group_id"],
-            "group_name": group["group_name"],
-            "required": required,
-            "configured": required - len(missing_pairs),
-            "missing": len(missing_pairs),
-            "missing_role_pairs": missing_pairs,
-        })
-    required = sum(group["required"] for group in groups)
-    missing = sum(group["missing"] for group in groups)
-    if not groups or not any(group["role_pairs"] for group in rule_matrix["groups"]) or missing:
-        raise HTTPException(status_code=409, detail={
-            "code": "form_assignments_incomplete",
-            "message": (
-                "Select and save a campaign group before editing the evaluation matrix" if not groups else
-                "Selected groups have no role relationships to configure" if required == 0 else
-                f"Assign valid forms to {missing} role relationships before editing the evaluation matrix"
-            ),
-            "required": required,
-            "configured": required - missing,
-            "missing": missing,
-            "groups": groups,
-        })
 
 
 @app.put("/campaigns/{campaign_id}/evaluation-matrix", response_model=schemas.CampaignEvaluationMatrixUpdateResponse)
@@ -2999,9 +3087,7 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    require_mutable_campaign_configuration(campaign)
-
-    validate_matrix_form_readiness(build_campaign_rule_matrix(campaign_id, db))
+    require_mutable_campaign_plan(campaign)
 
     assigned_group_ids = set(get_campaign_assigned_group_ids(campaign_id, db))
     group_members_by_group = {
@@ -3061,18 +3147,14 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
                 # Another group already issued this employee's single campaign-wide task.
                 continue
             form_id = self_form_ids.get(assignment.evaluator_id)
-            if form_id is None:
-                raise HTTPException(status_code=400, detail="Select this employee's self-evaluation form before issuing a task")
             desired_assignments.add((*unique_group_pair, form_id))
             continue
         form_id = get_form_id_for_employee_pair(campaign_id, assignment.company_group_id, evaluator, evaluatee, db)
-        if form_id is None:
-            raise HTTPException(status_code=400, detail="No form rule exists for this evaluator/evaluatee role relationship")
         desired_assignments.add((*unique_group_pair, form_id))
 
     # Multiple groups can contain the same person, but only one diagonal task may be issued.
     self_tasks = {}
-    for task in sorted(desired_assignments):
+    for task in sorted(desired_assignments, key=lambda item: (item[0], item[1], item[2])):
         group_id, evaluator_id, evaluatee_id, form_id = task
         if evaluator_id != evaluatee_id or (group_id, evaluator_id, evaluatee_id) in existing_by_pair and assignment_is_immutable(existing_by_pair[(group_id, evaluator_id, evaluatee_id)]):
             continue
@@ -3090,7 +3172,7 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
 
     # Duplicate pairs are forbidden even when different groups specify different forms.
     existing_tasks = {
-        (form.evaluator_id, form.evaluatee_id, form.form_id)
+        (form.evaluator_id, form.evaluatee_id)
         for form in existing_forms
         if assignment_is_immutable(form)
     }
@@ -3100,7 +3182,6 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
 
     desired_by_pair = {(group_id, evaluator_id, evaluatee_id): form_id for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments}
     removed_count = 0
-    changed_ids = set()
     for pair, existing in existing_by_pair.items():
         if assignment_is_immutable(existing):
             continue
@@ -3110,8 +3191,6 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
             db.delete(existing)
             removed_count += 1
         else:
-            if existing.form_id != desired_by_pair[pair]:
-                changed_ids.add(existing.id)
             existing.form_id = desired_by_pair[pair]
 
     remaining_pairs = {(form.evaluator_id, form.evaluatee_id) for form in existing_forms if campaign.legacy_issuance_blocked or assignment_is_immutable(form) or (form.company_group_id, form.evaluator_id, form.evaluatee_id) in desired_by_pair}
@@ -3127,8 +3206,8 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
     for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
         if (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
             continue
-        form = db.query(models.Form).filter(models.Form.id == form_id).first()
-        if form is None:
+        form = db.query(models.Form).filter(models.Form.id == form_id).first() if form_id is not None else None
+        if form_id is not None and form is None:
             raise HTTPException(status_code=400, detail="Assignment form does not exist")
         record = models.FilledForm(
             campaign_id=campaign_id,
@@ -3146,44 +3225,68 @@ def update_campaign_evaluation_matrix(campaign_id: int, payload: schemas.Campaig
         created_records.append(record)
         created_count += 1
 
-    now = datetime.now(timezone.utc)
-    if campaign.status == models.CampaignStatus.ACTIVE.value and created_records and (
-        campaign.is_archived or campaign.start_date > now
-        or (campaign.end_date is not None and campaign.end_date <= now)
-    ):
-        raise HTTPException(status_code=409, detail="New assignments can only be issued during an active, unarchived campaign window")
+    if campaign.legacy_issuance_blocked and campaign.status in {
+        models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value,
+    } and created_records:
+        raise HTTPException(status_code=409, detail="New pairs in migrated campaigns require a verified issuance path")
     db.flush()
-    validate_scheduled_campaign(campaign, db)
-    if campaign.legacy_issuance_blocked and campaign.status == models.CampaignStatus.ACTIVE.value:
-        # Only rows created by this locked, authenticated request have reliable
-        # post-migration provenance. Never infer it from a missing snapshot.
-        for record in created_records:
-            form = db.query(models.Form).filter(models.Form.id == record.form_id).first()
-            problems = form_issuance_errors(form.questions if isinstance(form.questions, list) else [], db)
-            if problems:
-                raise HTTPException(status_code=409, detail="Cannot issue selected assignment: " + "; ".join(problems))
-            record.form_snapshot = form_snapshot_service.create_form_snapshot(form, db)
-            record.snapshot_status = "verified"
-        campaign_lifecycle.record_snapshot_issuance(db, campaign, len(created_records), actor_user_id=manager.id)
-        errors = []
-    elif not campaign.legacy_issuance_blocked:
-        errors = ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=manager.id)
-    else:
-        errors = []
-    if campaign.status == models.CampaignStatus.ACTIVE.value and any(record.form_snapshot is None for record in created_records):
-        raise HTTPException(status_code=409, detail="New active assignments must receive a valid questionnaire snapshot")
-    touched_ids = changed_ids | {record.id for record in created_records}
-    blocking_errors = [error for error in errors if any(error.startswith(f"Assignment {record_id}:") or error.startswith(f"Assignment {record_id} (") for record_id in touched_ids)]
-    if business_date(campaign.start_date) <= campaign_today() and blocking_errors:
-        raise HTTPException(status_code=409, detail="Cannot issue selected assignments: " + "; ".join(blocking_errors))
+    unschedule_if_incomplete(campaign, db, manager.id)
     db.commit()
-    matrix = build_campaign_evaluation_matrix(campaign_id, db, errors)
+    matrix = build_campaign_evaluation_matrix(campaign_id, db)
     return {
         **matrix,
         "created_count": created_count,
         "removed_count": removed_count,
         "kept_completed_count": sum(form.finish_date is not None for form in existing_forms),
     }
+
+
+@app.post("/campaigns/{campaign_id}/issue-planned", response_model=schemas.CampaignEvaluationMatrixResponse)
+def issue_ready_campaign_evaluations(campaign_id: int, db: Session = Depends(get_db),
+                                     manager: models.User = Depends(require_permission("campaigns.manage"))):
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.is_archived or campaign.status not in {
+        models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value,
+    } or campaign.legacy_issuance_blocked:
+        raise HTTPException(status_code=409, detail="Only active or review campaigns with verified provenance can issue planned evaluations")
+    now = datetime.now(timezone.utc)
+    if campaign.status == models.CampaignStatus.ACTIVE.value and (
+        campaign.start_date > now or campaign.end_date is not None and campaign.end_date <= now
+    ):
+        raise HTTPException(status_code=409, detail="The active campaign window has ended; move to Review before issuing")
+
+    planned = db.query(models.FilledForm).filter(
+        models.FilledForm.campaign_id == campaign_id, unissued_snapshot_filter(),
+        models.FilledForm.finish_date.is_(None), models.FilledForm.answers == [],
+    ).order_by(models.FilledForm.id).all()
+    if not planned:
+        raise HTTPException(status_code=409, detail="No planned evaluations are waiting for issuance")
+    group_ids = set(get_campaign_assigned_group_ids(campaign_id, db))
+    members = {group_id: {person.id: person for person, _ in get_group_employees(group_id, db)}
+               for group_id in group_ids}
+    self_forms = {row.employee_id: row.form_id for row in db.query(models.CampaignEmployeeSelfEvaluation)
+                  .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id)}
+    for row in planned:
+        group_members = members.get(row.company_group_id, {})
+        evaluator = group_members.get(row.evaluator_id)
+        evaluatee = group_members.get(row.evaluatee_id)
+        if evaluator is None or evaluatee is None:
+            raise HTTPException(status_code=409, detail="Planned evaluation employees must belong to an active selected group")
+        expected = self_forms.get(row.evaluator_id) if row.evaluator_id == row.evaluatee_id else get_form_id_for_employee_pair(
+            campaign_id, row.company_group_id, evaluator, evaluatee, db)
+        if expected is None:
+            raise HTTPException(status_code=409, detail="Assign questionnaires to all planned evaluation pairs before issuing")
+        if row.form_id != expected:
+            raise HTTPException(status_code=409, detail="A planned evaluation has a stale questionnaire; save its role assignments before issuing")
+
+    errors = issue_activation_snapshots(campaign, db, actor_user_id=manager.id)
+    if errors:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Cannot issue planned evaluations: " + "; ".join(errors))
+    db.commit()
+    return build_campaign_evaluation_matrix(campaign_id, db)
 
 
 @app.get("/campaigns/{campaign_id}/setup-preview", response_model=schemas.CampaignSetupPreviewResponse)
@@ -3298,8 +3401,6 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
             evaluatee = members[item.company_group_id][item.evaluatee_id]
             form_id = (self_forms.get(item.evaluator_id) if item.evaluator_id == item.evaluatee_id else
                        rules.get((item.company_group_id, evaluator.company_role_id, evaluatee.company_role_id)))
-            if form_id is None:
-                raise HTTPException(status_code=400, detail="An assignment needs a saved self-evaluation or role rule")
             selected[key] = form_id
 
         existing_assignments = db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign_id).all()
@@ -3309,9 +3410,9 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
             if key in existing_pairs:
                 raise HTTPException(status_code=409, detail="Duplicate historical matrix assignments must be resolved")
             existing_pairs.add(key)
-            if assignment_is_immutable(row) and selected.get(key) != row.form_id:
+            if assignment_is_immutable(row) and (key not in selected or selected[key] != row.form_id):
                 raise HTTPException(status_code=409, detail="Issued evaluations cannot be changed or removed")
-            if campaign.legacy_issuance_blocked and not assignment_is_immutable(row) and selected.get(key) != row.form_id:
+            if campaign.legacy_issuance_blocked and not assignment_is_immutable(row) and (key not in selected or selected[key] != row.form_id):
                 raise HTTPException(status_code=409, detail="Historical planned assignments cannot be changed")
         relocated = {}
         for row in existing_assignments:
@@ -3328,12 +3429,11 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
                         continue
                     form_id = (self_forms.get(pair[0]) if pair[0] == pair[1] else rules.get(
                         (group_id, people[pair[0]].company_role_id, people[pair[1]].company_role_id)))
-                    if form_id is not None:
-                        target = (group_id, *pair)
-                        selected[target] = form_id
-                        selected_people.add(pair)
-                        candidates = [target]
-                        break
+                    target = (group_id, *pair)
+                    selected[target] = form_id
+                    selected_people.add(pair)
+                    candidates = [target]
+                    break
             if candidates:
                 relocated[row.id] = candidates[0]
         existing_rules = {(row.company_group_id, row.evaluator_role_id, row.evaluatee_role_id): row for row in
@@ -3381,7 +3481,7 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
                                          evaluatee_id=key[2], form_id=form_id, status_id=status.id,
                                          finish_date=None, answers=[], form_snapshot=None, snapshot_status=None))
         db.flush()
-        validate_scheduled_campaign(campaign, db)
+        unschedule_if_incomplete(campaign, db, manager.id)
         for other in affected.values():
             validate_scheduled_campaign(other, db)
         db.commit()
@@ -3395,6 +3495,33 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
 def get_forms(db: Session = Depends(get_db),
               _reader: models.User = Depends(require_permission("forms.read"))):
     return db.query(models.Form).order_by(models.Form.id.desc()).all()
+
+
+@app.post("/forms/ai/generate", response_model=schemas.FormAIGenerateResponse)
+def generate_form_draft(request: schemas.FormAIGenerateRequest, db: Session = Depends(get_db),
+                        _manager: models.User = Depends(require_permission("forms.manage"))):
+    def validation_errors(draft: dict) -> list[str]:
+        if not all(section["section_id"] is not None for section in draft["sections"]):
+            return []  # Proposed sections have no DB IDs until HR approves them.
+        blocks = [{"type": "section", "section_id": section["section_id"], "questions": section["questions"]}
+                  for section in draft["sections"]]
+        blocks.extend({"type": "question", "question": question} for question in draft["standalone_questions"])
+        errors = form_issuance_errors(blocks, db)
+        feedback = []
+        for error in errors:
+            if "option" in error.lower():
+                feedback.append("Choice questions need at least two distinct, labeled options")
+            elif "scale" in error.lower() or "maximum" in error.lower():
+                feedback.append("Rating scales need integer endpoints 1 and 5 with higher values better")
+            elif "section" in error.lower():
+                feedback.append("Every section must be nonempty and reference a unique existing Section")
+            elif "id" in error.lower():
+                feedback.append("Every question needs a unique ID")
+            else:
+                feedback.append("Every question must meet the form issuance rules")
+        return list(dict.fromkeys(feedback))
+
+    return ai_form_generation_service.generate(request, db, validate_draft=validation_errors)
 
 
 @app.get("/form-templates", response_model=list[schemas.FormTemplateResponse])
