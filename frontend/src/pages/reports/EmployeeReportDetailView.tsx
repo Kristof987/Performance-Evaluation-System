@@ -71,7 +71,7 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
         </div>;
       })}</div>}
     </section>
-    <div id="employee-question-analytics"><QuestionAnalytics campaignId={data.campaign.id} getAccessToken={getAccessToken} scope={{ employee_id: data.employee.id }} /></div>
+    <div id="employee-question-analytics"><QuestionAnalytics campaignId={data.campaign.id} getAccessToken={getAccessToken} scope={{ employee_id: data.employee.id }} feedbackStatus={data.campaign.campaign_status} /></div>
     <div id="employee-ai-analysis"><EmployeeAIAnalysisPanel scope={{ type: 'employee', campaignId: data.campaign.id, employeeId: data.employee.id }} getAccessToken={getAccessToken} /></div>
     <section className="reports-card reports-employee-coverage">
       <h2>Evaluation coverage</h2>

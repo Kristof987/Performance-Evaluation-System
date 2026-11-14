@@ -16,7 +16,7 @@ import { useHrDashboard } from './hooks/useHrDashboard';
 function HrHome() {
   const navigate = useNavigate();
   const { state } = useAppAuth();
-  const auth0User = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
+  const auth0User = state.status === 'authenticated' ? state.user : null;
   const canManageCampaigns = auth0User?.permissions.includes('campaigns.manage') ?? false;
   const canReadAssigned = auth0User?.permissions.includes('evaluations.read_assigned') ?? false;
   const canReadReports = auth0User?.permissions.includes('reports.read') ?? false;

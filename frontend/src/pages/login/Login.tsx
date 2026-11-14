@@ -9,27 +9,31 @@ import './Login.css';
 
 function LoginWithAuth0() {
   const { state } = useAppAuth();
+  return <LoginContent showDevelopmentLogin={import.meta.env.DEV && (
+    state.status === 'unauthenticated' || state.status === 'error' || state.mode === 'development'
+  )} auth0Content={<Auth0SignIn />} />;
+}
+
+function Login() {
+  const { state } = useAppAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   useEffect(() => {
-    if (state.status !== 'authenticated' || state.mode !== 'auth0') return;
-    const saved = sessionStorage.getItem('auth0ReturnTo');
+    if (state.status !== 'authenticated') return;
+    const saved = state.mode === 'auth0' ? sessionStorage.getItem('auth0ReturnTo') : (location.state as { from?: string } | null)?.from;
     sessionStorage.removeItem('auth0ReturnTo');
     const dashboard = getAuthenticatedDashboardPath(state.user.permissions);
     const target = saved?.startsWith('/') && !saved.startsWith('//') && !saved.startsWith('/\\') && saved !== '/'
       ? saved : dashboard;
     navigate(target, { replace: true });
-  }, [state, navigate]);
-  if (state.status === 'authenticated' && state.mode === 'auth0') return <main role="status">Opening your dashboard...</main>;
-  return <LoginContent showDevelopmentLogin={import.meta.env.DEV && (
-    state.status === 'unauthenticated' || state.mode === 'development'
-  )} auth0Content={<Auth0SignIn />} />;
-}
-
-function Login() {
+  }, [state, navigate, location.state]);
+  if (state.status === 'authenticated') return <main role="status">Opening your dashboard...</main>;
   return AUTH0_CONFIGURED
     ? <LoginWithAuth0 />
     : <LoginContent showDevelopmentLogin={import.meta.env.DEV} auth0Content={
-        <p className="login-error" role="alert">Auth0 sign-in is unavailable. Set the VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID and VITE_AUTH0_AUDIENCE environment variables.</p>
+        import.meta.env.DEV
+          ? <p className="login-support">Auth0 is not configured. Use development identity selection below.</p>
+          : <p className="login-error" role="alert">Auth0 sign-in is unavailable. Set the VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID and VITE_AUTH0_AUDIENCE environment variables.</p>
       } />;
 }
 
@@ -63,12 +67,12 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
       }
 
       const loggedInUser = await response.json();
-      if (!selectDevelopmentUser(loggedInUser)) return;
+      if (!await selectDevelopmentUser(loggedInUser)) return;
       const from = (location.state as { from?: unknown } | null)?.from;
       const landing = isHrOrManagerRole(loggedInUser.role_name ?? null) ? '/hr-home' : '/employee-home';
       navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : landing, { replace: true });
-    } catch {
-      setErrorMessage('Could not connect to Compass. Please try again.');
+    } catch (cause) {
+      setErrorMessage(cause instanceof Error ? cause.message : 'Could not connect to Compass. Please try again.');
     } finally {
       pending.current = false;
       setIsSubmitting(false);
@@ -104,12 +108,6 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
                 onChange={(event) => { setName(event.target.value); setErrorMessage(''); }}
               />
             </div>
-            <div className="form-field">
-              <label className="form-label" htmlFor="password">Password <span className="login-optional">(optional for development)</span></label>
-              <input className="form-control" id="password" type="password" autoComplete="off"
-                placeholder="Enter your password" disabled={isSubmitting} />
-            </div>
-
             {errorMessage && <p className="login-error" id="login-error" role="alert">{errorMessage}</p>}
 
             <button className="btn btn-primary login-submit" type="submit" disabled={isSubmitting}>

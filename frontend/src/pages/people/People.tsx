@@ -1,5 +1,4 @@
 import { getUserInitials } from '../layout/sidebar-user';
-import { useAuth0 } from '@auth0/auth0-react';
 import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import AppLayout from '../layout/AppLayout';
@@ -759,9 +758,8 @@ function ImportPanel({
 }
 
 export default function People() {
-  const { getAccessTokenSilently } = useAuth0();
-  const { state, retryAuth0 } = useAppAuth();
-  const auth0User = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
+  const { state, retryAuth0, getAccessToken: getAccessTokenSilently } = useAppAuth();
+  const auth0User = state.status === 'authenticated' ? state.user : null;
   const permissions = auth0User?.permissions ?? [];
   const canManageGroups = permissions.includes('groups.manage');
   const canManageEmployees = permissions.includes('employees.manage') && canManageGroups;

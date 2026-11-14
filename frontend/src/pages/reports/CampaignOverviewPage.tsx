@@ -5,9 +5,11 @@ import { fetchCampaignRatingDistribution, fetchCampaignReportOverview, fetchEmpl
 import { ComparisonChart, Histogram, HorizontalChart } from './components/OverviewCharts';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsKpiPanel from './components/ReportsKpiPanel';
+import EvaluationQualitySummary from './components/EvaluationQualitySummary';
 import ReportsLayout from './ReportsLayout';
-import type { CampaignRatingDistribution, CampaignReportOverview, EmployeeReportsOverview, ReportSectionScore, RolesReport } from './types/reports.types';
+import type { CampaignRatingDistribution, CampaignReportOverview, EmployeeReportsOverview, ReportCampaignOption, ReportSectionScore, RolesReport } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
+import { useAppAuth } from '../../auth/AppAuth';
 
 function DashboardCard({ title, info, children, actions, className = '' }: { title: string; info: string; children: ReactNode; actions?: ReactNode; className?: string }) {
   return <section className={`reports-card reports-dashboard-card ${className}`}><div className="reports-dashboard-card-heading"><div className="reports-dashboard-card-title"><h2>{title}</h2><span className="reports-info-icon" title={info} aria-label={info} tabIndex={0}><Info size={15} /></span></div>{actions}</div>{children}</section>;
@@ -48,7 +50,7 @@ export default function CampaignOverviewPage() {
   const selectedCampaignId = Number(campaignId);
   const validCampaignId = Number.isSafeInteger(selectedCampaignId) && selectedCampaignId > 0;
 
-  return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{(layoutState) => <OverviewContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layoutState} />}</ReportsLayout>;
+  return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null} allowQualityPreview>{(layoutState) => <OverviewContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layoutState} />}</ReportsLayout>;
 }
 
 function OverviewContent({
@@ -62,7 +64,7 @@ function OverviewContent({
 }: {
   selectedCampaignId: number;
   validCampaignId: boolean;
-  campaigns: Array<{ id: number }>;
+  campaigns: ReportCampaignOption[];
   getAccessToken: AccessTokenGetter | undefined;
   loadingCampaigns: boolean;
   campaignsError: string;
@@ -75,12 +77,17 @@ function OverviewContent({
   const [distributionError, setDistributionError] = useState(false);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const { state } = useAppAuth();
+  const qualityAuthorized = state.status === 'authenticated' && state.user.permissions.includes('reports.read') && state.user.permissions.includes('campaigns.manage');
+  const actorId = state.status === 'authenticated' ? state.user.id : null;
+  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId);
+  const qualityPreview = !!(qualityAuthorized && selectedCampaign && !selectedCampaign.is_archived && (selectedCampaign.campaign_status === 'active' || selectedCampaign.campaign_status === 'paused'));
   const tokenRef = useRef(getAccessToken);
   tokenRef.current = getAccessToken;
 
   useEffect(() => {
     const token = tokenRef.current;
-    if (!validCampaignId || !token) return undefined;
+    if (!validCampaignId || !token || qualityPreview) return undefined;
     const controller = new AbortController();
     setData(null);
     setRoles(null);
@@ -100,12 +107,13 @@ function OverviewContent({
     fetchEmployeeReportsOverview(token, selectedCampaignId, controller.signal).then((result) => { if (!controller.signal.aborted) setEmployees(result); }).catch(() => { if (!controller.signal.aborted) setEmployees(null); });
     fetchCampaignRatingDistribution(token, selectedCampaignId, controller.signal).then((result) => { if (!controller.signal.aborted) setDistribution(result); }).catch(() => { if (!controller.signal.aborted) setDistributionError(true); });
     return () => controller.abort();
-  }, [!!getAccessToken, reloadKey, selectedCampaignId, validCampaignId]);
+  }, [!!getAccessToken, reloadKey, selectedCampaignId, validCampaignId, qualityPreview]);
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
   if (campaignsError) return <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={retryCampaigns}>Retry</button></div>;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
+  if (qualityPreview) return <div className="reports-overview reports-overview-dashboard"><p className="reports-dashboard-note">Campaign performance charts become available in Review. Completed peer evaluations can already be checked for campaign-level quality patterns.</p><EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
   if (error) return <div className="reports-state reports-error" role="alert"><span>{error}</span><button className="btn btn-secondary" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></div>;
   if (data === null || data.campaign.id !== selectedCampaignId) return <div className="reports-state">Loading campaign analytics...</div>;
 
@@ -125,5 +133,5 @@ function OverviewContent({
     {groups.length > 0 && <DashboardCard key={`${selectedCampaignId}-groups`} title="Completion Rate by Group" info="Completed / assigned evaluations attributed to each assignment group. Click a bar for group details." className="reports-group-chart" actions={groups.length > 5 ? <Link className="reports-card-action" to={`${base}/groups`}>All groups</Link> : undefined}><HorizontalChart legend relaxed={groups.length <= 2} maximum={100} unit="%" series={groups.map((group, index) => ({ id: String(group.group_id), label: group.group_name, color: palette[index % palette.length], value: group.completion_rate, detail: `${group.completed_evaluations} / ${group.total_evaluations}`, href: `${base}/groups/${group.group_id}` }))} /></DashboardCard>}
     {people.length > 0 && <DashboardCard key={`${selectedCampaignId}-people`} title="Employee Comparison" info="Only employees with reportable peer scores in every issued campaign section are compared, so each overall score uses the same section basis."><ComparisonChart employeesPath={`${base}/employees`} series={people.map((employee, index) => ({ id: String(employee.employee_id), label: employee.employee_name, color: palette[index % palette.length], value: employee.performance_summary.overall_peer_score, href: `${base}/employees/${employee.employee_id}` }))} /></DashboardCard>}
     {reportableRoles.length > 0 && <DashboardCard key={`${selectedCampaignId}-roles`} title="Rating by Role" info="Privacy-cleared peer ratings received by evaluated role." className="reports-role-chart"><HorizontalChart legend series={reportableRoles.map((role, index) => ({ id: String(role.role_id), label: role.role_name, color: palette[index % palette.length], value: role.average_score, href: `${base}/roles/${role.role_id}` }))} /></DashboardCard>}
-  </div>{distributionError && <p className="reports-dashboard-note">Rating distribution could not be loaded.</p>}{distribution && !ratingAvailable && <p className="reports-dashboard-note">No privacy-released campaign rating distribution is available.</p>}{!sections.length && !ratingAvailable && !groups.length && !people.length && !distributionError && <p className="reports-dashboard-note">No privacy-cleared chart data is available for this campaign yet.</p>}{!people.length && (employees?.employees.length ?? 0) > 0 && <p className="reports-dashboard-note">Employee comparison is unavailable unless employees have reportable peer ratings for the same issued sections. <Link to={`${base}/employees`}>View all employees</Link></p>}</div>;
+  </div>{distributionError && <p className="reports-dashboard-note">Rating distribution could not be loaded.</p>}{distribution && !ratingAvailable && <p className="reports-dashboard-note">No privacy-released campaign rating distribution is available.</p>}{!sections.length && !ratingAvailable && !groups.length && !people.length && !distributionError && <p className="reports-dashboard-note">No privacy-cleared chart data is available for this campaign yet.</p>}{!people.length && (employees?.employees.length ?? 0) > 0 && <p className="reports-dashboard-note">Employee comparison is unavailable unless employees have reportable peer ratings for the same issued sections. <Link to={`${base}/employees`}>View all employees</Link></p>}<EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
 }

@@ -66,7 +66,7 @@ export default function Sidebar({
   const suppressNextClick = useRef(false);
 
   const { state, signOut } = useAppAuth();
-  const auth0User = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
+  const auth0User = state.status === 'authenticated' ? state.user : null;
   const sidebarUser = auth0User ? null : getSidebarUser();
   const navigate = useNavigate();
   const location = useLocation();

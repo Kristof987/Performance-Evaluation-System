@@ -38,6 +38,33 @@ export type ReviewFormValues = {
   source_template_id?: number;
 };
 
+export type AIGeneratedQuestion = {
+  id: string;
+  text: string;
+  type: 'Scale' | 'Single choice' | 'Multiple choice' | 'Text';
+  required: boolean;
+  helpText: string;
+  scale_direction: 'higher_is_better' | null;
+  scale_min: number | null;
+  scale_max: number | null;
+  min_label: string | null;
+  max_label: string | null;
+  options: ChoiceOption[] | null;
+};
+
+export type AIGeneratedForm = {
+  name: string;
+  description: string;
+  sections: Array<{ name: string; section_id: number | null; questions: AIGeneratedQuestion[] }>;
+  standalone_questions: AIGeneratedQuestion[];
+};
+
+export type AIGenerateRequest = {
+  description: string;
+  evaluation_type: 'peer' | 'self' | 'manager';
+  length: 'short' | 'standard' | 'detailed';
+};
+
 type FormResponse = {
   id: number;
   name: string;
@@ -105,6 +132,13 @@ async function requestApi<T>(getAccessToken: AccessTokenGetter, path: string, op
 export async function fetchForms(getAccessToken: AccessTokenGetter, signal: AbortSignal): Promise<ReviewForm[]> {
   const forms = await requestApi<FormResponse[]>(getAccessToken, '/forms', { signal }, 'Forms could not be loaded.');
   return forms.map(mapForm);
+}
+
+export function generateAIForm(getAccessToken: AccessTokenGetter, request: AIGenerateRequest, signal: AbortSignal): Promise<AIGeneratedForm> {
+  return requestApi<AIGeneratedForm>(getAccessToken, '/forms/ai/generate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request), signal,
+  }, 'Questionnaire draft could not be generated.');
 }
 
 export async function fetchFormTemplates(getAccessToken: AccessTokenGetter, signal: AbortSignal): Promise<ReviewForm[]> {

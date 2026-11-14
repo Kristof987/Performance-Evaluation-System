@@ -5,6 +5,7 @@ import EmployeeReportDetailView from './EmployeeReportDetailView';
 import EmployeeOverview from './components/EmployeeOverview';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsLayout from './ReportsLayout';
+import WrittenFeedbackPreview from './components/WrittenFeedbackPreview';
 import type { EmployeeReportDetail, EmployeeReportRow, EmployeeReportsOverview } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 
@@ -22,7 +23,13 @@ export function EmployeeReportsPage() {
   const { campaignId } = useParams();
   const selectedCampaignId = Number(campaignId);
   const validCampaignId = Number.isSafeInteger(selectedCampaignId) && selectedCampaignId > 0;
-  return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{(layout) => <EmployeeReportsContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layout} />}</ReportsLayout>;
+  return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null} allowWrittenFeedbackPreview>{(layout) => {
+    const campaign = layout.campaigns.find((item) => item.id === selectedCampaignId);
+    if (layout.getAccessToken && (campaign?.campaign_status === 'active' || campaign?.campaign_status === 'paused')) {
+      return <WrittenFeedbackPreview key={selectedCampaignId} campaignId={selectedCampaignId} targetList getAccessToken={layout.getAccessToken} />;
+    }
+    return <EmployeeReportsContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layout} />;
+  }}</ReportsLayout>;
 }
 
 function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccessToken, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; getAccessToken: AccessTokenGetter | undefined; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
@@ -89,7 +96,13 @@ export function EmployeeReportDetailPage() {
   const { campaignId, employeeId } = useParams();
   const selectedCampaignId = Number(campaignId);
   const selectedEmployeeId = Number(employeeId);
-  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ getAccessToken }) => <EmployeeReportDetailContent campaignId={selectedCampaignId} employeeId={selectedEmployeeId} getAccessToken={getAccessToken} />}</ReportsLayout>;
+  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null} allowWrittenFeedbackPreview>{({ getAccessToken, campaigns }) => {
+    const campaign = campaigns.find((item) => item.id === selectedCampaignId);
+    if (getAccessToken && Number.isSafeInteger(selectedEmployeeId) && selectedEmployeeId > 0 && (campaign?.campaign_status === 'active' || campaign?.campaign_status === 'paused')) {
+      return <div className="reports-overview"><p className="reports-dashboard-note">Employee performance statistics become available in Review. Submitted feedback received by this employee can be read now.</p><WrittenFeedbackPreview key={`${selectedCampaignId}-${selectedEmployeeId}`} campaignId={selectedCampaignId} employeeId={selectedEmployeeId} getAccessToken={getAccessToken} /></div>;
+    }
+    return <EmployeeReportDetailContent campaignId={selectedCampaignId} employeeId={selectedEmployeeId} getAccessToken={getAccessToken} />;
+  }}</ReportsLayout>;
 }
 
 function EmployeeReportDetailContent({ campaignId, employeeId, getAccessToken }: { campaignId: number; employeeId: number; getAccessToken: AccessTokenGetter | undefined }) {

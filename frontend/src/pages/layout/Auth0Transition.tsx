@@ -7,8 +7,8 @@ import './auth0-transition.css';
 
 function useAuth0Identity() {
   const { state } = useAppAuth();
-  if (state.status !== 'authenticated' || state.mode !== 'auth0') {
-    throw new Error('A linked Auth0 identity is required');
+  if (state.status !== 'authenticated') {
+    throw new Error('An authenticated identity is required');
   }
   return state.user;
 }
