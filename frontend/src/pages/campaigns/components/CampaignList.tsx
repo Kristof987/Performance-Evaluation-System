@@ -1,5 +1,6 @@
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { X } from 'lucide-react';
+import { Check, ChevronDown, Search, SlidersHorizontal, X } from 'lucide-react';
 import CampaignStatusBadge from './CampaignStatusBadge';
 import { formatDate } from '../campaign.utils';
 import type {
@@ -16,6 +17,16 @@ type Props = {
   setSearchQuery: (value: string) => void;
   setStatusFilter: (value: CampaignStatusFilter) => void;
 };
+const statuses: { value: CampaignStatusFilter; label: string }[] = [
+  { value: 'All statuses', label: 'All statuses' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'active', label: 'Active' },
+  { value: 'paused', label: 'Paused' },
+  { value: 'review', label: 'Review' },
+  { value: 'closed', label: 'Closed' },
+  { value: 'Archived', label: 'Archived' },
+];
 export default function CampaignList({
   campaignList,
   filteredCampaigns,
@@ -26,11 +37,39 @@ export default function CampaignList({
   setSearchQuery,
   setStatusFilter,
 }: Props) {
+  const [statusOpen, setStatusOpen] = useState(false);
+  const statusDropdown = useRef<HTMLDivElement>(null);
+  const statusTrigger = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!statusOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!statusDropdown.current?.contains(event.target as Node)) setStatusOpen(false);
+    }
+    function onFocusIn(event: FocusEvent) {
+      if (!statusDropdown.current?.contains(event.target as Node)) setStatusOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') { event.preventDefault(); setStatusOpen(false); statusTrigger.current?.focus(); return; }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const options = Array.from(statusDropdown.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);
+      if (!options.length) return;
+      event.preventDefault();
+      const current = options.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : event.key === 'ArrowDown' ? (current + 1) % options.length : (current - 1 + options.length) % options.length;
+      options[next].focus();
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('keydown', onKeyDown);
+    return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('focusin', onFocusIn); document.removeEventListener('keydown', onKeyDown); };
+  }, [statusOpen]);
+
   return (
     <>
-      <div className="campaign-filter-bar">
-        <div className="campaign-filters">
+      <div className="campaign-filter-bar" role="search" aria-label="Filter campaigns">
           <div className="campaign-search-field">
+            <Search className="campaign-search-icon" size={17} aria-hidden="true" />
             <input
               aria-label="Search campaigns"
               placeholder="Search campaigns..."
@@ -47,36 +86,11 @@ export default function CampaignList({
               </button>
             )}
           </div>
-          <select
-            aria-label="Filter by status"
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(
-                 event.target.value as CampaignStatusFilter,
-              )
-            }
-          >
-            <option>All statuses</option>
-             <option value="draft">Draft</option>
-             <option value="scheduled">Scheduled</option>
-             <option value="active">Active</option>
-             <option value="paused">Paused</option>
-             <option value="review">Review</option>
-              <option value="closed">Closed</option>
-              <option value="Archived">Archived</option>
-          </select>
-          <button
-            className="btn btn-secondary"
-            type="button"
-            disabled={searchQuery === '' && statusFilter === 'All statuses'}
-            onClick={() => {
-              setSearchQuery('');
-              setStatusFilter('All statuses');
-            }}
-          >
-            Reset
-          </button>
-        </div>
+          <div className="campaign-status-dropdown" ref={statusDropdown}>
+            <button ref={statusTrigger} className="campaign-status-trigger" type="button" aria-label={`Filter by status: ${statuses.find((status) => status.value === statusFilter)?.label ?? 'All statuses'}`} aria-haspopup="menu" aria-expanded={statusOpen} aria-controls={statusOpen ? 'campaign-status-menu' : undefined} onClick={() => setStatusOpen((open) => !open)} onKeyDown={(event) => { if (['ArrowDown', 'ArrowUp'].includes(event.key) && !statusOpen) { event.preventDefault(); setStatusOpen(true); requestAnimationFrame(() => { const options = statusDropdown.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'); options?.[event.key === 'ArrowUp' ? options.length - 1 : 0]?.focus(); }); } }}><SlidersHorizontal size={16} aria-hidden="true" /><span>{statuses.find((status) => status.value === statusFilter)?.label ?? 'All statuses'}</span><ChevronDown size={15} aria-hidden="true" /></button>
+            {statusOpen && <div className="campaign-status-menu" id="campaign-status-menu" role="menu" aria-label="Campaign status">{statuses.map((status) => <button key={status.value} type="button" role="menuitemradio" aria-checked={statusFilter === status.value} className={statusFilter === status.value ? 'selected' : ''} onClick={() => { setStatusFilter(status.value); setStatusOpen(false); statusTrigger.current?.focus(); }}>{status.label}{statusFilter === status.value && <Check size={15} aria-hidden="true" />}</button>)}</div>}
+          </div>
+          {(searchQuery !== '' || statusFilter !== 'All statuses') && <button className="campaign-clear-filters" type="button" onClick={() => { setSearchQuery(''); setStatusFilter('All statuses'); }}>Clear filters</button>}
       </div>
 
       <div className="campaign-table-wrap">

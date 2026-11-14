@@ -33,34 +33,7 @@
   color: var(--color-text-muted);
   font-size: 12px;
 }
-.campaign-page .campaign-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  overflow: hidden;
-  margin-bottom: 20px;
-}
-.campaign-page .campaign-stat {
-  display: grid;
-  gap: 8px;
-  padding: 18px 20px;
-  border-right: 1px solid var(--color-border);
-}
-.campaign-page .campaign-stat:last-child {
-  border-right: 0;
-}
-.campaign-page .campaign-stat span {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-.campaign-page .campaign-stat strong {
-  font-size: 28px;
-}
 @media (max-width: 700px) {
-  .campaign-page .campaign-stats,
   .campaign-page .campaign-overview-stats {
     grid-template-columns: 1fr;
   }
@@ -71,9 +44,4 @@
   .campaign-page .campaign-mini-stat:last-child {
     border-bottom: 0;
   }
-  .campaign-page .campaign-stat {
-    border-right: 0;
-    border-bottom: 1px solid var(--color-border);
-  }
-  .campaign-page .campaign-stat:last-child { border-bottom: 0; }
 }

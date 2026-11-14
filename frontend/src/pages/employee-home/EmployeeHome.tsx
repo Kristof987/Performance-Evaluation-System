@@ -43,7 +43,7 @@ type EmployeeHomeProps = { forceEmptyState?: boolean };
 
 export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomeProps) {
   const { state, getAccessToken, retryAuth0 } = useAppAuth();
-  const user = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
+  const user = state.status === 'authenticated' ? state.user : null;
   const userId = user?.id;
   const [evaluations, setEvaluations] = useState<AssignedEvaluation[]>([]);
   const [restrictedCampaigns, setRestrictedCampaigns] = useState<Array<{ campaignId: number; campaignName: string; status: 'paused' | 'closed' }>>([]);

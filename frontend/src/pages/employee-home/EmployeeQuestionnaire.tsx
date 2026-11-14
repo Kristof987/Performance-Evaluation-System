@@ -81,8 +81,8 @@ export default function EmployeeQuestionnaire() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { state, getAccessToken, retryAuth0 } = useAppAuth();
-  const userId = state.status === 'authenticated' && state.mode === 'auth0' ? state.user.id : undefined;
-  const canSubmit = state.status === 'authenticated' && state.mode === 'auth0'
+  const userId = state.status === 'authenticated' ? state.user.id : undefined;
+  const canSubmit = state.status === 'authenticated'
     && state.user.permissions.includes('evaluations.submit');
   const evaluationId = Number(id);
   const [questionnaire, setQuestionnaire] = useState<AssignedQuestionnaire | null>(null);
