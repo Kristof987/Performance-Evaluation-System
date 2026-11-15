@@ -252,7 +252,7 @@ class SettingsAuditEvent(Base):
     details = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
     __table_args__ = (
-        CheckConstraint("category IN ('privacy', 'ai', 'permissions')", name="ck_settings_audit_category"),
+        CheckConstraint("category IN ('privacy', 'ai', 'permissions', 'accounts')", name="ck_settings_audit_category"),
     )
 
 
@@ -469,6 +469,7 @@ class User(Base):
 
     __table_args__ = (
         UniqueConstraint("auth0_user_id", name="uq_users_auth0_user_id"),
+        CheckConstraint("invitation_status IN ('not_sent', 'sent', 'failed')", name="ck_users_invitation_status"),
     )
 
     system_role_id = Column(
@@ -496,6 +497,11 @@ class User(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    # Sign-in invitation sent through Auth0; see auth0_management.invite_user.
+    invitation_status = Column(String(16), nullable=False, default="not_sent", server_default="not_sent")
+    invitation_sent_at = Column(DateTime(timezone=True), nullable=True)
+    invitation_error = Column(String(64), nullable=True)
 
     employee = relationship("Employee", back_populates="user", uselist=False)
 

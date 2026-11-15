@@ -2,6 +2,8 @@ import { formatUserName } from '../layout/sidebar-user';
 
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 
+export type SignInStatus = 'Signed in' | 'Invited' | 'Invitation failed' | 'Not invited';
+
 export type Employee = {
   id: number;
   userId: number | null;
@@ -9,8 +11,12 @@ export type Employee = {
   role: string;
   groups: string[];
   groupIds: number[];
-  status: 'Active' | 'Invited';
+  status: 'Active' | 'Inactive';
   email: string;
+  signIn: SignInStatus;
+  signInLinked: boolean;
+  invitationSentAt: string | null;
+  invitationError: string | null;
 };
 
 export type Group = {
@@ -35,6 +41,8 @@ export type EmployeeFormValues = {
 export type EmployeeImportResult = {
   createdCount: number;
   errors: string[];
+  invitationsSent: number;
+  invitationErrors: string[];
 };
 
 export type GroupImportResult = {
@@ -58,6 +66,10 @@ type PeopleEmployeeResponse = {
   role_name: string;
   groups: PeopleGroupResponse[];
   is_active: boolean;
+  sign_in_status?: 'active' | 'invited' | 'failed' | 'not_invited';
+  sign_in_linked?: boolean;
+  invitation_sent_at?: string | null;
+  invitation_error?: string | null;
 };
 
 type PeopleResponse = {
@@ -82,9 +94,43 @@ function mapEmployee(employee: PeopleEmployeeResponse): Employee {
     role: employee.role_name,
     groups: employee.groups.map((group) => group.name),
     groupIds: employee.groups.map((group) => group.id),
-    status: employee.is_active ? 'Active' : 'Invited',
+    status: employee.is_active ? 'Active' : 'Inactive',
     email: employee.email,
+    signIn: SIGN_IN_LABELS[employee.sign_in_status ?? 'not_invited'],
+    signInLinked: employee.sign_in_linked ?? false,
+    invitationSentAt: employee.invitation_sent_at ?? null,
+    invitationError: employee.invitation_error ?? null,
   };
+}
+
+const SIGN_IN_LABELS: Record<NonNullable<PeopleEmployeeResponse['sign_in_status']>, SignInStatus> = {
+  active: 'Signed in', invited: 'Invited', failed: 'Invitation failed', not_invited: 'Not invited',
+};
+
+const INVITATION_ERRORS: Record<string, string> = {
+  account_exists: 'An Auth0 account already exists with this email address.',
+  provider_unavailable: 'Auth0 was unavailable. Resend the invitation later.',
+  email_failed: 'The sign-in account was created, but the email could not be sent. Resend the invitation.',
+  signup_rejected: 'Auth0 rejected the sign-up. Check that sign-ups are enabled on the database connection.',
+  invalid_provider_response: 'Auth0 returned an unexpected response.',
+  external_identity: 'This account signs in with an external provider.',
+  not_configured: 'Sign-in invitations are not configured on the server.',
+};
+
+export function invitationErrorMessage(code: string | null) {
+  return code ? INVITATION_ERRORS[code] ?? 'The invitation could not be sent.' : 'The invitation could not be sent.';
+}
+
+export async function resendInvitation(getAccessToken: AccessTokenGetter, employeeId: number): Promise<Employee> {
+  const response = await authenticatedApiFetch(getAccessToken, `/people/employees/${employeeId}/invitation`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null;
+    throw new Error(typeof detail === 'string' ? detail : 'The invitation could not be sent.');
+  }
+  return mapEmployee((await response.json()) as PeopleEmployeeResponse);
 }
 
 export async function fetchPeople(getAccessToken: AccessTokenGetter, signal: AbortSignal) {
@@ -153,7 +199,8 @@ export async function importEmployees(getAccessToken: AccessTokenGetter, file: F
     body: form,
   });
   const body = (await response.json().catch(() => null)) as
-    | { created_count?: number; errors?: string[]; detail?: string }
+    | { created_count?: number; errors?: string[]; detail?: string;
+      invitations_sent?: number; invitation_errors?: string[] }
     | null;
   if (!response.ok) {
     throw new Error(body?.detail || 'Employees could not be imported.');
@@ -161,6 +208,8 @@ export async function importEmployees(getAccessToken: AccessTokenGetter, file: F
   return {
     createdCount: body?.created_count ?? 0,
     errors: body?.errors ?? [],
+    invitationsSent: body?.invitations_sent ?? 0,
+    invitationErrors: body?.invitation_errors ?? [],
   };
 }
 

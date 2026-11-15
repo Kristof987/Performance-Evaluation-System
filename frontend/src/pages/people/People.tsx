@@ -22,7 +22,9 @@ import {
   fetchPeople,
   importEmployees,
   importGroups,
+  invitationErrorMessage,
   removeGroupMember,
+  resendInvitation,
   updateEmployee,
   updateGroup,
   type Employee,
@@ -34,7 +36,15 @@ import '../hr-home/hr-home.css';
 import '../hr-home/components/MetricsGrid.css';
 import './people.css';
 
-type SortKey = 'name' | 'role' | 'groups' | 'status';
+type SortKey = 'name' | 'role' | 'groups' | 'status' | 'signIn';
+
+const SIGN_IN_BADGES: Record<Employee['signIn'], string> = {
+  'Signed in': 'badge-success', Invited: 'badge-primary', 'Invitation failed': 'badge-danger', 'Not invited': 'badge-neutral',
+};
+
+function SignInBadge({ employee }: { employee: Employee }) {
+  return <span className={`badge ${SIGN_IN_BADGES[employee.signIn]} people-status`}>{employee.signIn}</span>;
+}
 type Page<T> = {
   items: T[];
   page: number;
@@ -821,6 +831,11 @@ export default function People() {
   const [groupSearch, setGroupSearch] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
+  const [employeeNotice, setEmployeeNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(null);
+  const [invitationMessage, setInvitationMessage] = useState<{ employeeId: number; tone: 'success' | 'error'; text: string } | null>(null);
+  const [isSendingInvitation, setIsSendingInvitation] = useState(false);
+  const editingEmployeeLinked = editingEmployeeId !== null
+    && (employees.find((employee) => employee.id === editingEmployeeId)?.signInLinked ?? false);
   const selectedGroup =
     groups.find((group) => group.id === selectedGroupId) ?? null;
   const selectedEmployee =
@@ -872,7 +887,7 @@ export default function People() {
     const matchesGroup =
       groupFilter === 'All groups' || employee.groups.includes(groupFilter);
     const matchesStatus =
-      statusFilter === 'All statuses' || employee.status === statusFilter;
+      statusFilter === 'All statuses' || employee.status === statusFilter || employee.signIn === statusFilter;
     return matchesSearch && matchesGroup && matchesStatus;
   });
 
@@ -1280,7 +1295,12 @@ export default function People() {
         email: employeeForm.email.trim(),
       };
       if (editingEmployeeId === null) {
-        await createEmployee(getAccessTokenSilently, payload);
+        const created = await createEmployee(getAccessTokenSilently, payload);
+        setEmployeeNotice(created.signIn === 'Invited'
+          ? { tone: 'success', text: `${created.name} was created and a sign-in invitation was sent to ${created.email}.` }
+          : created.signIn === 'Invitation failed'
+            ? { tone: 'warning', text: `${created.name} was created, but the invitation was not sent: ${invitationErrorMessage(created.invitationError)}` }
+            : { tone: 'warning', text: `${created.name} was created. Sign-in invitations are not configured, so no email was sent.` });
       } else {
         await updateEmployee(getAccessTokenSilently, editingEmployeeId, payload);
       }
@@ -1298,6 +1318,25 @@ export default function People() {
       );
     } finally {
       setIsSavingEmployee(false);
+    }
+  }
+
+  async function handleSendInvitation(employee: Employee) {
+    if (isSendingInvitation || !canManageEmployees) return;
+    setIsSendingInvitation(true);
+    setInvitationMessage(null);
+    try {
+      const updated = await resendInvitation(getAccessTokenSilently, employee.id);
+      setEmployees((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setInvitationMessage(updated.signIn === 'Invited'
+        ? { employeeId: employee.id, tone: 'success', text: `Invitation sent to ${updated.email}.` }
+        : { employeeId: employee.id, tone: 'error', text: invitationErrorMessage(updated.invitationError) });
+    } catch (error) {
+      handleAccessError(error);
+      setInvitationMessage({ employeeId: employee.id, tone: 'error',
+        text: error instanceof Error ? error.message : 'The invitation could not be sent.' });
+    } finally {
+      setIsSendingInvitation(false);
     }
   }
 
@@ -1327,9 +1366,13 @@ export default function People() {
       const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
       applyPeopleData(people);
       setEmployeeImportFile(null);
+      const failed = result.invitationErrors.length;
       setEmployeeImportMessage(
-        `${result.createdCount} employee${result.createdCount === 1 ? '' : 's'} imported successfully.`,
+        `${result.createdCount} employee${result.createdCount === 1 ? '' : 's'} imported. `
+        + `${result.invitationsSent} invitation${result.invitationsSent === 1 ? '' : 's'} sent`
+        + (failed ? `, ${failed} failed. You can resend them from each employee's details.` : '.'),
       );
+      setEmployeeImportErrors(result.invitationErrors);
       setEmployeePage(1);
     } catch (error) {
       handleAccessError(error);
@@ -1394,8 +1437,16 @@ export default function People() {
                   }}
                 >
                   <option>All statuses</option>
-                  <option>Active</option>
-                  <option>Invited</option>
+                  <optgroup label="Employment">
+                    <option>Active</option>
+                    <option>Inactive</option>
+                  </optgroup>
+                  <optgroup label="Sign-in">
+                    <option>Signed in</option>
+                    <option>Invited</option>
+                    <option>Invitation failed</option>
+                    <option>Not invited</option>
+                  </optgroup>
                 </select>
                 <button
                   className={`btn btn-secondary${employeeFiltersActive ? '' : ' people-reset-subtle'}`}
@@ -1407,6 +1458,12 @@ export default function People() {
                 </button>
               </div>
 
+              {employeeNotice && (
+                <div className={`people-notice people-notice-${employeeNotice.tone}`} role="status">
+                  <span>{employeeNotice.text}</span>
+                  <button className="link people-link-button" type="button" onClick={() => setEmployeeNotice(null)}>Dismiss</button>
+                </div>
+              )}
               <div className="card table-card">
                 <table className="table people-employee-table">
                   <thead>
@@ -1463,6 +1520,19 @@ export default function People() {
                           Status
                         </button>
                       </th>
+                      <th>
+                        <button
+                          className={
+                            sort.key === 'signIn'
+                              ? `active${sort.direction === 'asc' ? ' asc' : ''}`
+                              : ''
+                          }
+                          type="button"
+                          onClick={() => handleSort('signIn')}
+                        >
+                          Sign-in
+                        </button>
+                      </th>
                       <th></th>
                     </tr>
                   </thead>
@@ -1516,6 +1586,9 @@ export default function People() {
                             >
                               {employee.status}
                             </span>
+                          </td>
+                          <td>
+                            <SignInBadge employee={employee} />
                           </td>
                           <td>
                             {canManageEmployees &&
@@ -1696,6 +1769,20 @@ export default function People() {
                 <dd>{selectedEmployee.status}</dd>
               </div>
               <div>
+                <dt>Sign-in</dt>
+                <dd>
+                  <SignInBadge employee={selectedEmployee} />
+                  {selectedEmployee.signIn === 'Invited' && selectedEmployee.invitationSentAt && (
+                    <small className="people-signin-detail">
+                      Invitation sent {new Date(selectedEmployee.invitationSentAt).toLocaleString()}
+                    </small>
+                  )}
+                  {selectedEmployee.signIn === 'Invitation failed' && (
+                    <small className="people-signin-detail">{invitationErrorMessage(selectedEmployee.invitationError)}</small>
+                  )}
+                </dd>
+              </div>
+              <div>
                 <dt>Groups</dt>
                 <dd>
                   {selectedEmployee.groups.length > 0
@@ -1712,6 +1799,18 @@ export default function People() {
             >
               Edit employee
             </button>}
+            {canManageEmployees && selectedEmployee.status === 'Active' && selectedEmployee.signIn !== 'Signed in' && <button
+              className="btn btn-secondary people-button people-drawer-action"
+              type="button"
+              disabled={isSendingInvitation}
+              onClick={() => void handleSendInvitation(selectedEmployee)}
+            >
+              {isSendingInvitation ? 'Sending...' : selectedEmployee.signIn === 'Not invited' ? 'Send invitation' : 'Resend invitation'}
+            </button>}
+            {invitationMessage?.employeeId === selectedEmployee.id && (
+              <p className={invitationMessage.tone === 'success' ? 'people-invite-success' : 'people-invite-error'}
+                role={invitationMessage.tone === 'success' ? 'status' : 'alert'}>{invitationMessage.text}</p>
+            )}
           </div>
         )}
       </DetailDrawer>
@@ -1959,11 +2058,15 @@ export default function People() {
                     type="email"
                     placeholder="anna.molnar@company.com"
                     value={employeeForm.email}
+                    disabled={editingEmployeeLinked}
+                    aria-describedby={editingEmployeeLinked ? 'employee-email-locked' : undefined}
                     onChange={(event) =>
                       updateEmployeeForm('email', event.target.value)
                     }
                     aria-invalid={employeeFormErrors.email ? true : undefined}
                   />
+                  {editingEmployeeLinked && <small id="employee-email-locked" className="people-field-note">
+                    The email cannot be changed after the sign-in account is created.</small>}
                   <FieldError message={employeeFormErrors.email} />
                 </div>
                 <div className="form-field field full">

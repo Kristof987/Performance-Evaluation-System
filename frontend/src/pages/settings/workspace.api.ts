@@ -18,7 +18,7 @@ export type PermissionMatrix = {
   permissions: { name: string; description: string }[];
 };
 
-export type AuditCategory = 'lifecycle' | 'archive' | 'operation' | 'privacy' | 'ai' | 'permissions';
+export type AuditCategory = 'lifecycle' | 'archive' | 'operation' | 'privacy' | 'ai' | 'permissions' | 'accounts';
 
 export type AuditEntry = {
   id: string;

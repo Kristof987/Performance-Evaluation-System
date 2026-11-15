@@ -10,6 +10,7 @@ const CATEGORIES: { value: AuditCategory; label: string }[] = [
   { value: 'lifecycle', label: 'Campaign status' },
   { value: 'operation', label: 'Campaign operations' },
   { value: 'archive', label: 'Archiving' },
+  { value: 'accounts', label: 'Sign-in invitations' },
   { value: 'permissions', label: 'Permissions' },
   { value: 'privacy', label: 'Privacy settings' },
   { value: 'ai', label: 'AI settings' },

@@ -290,6 +290,11 @@ class PeopleEmployeeResponse(BaseModel):
     role_name: str
     groups: list[PeopleGroupResponse]
     is_active: bool
+    # active: linked and has signed in; invited: email sent; failed / not_invited otherwise.
+    sign_in_status: Literal["active", "invited", "failed", "not_invited"] = "not_invited"
+    sign_in_linked: bool = False
+    invitation_sent_at: datetime | None = None
+    invitation_error: str | None = None
 
 
 class PeopleResponse(BaseModel):
@@ -393,7 +398,7 @@ class PermissionMatrixUpdate(BaseModel):
 
 class AuditLogEntry(BaseModel):
     id: str
-    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions"]
+    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts"]
     occurred_at: datetime
     actor_user_id: int | None
     actor_name: str | None = None
@@ -425,6 +430,8 @@ class PeopleEmployeeUpdate(BaseModel):
 class PeopleEmployeeImportResponse(BaseModel):
     created_count: int
     errors: list[str] = Field(default_factory=list)
+    invitations_sent: int = 0
+    invitation_errors: list[str] = Field(default_factory=list)
 
 
 class PeopleGroupImportResponse(BaseModel):

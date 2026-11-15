@@ -148,6 +148,64 @@ def require_permission(*permission_names: str) -> Callable[..., models.User]:
     return check_permission
 
 
+def record_sign_in(user: models.User, db: Session) -> None:
+    """The app calls /auth/me on every start; store it as the last sign-in, at most every 5 minutes."""
+    now = datetime.now(timezone.utc)
+    if user.last_login is None or now - user.last_login > timedelta(minutes=5):
+        user.last_login = now
+        db.commit()
+
+
+def sign_in_status(user: models.User | None) -> str:
+    if user is None:
+        return "not_invited"
+    if user.auth0_user_id and user.last_login is not None:
+        return "active"
+    if user.invitation_status in {"sent", "failed"}:
+        return "invited" if user.invitation_status == "sent" else "failed"
+    return "not_invited"
+
+
+def invitation_fields(user: models.User | None) -> dict:
+    return {"sign_in_status": sign_in_status(user),
+            "sign_in_linked": bool(user and user.auth0_user_id),
+            "invitation_sent_at": user.invitation_sent_at if user else None,
+            "invitation_error": user.invitation_error if user else None}
+
+
+INVITATION_ERROR_MESSAGES = {
+    "account_exists": "an Auth0 account already exists with this email",
+    "provider_unavailable": "Auth0 was unavailable; resend the invitation later",
+    "email_failed": "the account was created but the email could not be sent; resend the invitation",
+    "signup_rejected": "Auth0 rejected the sign-up; check that sign-ups are enabled on the connection",
+    "invalid_provider_response": "Auth0 returned an unexpected response",
+    "external_identity": "this account signs in with an external provider",
+}
+
+
+def invitation_error_message(code: str | None) -> str:
+    return INVITATION_ERROR_MESSAGES.get(code or "", "the invitation could not be sent")
+
+
+def normalized_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def email_taken(email: str, db: Session, *, except_user_id: int | None = None) -> bool:
+    query = db.query(models.User.id).filter(func.lower(models.User.email) == normalized_email(email))
+    if except_user_id is not None:
+        query = query.filter(models.User.id != except_user_id)
+    return query.first() is not None
+
+
+def group_member_counts(group_ids: list[int], db: Session) -> dict[int, int]:
+    if not group_ids:
+        return {}
+    return dict(db.query(models.employee_company_groups.c.company_group_id, func.count())
+                .filter(models.employee_company_groups.c.company_group_id.in_(group_ids))
+                .group_by(models.employee_company_groups.c.company_group_id).all())
+
+
 @app.get("/auth/me", response_model=schemas.AuthMeResponse)
 def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     roles = (
@@ -172,6 +230,7 @@ def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Dep
         .order_by(models.SystemPermission.name)
         .all()
     )
+    record_sign_in(user, db)
     employee = user.employee
     return {"id": user.id, "username": user.username, "email": user.email,
             "system_role_id": user.system_role_id, "system_role_name": roles.system_role_name,
@@ -324,6 +383,7 @@ def get_people(db: Session = Depends(get_db),
                     if group_id in groups_by_id
                 ],
                 "is_active": employee.is_active,
+                **invitation_fields(employee.user),
             }
             for employee in employees
         ],
@@ -462,7 +522,7 @@ def put_permission_matrix(update: schemas.PermissionMatrixUpdate, db: Session = 
 
 @app.get("/workspace/audit", response_model=schemas.AuditLogResponse)
 def get_audit_log(
-    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions"] | None = Query(default=None),
+    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts"] | None = Query(default=None),
     campaign_id: int | None = Query(default=None, gt=0),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=10_000),
@@ -516,15 +576,15 @@ def employee_username(name: str, email: str, used: set[str]) -> str:
 
 @app.post("/people/employees", response_model=schemas.PeopleEmployeeResponse)
 def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session = Depends(get_db),
-                           _employee_manager: models.User = Depends(require_permission("employees.manage")),
+                           actor: models.User = Depends(require_permission("employees.manage")),
                            _group_manager: models.User = Depends(require_permission("groups.manage"))):
     name = " ".join(employee.name.split())
     role_name = employee.role.strip()
     if name == "" or role_name == "":
         raise HTTPException(status_code=400, detail="Name and role are required")
 
-    existing_user = db.query(models.User.id).filter(models.User.email == employee.email).first()
-    if existing_user is not None:
+    email = normalized_email(employee.email)
+    if email_taken(email, db):
         raise HTTPException(status_code=409, detail="Employee email already exists")
 
     group_ids = sorted(set(employee.group_ids))
@@ -546,8 +606,8 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
         if system_role is None:
             raise HTTPException(status_code=500, detail="Employee system role is unavailable")
         new_user = models.User(
-            username=employee_username(name, employee.email, used),
-            email=employee.email,
+            username=employee_username(name, email, used),
+            email=email,
             password_hash="",
             system_role_id=system_role.id,
             is_active=True,
@@ -571,7 +631,8 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
     except Exception:
         db.rollback()
         raise
-    db.refresh(new_user)
+    new_user = auth0_management.invite_user(new_user, actor, db)
+    counts = group_member_counts([group.id for group in groups], db)
 
     return {
         "id": new_employee.id,
@@ -586,11 +647,12 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
                 "id": group.id,
                 "name": group.name,
                 "description": group.description,
-                "member_count": 0,
+                "member_count": counts.get(group.id, 0),
             }
             for group in groups
         ],
         "is_active": new_employee.is_active,
+        **invitation_fields(new_user),
     }
 
 
@@ -610,14 +672,12 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
     if name == "" or role_name == "":
         raise HTTPException(status_code=400, detail="Name and role are required")
 
-    duplicate_user = (
-        db.query(models.User)
-        .filter(models.User.id != user.id)
-        .filter(models.User.email == employee.email)
-        .first()
-    )
-    if duplicate_user is not None:
+    email = normalized_email(employee.email)
+    if email_taken(email, db, except_user_id=user.id):
         raise HTTPException(status_code=409, detail="Employee email already exists")
+    if user.auth0_user_id and email != normalized_email(user.email):
+        # Auth0 still has the old address; changing only ours would send invitations and resets astray.
+        raise HTTPException(status_code=409, detail="The email cannot be changed after the sign-in account is created")
 
     company_role = get_or_create_company_role(role_name, db)
     group_ids = sorted(set(employee.group_ids))
@@ -641,7 +701,7 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
         ensure_group_membership_mutable(None, employee_id, db, role_change=True)
 
     person.full_name = name
-    user.email = employee.email
+    user.email = email
     person.company_role_id = company_role.id
 
     db.execute(
@@ -662,6 +722,7 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
         validate_scheduled_campaign(campaign, db)
     db.commit()
     db.refresh(person)
+    counts = group_member_counts([group.id for group in groups], db)
 
     return {
         "id": person.id,
@@ -676,11 +737,40 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
                 "id": group.id,
                 "name": group.name,
                 "description": group.description,
-                "member_count": 0,
+                "member_count": counts.get(group.id, 0),
             }
             for group in groups
         ],
         "is_active": person.is_active,
+        **invitation_fields(user),
+    }
+
+
+@app.post("/people/employees/{employee_id}/invitation", response_model=schemas.PeopleEmployeeResponse)
+def resend_employee_invitation(employee_id: int, db: Session = Depends(get_db),
+                               actor: models.User = Depends(require_permission("employees.manage"))):
+    person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    if person is None or person.user is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if not person.is_active or not person.user.is_active:
+        raise HTTPException(status_code=409, detail="Inactive employees cannot be invited")
+    if not auth0_management.password_reset_available():
+        raise HTTPException(status_code=503, detail="Sign-in invitations are not configured on the server")
+    user = auth0_management.invite_user(person.user, actor, db, enforce_cooldown=True)
+    group_ids = [group_id for (group_id,) in db.query(models.employee_company_groups.c.company_group_id)
+                 .filter(models.employee_company_groups.c.employee_id == person.id)]
+    groups = db.query(models.CompanyGroup).filter(models.CompanyGroup.id.in_(group_ids)) \
+        .order_by(models.CompanyGroup.name.asc()).all() if group_ids else []
+    counts = group_member_counts(group_ids, db)
+    role = db.get(models.CompanyRole, person.company_role_id)
+    return {
+        "id": person.id, "user_id": user.id, "username": user.username, "full_name": person.full_name,
+        "email": user.email, "company_role_id": person.company_role_id,
+        "role_name": role.name if role else "Unknown role",
+        "groups": [{"id": group.id, "name": group.name, "description": group.description,
+                    "member_count": counts.get(group.id, 0)} for group in groups],
+        "is_active": person.is_active,
+        **invitation_fields(user),
     }
 
 
@@ -908,7 +998,7 @@ def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get
 
 @app.post("/people/employees/import", response_model=schemas.PeopleEmployeeImportResponse)
 def import_people_employees(file: UploadFile = File(...), db: Session = Depends(get_db),
-                            _employee_manager: models.User = Depends(require_permission("employees.manage")),
+                            actor: models.User = Depends(require_permission("employees.manage")),
                             _role_assigner: models.User = Depends(require_permission("roles.assign"))):
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Please upload the provided .xlsx employee template.")
@@ -969,7 +1059,7 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
             errors.append(f"Row {row_number}: Employee Email Address already exists in the database.")
 
         seen_emails.add(email_key)
-        rows.append((name, email, company_role_name, system_role_name))
+        rows.append((row_number, name, email_key, company_role_name, system_role_name))
 
     if len(rows) == 0:
         errors.append("The uploaded template does not contain any employee rows.")
@@ -977,8 +1067,9 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
     if len(errors) > 0:
         return {"created_count": 0, "errors": errors}
 
+    created: list[tuple[int, models.User]] = []
     try:
-        for name, email, company_role_name, system_role_name in rows:
+        for row_number, name, email, company_role_name, system_role_name in rows:
             company_role = get_or_create_company_role(company_role_name, db)
             system_role = system_roles[system_role_name.casefold()]
             new_user = models.User(
@@ -992,6 +1083,7 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
             db.flush()
             db.add(models.Employee(user_id=new_user.id, full_name=" ".join(name.split()),
                                    company_role_id=company_role.id, is_active=True))
+            created.append((row_number, new_user))
         db.commit()
     except IntegrityError as error:
         db.rollback()
@@ -999,7 +1091,17 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
     except Exception:
         db.rollback()
         raise
-    return {"created_count": len(rows), "errors": []}
+
+    # Employees are already saved; a failed invitation can be resent from the People page.
+    invitations_sent, invitation_errors = 0, []
+    for row_number, new_user in created:
+        invited = auth0_management.invite_user(new_user, actor, db)
+        if invited.invitation_status == "sent":
+            invitations_sent += 1
+        elif invited.invitation_status == "failed":
+            invitation_errors.append(f"Row {row_number} ({invited.email}): {invitation_error_message(invited.invitation_error)}")
+    return {"created_count": len(rows), "errors": [], "invitations_sent": invitations_sent,
+            "invitation_errors": invitation_errors}
 
 
 def get_campaign_form_ids(campaign_id: int, db: Session):

@@ -82,6 +82,7 @@
 .settings-badge { background: var(--color-surface-muted); border-radius: var(--radius-pill); color: var(--color-text-secondary); display: inline-block; font-size: 11px; font-weight: 700; padding: 4px 9px; }
 .settings-badge.granted { background: var(--color-success-bg); color: var(--color-success); }
 .settings-badge.audit-permissions, .settings-badge.audit-privacy, .settings-badge.audit-ai { background: var(--color-primary-soft); color: var(--color-primary); }
+.settings-badge.audit-accounts { background: var(--color-success-bg); color: var(--color-success); }
 .settings-badge.audit-operation { background: var(--color-warning-bg); color: var(--color-warning); }
 .settings-audit-list { display: grid; list-style: none; margin: 0; padding: 0; }
 .settings-audit-list li { border-bottom: 1px solid var(--color-border); display: grid; gap: 6px; padding: 12px 0; }

@@ -183,7 +183,7 @@ def update_permission_matrix(actor: models.User, update: schemas.PermissionMatri
     return permission_matrix(db)
 
 
-AUDIT_CATEGORIES = ("lifecycle", "archive", "operation", "privacy", "ai", "permissions")
+AUDIT_CATEGORIES = ("lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts")
 
 
 def audit_log(db: Session, *, category: str | None, campaign_id: int | None,
@@ -240,7 +240,7 @@ def audit_log(db: Session, *, category: str | None, campaign_id: int | None,
         query = db.query(models.SettingsAuditEvent)
         if category is not None:
             query = query.filter(models.SettingsAuditEvent.category == category)
-        if category is None or category in {"privacy", "ai", "permissions"}:
+        if category is None or category in {"privacy", "ai", "permissions", "accounts"}:
             for row in query.order_by(models.SettingsAuditEvent.occurred_at.desc()).limit(window):
                 entries.append(schemas.AuditLogEntry(
                     id=f"settings-{row.id}", category=row.category, occurred_at=row.occurred_at,

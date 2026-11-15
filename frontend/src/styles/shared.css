@@ -162,3 +162,8 @@ textarea.form-control {
   background: var(--color-warning-bg);
   color: var(--color-warning);
 }
+
+.badge-danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
