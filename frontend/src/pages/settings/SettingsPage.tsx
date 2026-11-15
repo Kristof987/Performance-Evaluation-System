@@ -4,7 +4,8 @@ import AppLayout from '../layout/AppLayout';
 import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import SettingsNavigation from './SettingsNavigation';
-import { canOpenSection, isSettingsSection } from './settings-sections';
+import { canOpenSection, isSettingsSection, SETTINGS_GROUPS } from './settings-sections';
+import { usePageTitle } from '../../app/usePageTitle';
 import ProfileSettings from './sections/ProfileSettings';
 import SecuritySettings from './sections/SecuritySettings';
 import PreferenceSettings from './sections/PreferenceSettings';
@@ -45,6 +46,9 @@ export default function SettingsPage() {
       });
     return () => controller.abort();
   }, [userId, getAccessToken]);
+
+  const sectionLabel = SETTINGS_GROUPS.flatMap((group) => group.items).find((item) => item.id === section)?.label;
+  usePageTitle(sectionLabel, 'Settings');
 
   if (!isSettingsSection(section)) return <Navigate to="/settings/profile" replace />;
   if (userId !== null && !canOpenSection(section, permissions)) return <Navigate to="/settings/profile" replace />;

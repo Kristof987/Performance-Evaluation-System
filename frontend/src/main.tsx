@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router'
 import { Auth0Provider } from '@auth0/auth0-react'
@@ -8,8 +8,6 @@ import HrHome from './pages/hr-home/HrHome'
 import MyEvaluationsPage from './pages/hr-home/MyEvaluationsPage'
 import EmployeeHome from './pages/employee-home/EmployeeHome'
 import EmployeeQuestionnaire from './pages/employee-home/EmployeeQuestionnaire'
-import EmployeeReviewPreview from './pages/employee-home/EmployeeReviewPreview'
-import EmployeeResults from './pages/employee-results/EmployeeResults'
 import People from './pages/people/People'
 import Forms from './pages/forms/Forms'
 import { CampaignDetails, Campaigns } from './pages/campaigns/Campaigns'
@@ -23,110 +21,88 @@ import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/E
 import SettingsPage from './pages/settings/SettingsPage'
 import NotFound from './pages/layout/NotFound'
 import './styles/shared.css'
-import { getAuthenticatedDashboardPath } from './pages/layout/sidebar-user'
+import { ACCESS, hasAccess, type AccessRule } from './app/access'
+import { PageTitle } from './app/usePageTitle'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
 import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './auth/AppAuth'
-import { Auth0Unavailable, Auth0PersonalResultsUnavailable, Auth0PermissionDenied } from './pages/layout/Auth0Transition'
+import { Auth0PermissionDenied } from './pages/layout/Auth0Transition'
 import PreferencesProvider from './pages/settings/PreferencesProvider'
 import { applyTheme, cachedTheme } from './pages/settings/theme'
-
-function RoleHome() {
-  const { state } = useAppAuth()
-  return state.status === 'authenticated' && state.user.permissions.includes('campaigns.read') ? <HrHome /> : <EmployeeHome />
-}
 
 function EvaluationQualityRedirect() {
   const { campaignId } = useParams()
   return <Navigate to={`/reports/campaigns/${campaignId}`} replace />
 }
 
-function ProtectedPage({ children, hrOnly = false }: {
-  children: React.ReactNode;
-  hrOnly?: boolean;
-}) {
+/** Old questionnaire links (e.g. in bookmarks) keep working. */
+function LegacyEvaluationRedirect() {
+  const { id } = useParams()
+  const { search, hash } = useLocation()
+  return <Navigate to={`/evaluations/${id}${search}${hash}`} replace />
+}
+
+/** Requires a signed-in user and, when a rule is given, every permission it lists (see app/access.ts). */
+function ProtectedPage({ rule, children }: { rule?: AccessRule; children: ReactNode }) {
   const { state } = useAppAuth()
   const location = useLocation()
   if (state.status === 'loading') return <main role="status">Checking your PerfEval account...</main>
   if (state.status !== 'authenticated') {
     return <Navigate to="/" state={{ from: location.pathname + location.search + location.hash }} replace />
   }
-  const canReadCampaigns = state.user.permissions.includes('campaigns.read')
-  if (location.pathname === '/hr-home') {
-    return canReadCampaigns ? <HrHome /> : <Navigate to="/employee-home" replace />
+  if (rule && !hasAccess(state.user.permissions, rule)) {
+    return <Auth0PermissionDenied feature={rule.feature} required={rule.permissions.join(' and ')} activePage={rule.activePage} />
   }
-  if (location.pathname === '/employee-home' && canReadCampaigns) {
-    return <Navigate to="/hr-home" replace />
-  }
-  if (location.pathname === '/people') {
-    if (!state.user.permissions.includes('employees.read') || !state.user.permissions.includes('groups.read')) {
-      return <Auth0PermissionDenied />
-    }
-    return children
-  }
-  if (location.pathname === '/campaigns' || (location.pathname.startsWith('/campaigns/') && !location.pathname.endsWith('/completion'))) {
-    return state.user.permissions.includes('campaigns.read')
-      ? children : <Auth0PermissionDenied feature="Campaigns" required="campaigns.read" activePage="campaigns" />
-  }
-  if (location.pathname === '/forms') {
-    return state.user.permissions.includes('forms.read') && state.user.permissions.includes('sections.read')
-      ? children : <Auth0PermissionDenied feature="Forms" required="forms.read and sections.read" activePage="forms" />
-  }
-  if (location.pathname.startsWith('/campaigns/') && location.pathname.endsWith('/completion')) {
-    return canReadCampaigns ? children
-      : <Auth0PermissionDenied feature="Completion status" required="campaigns.read" activePage="campaigns" />
-  }
-  if (location.pathname === '/reports' || location.pathname.startsWith('/reports/')) {
-    return state.user.permissions.includes('reports.read') ? children
-      : <Auth0PermissionDenied feature="Reports" required="reports.read" activePage="reports" />
-  }
-  if (location.pathname === '/results' || location.pathname === '/employee-review-preview') {
-    return state.mode === 'development' ? children : <Auth0PersonalResultsUnavailable />
-  }
-  if (location.pathname === '/my-evaluations' || location.pathname === '/employee-home'
-    || location.pathname.startsWith('/employee-home/evaluations/') || location.pathname.startsWith('/evaluations/')) {
-    return state.user.permissions.includes('evaluations.read_assigned')
-      ? children : <Auth0PermissionDenied feature="Evaluations" required="evaluations.read_assigned" activePage="my-evaluations" />
-  }
-  if (location.pathname === '/settings' || location.pathname.startsWith('/settings/')) {
-    return state.user.permissions.includes('settings.read')
-      ? children : <Auth0PermissionDenied feature="Settings" required="settings.read" activePage="settings" />
-  }
-  if (hrOnly && !canReadCampaigns) return <Navigate to={getAuthenticatedDashboardPath(state.user.permissions)} replace />
-  return <Auth0Unavailable />
+  return children
+}
+
+function HrHomeRoute() {
+  const { state } = useAppAuth()
+  const permissions = state.status === 'authenticated' ? state.user.permissions : []
+  return hasAccess(permissions, ACCESS.campaigns) ? <HrHome /> : <Navigate to="/employee-home" replace />
+}
+
+function EmployeeHomeRoute() {
+  const { state } = useAppAuth()
+  const permissions = state.status === 'authenticated' ? state.user.permissions : []
+  if (hasAccess(permissions, ACCESS.campaigns)) return <Navigate to="/hr-home" replace />
+  return <ProtectedPage rule={ACCESS.evaluations}><EmployeeHome /></ProtectedPage>
+}
+
+/** A route's tab title plus its access check. Pages that know a more specific name refine the title. */
+function page(title: string[], element: ReactNode, rule?: AccessRule) {
+  return <><PageTitle parts={title} /><ProtectedPage rule={rule}>{element}</ProtectedPage></>
 }
 
 export default function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/hr-home" element={<ProtectedPage><RoleHome /></ProtectedPage>} />
-        <Route path="/my-evaluations" element={<ProtectedPage hrOnly><MyEvaluationsPage /></ProtectedPage>} />
-        <Route path="/employee-home" element={<ProtectedPage><EmployeeHome /></ProtectedPage>} />
-        <Route path="/employee-home/evaluations/:id" element={<ProtectedPage><EmployeeQuestionnaire /></ProtectedPage>} />
-        <Route path="/evaluations/:id" element={<ProtectedPage><EmployeeQuestionnaire /></ProtectedPage>} />
-        <Route path="/employee-review-preview" element={<ProtectedPage><EmployeeReviewPreview /></ProtectedPage>} />
-        <Route path="/results" element={<ProtectedPage><EmployeeResults /></ProtectedPage>} />
-        <Route path="/people" element={<ProtectedPage hrOnly><People /></ProtectedPage>} />
-        <Route path="/forms" element={<ProtectedPage hrOnly><Forms /></ProtectedPage>} />
-        <Route path="/campaigns" element={<ProtectedPage hrOnly><Campaigns /></ProtectedPage>} />
-        <Route path="/campaigns/:id" element={<ProtectedPage hrOnly><CampaignDetails /></ProtectedPage>} />
-        <Route path="/campaigns/:id/completion" element={<ProtectedPage hrOnly><CompletionStatus /></ProtectedPage>} />
-        <Route path="/reports" element={<ProtectedPage hrOnly><ReportsIndexPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId" element={<ProtectedPage hrOnly><CampaignOverviewPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId/detailed" element={<ProtectedPage hrOnly><DetailedResultsPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId/ai-analysis" element={<ProtectedPage hrOnly><AIAnalysisPage /></ProtectedPage>} />
+        <Route path="/" element={<><PageTitle parts={['Sign in']} /><Login /></>} />
+        <Route path="/hr-home" element={page(['Dashboard'], <HrHomeRoute />)} />
+        <Route path="/employee-home" element={page(['Dashboard'], <EmployeeHomeRoute />)} />
+        <Route path="/my-evaluations" element={page(['My evaluations'], <MyEvaluationsPage />, ACCESS.evaluations)} />
+        <Route path="/evaluations/:id" element={page(['Evaluation'], <EmployeeQuestionnaire />, ACCESS.evaluations)} />
+        <Route path="/employee-home/evaluations/:id" element={<LegacyEvaluationRedirect />} />
+        <Route path="/people" element={page(['People'], <People />, ACCESS.people)} />
+        <Route path="/forms" element={page(['Forms'], <Forms />, ACCESS.forms)} />
+        <Route path="/campaigns" element={page(['Campaigns'], <Campaigns />, ACCESS.campaigns)} />
+        <Route path="/campaigns/:id" element={page(['Campaigns'], <CampaignDetails />, ACCESS.campaigns)} />
+        <Route path="/campaigns/:id/completion" element={page(['Completion status', 'Campaigns'], <CompletionStatus />, ACCESS.completion)} />
+        <Route path="/reports" element={page(['Reports'], <ReportsIndexPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId" element={page(['Overview', 'Reports'], <CampaignOverviewPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId/detailed" element={page(['Detailed results', 'Reports'], <DetailedResultsPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId/ai-analysis" element={page(['AI analysis', 'Reports'], <AIAnalysisPage />, ACCESS.reports)} />
         <Route path="/reports/campaigns/:campaignId/evaluation-quality" element={<EvaluationQualityRedirect />} />
-        <Route path="/reports/campaigns/:campaignId/questions" element={<ProtectedPage hrOnly><QuestionAnalyticsPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId/groups" element={<ProtectedPage hrOnly><GroupsRolesPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={<ProtectedPage hrOnly><GroupDetailPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId/roles" element={<ProtectedPage hrOnly><GroupsRolesPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId/roles/:roleId" element={<ProtectedPage hrOnly><RoleDetailPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId/employees" element={<ProtectedPage hrOnly><EmployeeReportsPage /></ProtectedPage>} />
-        <Route path="/reports/campaigns/:campaignId/employees/:employeeId" element={<ProtectedPage hrOnly><EmployeeReportDetailPage /></ProtectedPage>} />
-        <Route path="/settings" element={<ProtectedPage><Navigate to="/settings/profile" replace /></ProtectedPage>} />
-        <Route path="/settings/:section" element={<ProtectedPage><SettingsPage /></ProtectedPage>} />
-        <Route path="*" element={<NotFound />} />
+        <Route path="/reports/campaigns/:campaignId/questions" element={page(['Question analytics', 'Reports'], <QuestionAnalyticsPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId/groups" element={page(['Groups', 'Reports'], <GroupsRolesPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={page(['Group', 'Reports'], <GroupDetailPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId/roles" element={page(['Roles', 'Reports'], <GroupsRolesPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId/roles/:roleId" element={page(['Role', 'Reports'], <RoleDetailPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId/employees" element={page(['Employees', 'Reports'], <EmployeeReportsPage />, ACCESS.reports)} />
+        <Route path="/reports/campaigns/:campaignId/employees/:employeeId" element={page(['Employee', 'Reports'], <EmployeeReportDetailPage />, ACCESS.reports)} />
+        <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />
+        <Route path="/settings/:section" element={page(['Settings'], <SettingsPage />, ACCESS.settings)} />
+        <Route path="*" element={<><PageTitle parts={['Page not found']} /><NotFound /></>} />
       </Routes>
     </BrowserRouter>
   )

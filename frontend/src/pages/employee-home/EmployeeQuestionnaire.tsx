@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import AppLayout from '../layout/AppLayout';
 import { formatUserName } from '../layout/sidebar-user';
 import { useAppAuth } from '../../auth/AppAuth';
+import { usePageTitle } from '../../app/usePageTitle';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import type { FormQuestion } from '../forms/forms.api';
 import { ChoiceRows, RatingChoices } from '../forms/QuestionnaireChoices';
@@ -96,6 +97,7 @@ export default function EmployeeQuestionnaire() {
   const confirmRef = useRef<HTMLDialogElement>(null);
   const requestVersion = useRef(0);
   const visibleQuestionnaire = questionnaire?.evaluation.id === evaluationId && evaluationAvailable(questionnaire.evaluation) ? questionnaire : null;
+  usePageTitle(visibleQuestionnaire ? `Evaluating ${formatUserName(visibleQuestionnaire.evaluation.evaluateeName)}` : 'Evaluation');
   const questions = visibleQuestionnaire ? issuedQuestions(visibleQuestionnaire.blocks) : [];
   const fromHr = searchParams.get('from') === 'hr';
   const backPath = fromHr ? '/my-evaluations' : '/employee-home';

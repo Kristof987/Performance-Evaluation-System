@@ -21,20 +21,18 @@ import {
   getAuthenticatedDashboardPath,
   getSidebarUser,
   getUserInitials,
-  isHrOrManagerRole,
 } from './sidebar-user';
 import { useAppAuth } from '../../auth/AppAuth';
+import { ACCESS, hasAccess, type AccessRule } from '../../app/access';
 
 export type SidebarPage =
   | 'hr-home'
   | 'my-evaluations'
   | 'employee-home'
-  | 'employee-review-preview'
   | 'people'
   | 'campaigns'
   | 'forms'
   | 'reports'
-  | 'results'
   | 'settings';
 
 type SidebarProps = {
@@ -83,9 +81,7 @@ export default function Sidebar({
     : getDashboardPath();
   const isDashboardActive =
     activePage === 'hr-home' || activePage === 'employee-home';
-  const isHrOrManager = auth0User
-    ? dashboardPath === '/hr-home' : isHrOrManagerRole(sidebarUser?.role_name ?? null);
-  const hasPermission = (permission: string) => auth0User?.permissions.includes(permission) ?? false;
+  const can = (rule: AccessRule) => hasAccess(auth0User?.permissions ?? [], rule);
 
   const currentWidth =
     dragWidth ?? (isSidebarCollapsed ? MIN_WIDTH : expandedWidth);
@@ -189,93 +185,68 @@ export default function Sidebar({
           <LayoutDashboard size={17} />
           <span className="nav-item-label">Dashboard</span>
         </Link>
-        {auth0User || isHrOrManager ? (
-          <>
-            {(!auth0User || hasPermission('evaluations.read_assigned')) && <Link
-              className={activePage === 'my-evaluations' ? 'nav-item active' : 'nav-item'}
-              aria-current={activePage === 'my-evaluations' ? 'page' : undefined}
-              to="/my-evaluations"
-              style={{ textDecoration: 'none' }}
-            >
-              <ClipboardCheck size={17} />
-              <span className="nav-item-label">My Evaluations</span>
-            </Link>}
-            {(!auth0User || (hasPermission('employees.read') && hasPermission('groups.read'))) && <Link
-              className={activePage === 'people' ? 'nav-item active' : 'nav-item'}
-              aria-current={activePage === 'people' ? 'page' : undefined}
-              to="/people"
-              style={{ textDecoration: 'none' }}
-            >
-              <Users size={17} />
-              <span className="nav-item-label">People</span>
-            </Link>}
-            {(!auth0User || hasPermission('campaigns.read')) && <Link
-              className={
-                activePage === 'campaigns' ? 'nav-item active' : 'nav-item'
-              }
-              aria-current={activePage === 'campaigns' ? 'page' : undefined}
-              to="/campaigns"
-              style={{ textDecoration: 'none' }}
-            >
-              <ClipboardPen size={17} />
-              <span className="nav-item-label">Campaigns</span>
-            </Link>}
-            {(!auth0User || (hasPermission('forms.read') && hasPermission('sections.read'))) && <Link
-              className={activePage === 'forms' ? 'nav-item active' : 'nav-item'}
-              aria-current={activePage === 'forms' ? 'page' : undefined}
-              to="/forms"
-              style={{ textDecoration: 'none' }}
-            >
-              <Files size={17} />
-              <span className="nav-item-label">Forms</span>
-            </Link>}
-            {(!auth0User || hasPermission('reports.read')) && <Link
-              className={activePage === 'reports' ? 'nav-item active' : 'nav-item'}
-              aria-current={activePage === 'reports' ? 'page' : undefined}
-              to="/reports"
-              style={{ textDecoration: 'none' }}
-            >
-              <ChartNoAxesCombined size={17} />
-              <span className="nav-item-label">Reports</span>
-            </Link>}
-            {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && <div className="sidebar-report-links" aria-label="Reports pages">
-              <NavLink end to={reportBase}>Overview</NavLink>
-              <NavLink to={`${reportBase}/detailed`} className={({ isActive }) => isActive || location.pathname.includes('/questions') || location.pathname.includes('/groups') || location.pathname.includes('/roles') ? 'active' : ''}>Detailed Results</NavLink>
-              <NavLink to={`${reportBase}/employees`}>Employees</NavLink>
-              <NavLink to={`${reportBase}/ai-analysis`}>AI Analysis</NavLink>
-            </div>}
-            {(!auth0User || hasPermission('settings.read')) && <Link
-              className={activePage === 'settings' ? 'nav-item active' : 'nav-item'}
-              aria-current={activePage === 'settings' ? 'page' : undefined}
-              to="/settings/profile"
-              style={{ textDecoration: 'none' }}
-            >
-              <Settings size={17} />
-              <span className="nav-item-label">Settings</span>
-            </Link>}
-          </>
-        ) : (
-          <>
-            <Link
-              className={activePage === 'results' ? 'nav-item active' : 'nav-item'}
-              aria-current={activePage === 'results' ? 'page' : undefined}
-              to="/results"
-              style={{ textDecoration: 'none' }}
-            >
-              <ChartNoAxesCombined size={17} />
-              <span className="nav-item-label">Results</span>
-            </Link>
-            <Link
-              className={activePage === 'settings' ? 'nav-item active' : 'nav-item'}
-              aria-current={activePage === 'settings' ? 'page' : undefined}
-              to="/settings/profile"
-              style={{ textDecoration: 'none' }}
-            >
-              <Settings size={17} />
-              <span className="nav-item-label">Settings</span>
-            </Link>
-          </>
-        )}
+        {can(ACCESS.evaluations) && <Link
+          className={activePage === 'my-evaluations' ? 'nav-item active' : 'nav-item'}
+          aria-current={activePage === 'my-evaluations' ? 'page' : undefined}
+          to="/my-evaluations"
+          style={{ textDecoration: 'none' }}
+        >
+          <ClipboardCheck size={17} />
+          <span className="nav-item-label">My Evaluations</span>
+        </Link>}
+        {can(ACCESS.people) && <Link
+          className={activePage === 'people' ? 'nav-item active' : 'nav-item'}
+          aria-current={activePage === 'people' ? 'page' : undefined}
+          to="/people"
+          style={{ textDecoration: 'none' }}
+        >
+          <Users size={17} />
+          <span className="nav-item-label">People</span>
+        </Link>}
+        {can(ACCESS.campaigns) && <Link
+          className={
+            activePage === 'campaigns' ? 'nav-item active' : 'nav-item'
+          }
+          aria-current={activePage === 'campaigns' ? 'page' : undefined}
+          to="/campaigns"
+          style={{ textDecoration: 'none' }}
+        >
+          <ClipboardPen size={17} />
+          <span className="nav-item-label">Campaigns</span>
+        </Link>}
+        {can(ACCESS.forms) && <Link
+          className={activePage === 'forms' ? 'nav-item active' : 'nav-item'}
+          aria-current={activePage === 'forms' ? 'page' : undefined}
+          to="/forms"
+          style={{ textDecoration: 'none' }}
+        >
+          <Files size={17} />
+          <span className="nav-item-label">Forms</span>
+        </Link>}
+        {can(ACCESS.reports) && <Link
+          className={activePage === 'reports' ? 'nav-item active' : 'nav-item'}
+          aria-current={activePage === 'reports' ? 'page' : undefined}
+          to="/reports"
+          style={{ textDecoration: 'none' }}
+        >
+          <ChartNoAxesCombined size={17} />
+          <span className="nav-item-label">Reports</span>
+        </Link>}
+        {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && <div className="sidebar-report-links" aria-label="Reports pages">
+          <NavLink end to={reportBase}>Overview</NavLink>
+          <NavLink to={`${reportBase}/detailed`} className={({ isActive }) => isActive || location.pathname.includes('/questions') || location.pathname.includes('/groups') || location.pathname.includes('/roles') ? 'active' : ''}>Detailed Results</NavLink>
+          <NavLink to={`${reportBase}/employees`}>Employees</NavLink>
+          <NavLink to={`${reportBase}/ai-analysis`}>AI Analysis</NavLink>
+        </div>}
+        {can(ACCESS.settings) && <Link
+          className={activePage === 'settings' ? 'nav-item active' : 'nav-item'}
+          aria-current={activePage === 'settings' ? 'page' : undefined}
+          to="/settings/profile"
+          style={{ textDecoration: 'none' }}
+        >
+          <Settings size={17} />
+          <span className="nav-item-label">Settings</span>
+        </Link>}
       </nav>
 
       <div className="sidebar-footer">

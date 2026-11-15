@@ -8,6 +8,7 @@ import ReportsLayout from './ReportsLayout';
 import WrittenFeedbackPreview from './components/WrittenFeedbackPreview';
 import type { EmployeeReportDetail, EmployeeReportRow, EmployeeReportsOverview } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
+import { usePageTitle } from '../../app/usePageTitle';
 
 function formatScore(value: number | null) {
   if (value === null) return '—';
@@ -112,6 +113,7 @@ function EmployeeReportDetailContent({ campaignId, employeeId, getAccessToken }:
   const [data, setData] = useState<EmployeeReportDetail | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
+  usePageTitle(data?.employee.id === employeeId ? data.employee.name : null, 'Employees', 'Reports');
 
   useEffect(() => {
     const tokenGetter = accessTokenRef.current;

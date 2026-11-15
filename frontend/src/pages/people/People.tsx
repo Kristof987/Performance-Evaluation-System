@@ -14,6 +14,7 @@ import {
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { parsePositiveInt, parseText, useUrlState } from '../../app/useUrlState';
 import Avatar from '../../components/Avatar';
 import {
   addGroupMember,
@@ -37,6 +38,14 @@ import '../hr-home/components/MetricsGrid.css';
 import './people.css';
 
 type SortKey = 'name' | 'role' | 'groups' | 'status' | 'signIn';
+
+const SORT_KEYS: SortKey[] = ['name', 'role', 'groups', 'status', 'signIn'];
+
+function parseSort(raw: string): { key: SortKey; direction: 'asc' | 'desc' } | null {
+  const [key, direction] = raw.split('-');
+  return SORT_KEYS.includes(key as SortKey) && (direction === 'asc' || direction === 'desc')
+    ? { key: key as SortKey, direction } : null;
+}
 
 const SIGN_IN_BADGES: Record<Employee['signIn'], string> = {
   'Signed in': 'badge-success', Invited: 'badge-primary', 'Invitation failed': 'badge-danger', 'Not invited': 'badge-neutral',
@@ -783,7 +792,11 @@ export default function People() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [isPeopleLoading, setIsPeopleLoading] = useState(true);
   const [peopleError, setPeopleError] = useState('');
-  const [activePeopleTab, setActivePeopleTab] = useState<PeopleTab>('employees');
+  // Tab, filters, sorting, pages and the open drawer live in the URL, so links and refreshes keep the view.
+  const urlState = useUrlState();
+  const [activePeopleTab, setActivePeopleTab] = urlState.field<PeopleTab>({
+    key: 'tab', defaultValue: 'employees', parse: (raw) => (raw === 'groups' ? 'groups' : null), push: true,
+  });
   const [employeeForm, setEmployeeForm] =
     useState<EmployeeFormValues>(emptyEmployeeForm);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
@@ -820,17 +833,24 @@ export default function People() {
   const [groupImportMessage, setGroupImportMessage] = useState('');
   const [groupImportErrors, setGroupImportErrors] = useState<string[]>([]);
   const [isImportingGroups, setIsImportingGroups] = useState(false);
-  const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>(
-    { key: 'name', direction: 'asc' },
-  );
-  const [employeePage, setEmployeePage] = useState(1);
-  const [groupPage, setGroupPage] = useState(1);
-  const [employeeSearch, setEmployeeSearch] = useState('');
-  const [groupFilter, setGroupFilter] = useState('All groups');
-  const [statusFilter, setStatusFilter] = useState('All statuses');
-  const [groupSearch, setGroupSearch] = useState('');
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
+  const [sort, setSort] = urlState.field<{ key: SortKey; direction: 'asc' | 'desc' }>({
+    key: 'sort', defaultValue: { key: 'name', direction: 'asc' }, parse: parseSort,
+    serialize: (value) => `${value.key}-${value.direction}`,
+  });
+  const [employeePage, setEmployeePage] = urlState.field({ key: 'page', defaultValue: 1, parse: parsePositiveInt });
+  const [groupPage, setGroupPage] = urlState.field({ key: 'group_page', defaultValue: 1, parse: parsePositiveInt });
+  const [employeeSearch, setEmployeeSearch] = urlState.field({ key: 'q', defaultValue: '', parse: parseText });
+  const [groupFilter, setGroupFilter] = urlState.field({ key: 'group', defaultValue: 'All groups', parse: parseText });
+  const [statusFilter, setStatusFilter] = urlState.field({ key: 'status', defaultValue: 'All statuses', parse: parseText });
+  const [groupSearch, setGroupSearch] = urlState.field({ key: 'group_q', defaultValue: '', parse: parseText });
+  const [selectedGroupId, setSelectedGroupId] = urlState.field<number | null>({
+    key: 'open_group', defaultValue: null, parse: parsePositiveInt,
+    serialize: (value) => (value === null ? '' : String(value)), push: true,
+  });
+  const [selectedEmployeeId, setSelectedEmployeeId] = urlState.field<number | null>({
+    key: 'open_employee', defaultValue: null, parse: parsePositiveInt,
+    serialize: (value) => (value === null ? '' : String(value)), push: true,
+  });
   const [employeeNotice, setEmployeeNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(null);
   const [invitationMessage, setInvitationMessage] = useState<{ employeeId: number; tone: 'success' | 'error'; text: string } | null>(null);
   const [isSendingInvitation, setIsSendingInvitation] = useState(false);
@@ -853,12 +873,12 @@ export default function People() {
       current !== null && people.employees.some((employee) => employee.id === current)
         ? current
         : null,
-    );
+    { replace: true });
     setSelectedGroupId((current) =>
       current !== null && people.groups.some((group) => group.id === current)
         ? current
         : null,
-    );
+    { replace: true });
   }
 
   useEffect(() => {

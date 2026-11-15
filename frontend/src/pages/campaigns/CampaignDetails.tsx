@@ -12,6 +12,7 @@ import { matrixGroupWithSelfLocks, matrixSelectedCount } from './matrix.utils';
 import EvaluationMatrix from './components/EvaluationMatrix';
 import { formatDate } from './campaign.utils';
 import { useAppAuth } from '../../auth/AppAuth';
+import { usePageTitle } from '../../app/usePageTitle';
 import { fetchDashboard } from '../hr-home/services/dashboardService';
 import CampaignTimeline from './components/CampaignTimeline';
 import CampaignSetupSummary, { type SetupSummaryItem } from './components/CampaignSetupSummary';
@@ -136,6 +137,7 @@ export function CampaignDetails() {
     handleUpdateMatrix,
     handleUpdateCampaign,
   } = useCampaignDetails(id);
+  usePageTitle(campaign?.name, 'Campaigns');
   const canEdit = canManageCampaigns && !campaign?.isArchived &&
     (campaign?.status === 'draft' || campaign?.status === 'scheduled' || campaign?.status === 'active');
   const canPlanPairs = canManageCampaigns && !campaign?.isArchived && campaign?.status !== 'closed';

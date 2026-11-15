@@ -30,7 +30,7 @@ function EvaluationRow({ evaluation, upcoming = false }: { evaluation: AssignedE
          <small>{upcoming ? 'Upcoming' : <>{status}{evaluation.campaignStatus === 'review' ? ' · Review' : ''}{evaluationOverdue(evaluation) ? ' · Overdue' : ''}</>}</small>
       </div>
       {!upcoming && (
-        <Link className="btn btn-secondary employee-compact-action" to={`/employee-home/evaluations/${evaluation.id}`}
+        <Link className="btn btn-secondary employee-compact-action" to={`/evaluations/${evaluation.id}`}
            aria-label={`${status === 'In progress' ? 'Continue' : 'Start'} ${title.toLowerCase()} · ${evaluation.formName} · ${evaluation.campaignName}${evaluationOverdue(evaluation) ? ' · Overdue' : ''}`}>
           {status === 'In progress' ? 'Continue' : 'Start'}
         </Link>
