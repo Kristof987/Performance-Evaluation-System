@@ -279,6 +279,18 @@ def users_by_id(db: Session) -> dict[int, Any]:
     return {employee.id: (employee, role) for employee, role in rows}
 
 
+def assignment_role_id(filled_form: models.FilledForm, role_map: dict[int, int], *, evaluator: bool = False) -> int | None:
+    """The company role frozen at issuance, or the current role for still-planned assignments."""
+    snapshot = filled_form.evaluator_company_role_id if evaluator else filled_form.evaluatee_company_role_id
+    if snapshot is not None:
+        return snapshot
+    return role_map.get(filled_form.evaluator_id if evaluator else filled_form.evaluatee_id)
+
+
+def company_role_names(db: Session) -> dict[int, str]:
+    return dict(db.query(models.CompanyRole.id, models.CompanyRole.name).all())
+
+
 def _section_report_data(rows: list[Any], db: Session):
     import section_scoring_service
 
@@ -536,22 +548,23 @@ def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: 
     member_ids = members_by_group[group_id]
     attributed_evaluatees = {evaluation.evaluatee_id for evaluation in group_scored}
     role_cohort_ids = member_ids | attributed_evaluatees
+    role_names = company_role_names(db)
+    # People evaluated in this group keep the role they had then; other members show their current role.
+    cohort_roles = {employee_id: role.id for employee_id, (_employee, role) in employees_by_id.items() if employee_id in role_cohort_ids}
+    for filled_form, _form, _status in sorted(group_rows, key=lambda row: row[0].id):
+        if filled_form.evaluatee_company_role_id is not None:
+            cohort_roles[filled_form.evaluatee_id] = filled_form.evaluatee_company_role_id
     role_counts: dict[int, dict[str, Any]] = {}
-    for employee_id in role_cohort_ids:
-        employee_role = employees_by_id.get(employee_id)
-        if employee_role is None:
-            continue
-        _, role = employee_role
-        item = role_counts.setdefault(role.id, {"role_id": role.id, "role_name": role.name, "employee_count": 0, "completed_evaluations_received": 0, "average_score": None})
+    for employee_id, role_id in cohort_roles.items():
+        item = role_counts.setdefault(role_id, {"role_id": role_id, "role_name": role_names.get(role_id, "Unknown role"), "employee_count": 0, "completed_evaluations_received": 0, "average_score": None})
         item["employee_count"] += 1
     role_results = section_scoring_service.role_scores(group_scored, campaign_id, role_map, aggregate_access=aggregate_access)
     for role_item in role_counts.values():
-        role_member_ids = {employee_id for employee_id in role_cohort_ids if employees_by_id.get(employee_id) and employees_by_id[employee_id][1].id == role_item["role_id"]}
-        role_rows = [row for row in completed_rows if row[0].evaluatee_id in role_member_ids]
+        role_rows = [row for row in completed_rows if assignment_role_id(row[0], role_map) == role_item["role_id"]]
         role_item["completed_evaluations_received"] = len({row[0].id for row in role_rows})
         role_result = role_results.get(role_item["role_id"])
         if role_result and not aggregate_access:
-            role_scored = [item for item in group_scored if role_map.get(item.evaluatee_id) == role_item["role_id"]]
+            role_scored = [item for item in group_scored if section_scoring_service.role_of(item, role_map) == role_item["role_id"]]
             role_result = section_scoring_service.suppress_small_complements(role_result, scored, role_scored)
         role_visible = role_result if aggregate_access or all(section.availability != "suppressed" for section in group_result.sections.values()) else None
         role_item["average_score"] = role_visible.overall.score if role_visible else None
@@ -567,7 +580,7 @@ def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: 
         employees.append({
             "employee_id": employee.id,
             "employee_name": employee.full_name,
-            "role_name": role.name,
+            "role_name": role_names.get(cohort_roles.get(employee.id, role.id), role.name),
             "reviews_received": len({row[0].id for row in received}),
             "completed_self_evaluation": self_completed,
             "feedback_availability": "Submitted" if len(received) > 0 else "No submitted peer feedback",
@@ -593,6 +606,18 @@ def normalize_perspective(perspective: str) -> str:
     return "evaluator" if perspective == "evaluator" else "evaluatee"
 
 
+def _role_slice(rows: list[Any], scored: list[Any], role_map: dict[int, int], role_id: int, evaluator: bool):
+    """Peer assignments, scored evaluations and people on one side of the role at issuance."""
+    import section_scoring_service
+
+    role_rows = [row for row in rows if row[0].evaluator_id != row[0].evaluatee_id
+                 and assignment_role_id(row[0], role_map, evaluator=evaluator) == role_id]
+    role_scored = [item for item in scored if item.evaluator_id != item.evaluatee_id
+                   and section_scoring_service.role_of(item, role_map, evaluator=evaluator) == role_id]
+    employee_ids = {row[0].evaluator_id if evaluator else row[0].evaluatee_id for row in role_rows}
+    return role_rows, role_scored, employee_ids
+
+
 def build_roles_overview(campaign_id: int, actor: models.User, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
     import section_scoring_service
 
@@ -611,16 +636,10 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session, pers
     section_candidate: dict[int, list[dict[str, Any]]] = defaultdict(list)
     suppressed_sections = set()
     participating_employees: set[int] = set()
+    evaluator_side = perspective == "evaluator"
     for role in roles:
-        employee_ids = {employee_id for employee_id, (_, employee_role) in employees_by_id.items() if employee_role.id == role.id}
-        if perspective == "evaluator":
-            role_rows = [row for row in rows if row[0].evaluator_id in employee_ids and row[0].evaluator_id != row[0].evaluatee_id]
-            role_scored = [item for item in scored if item.evaluator_id in employee_ids and item.evaluator_id != item.evaluatee_id]
-            participating_employees.update(row[0].evaluator_id for row in role_rows)
-        else:
-            role_rows = [row for row in rows if row[0].evaluatee_id in employee_ids and row[0].evaluator_id != row[0].evaluatee_id]
-            role_scored = [item for item in scored if item.evaluatee_id in employee_ids and item.evaluator_id != item.evaluatee_id]
-            participating_employees.update(row[0].evaluatee_id for row in role_rows)
+        role_rows, role_scored, employee_ids = _role_slice(rows, scored, role_map, role.id, evaluator_side)
+        participating_employees.update(employee_ids)
         completed = [row for row in role_rows if status_key(row[2], row[0].finish_date) == "completed"]
         result = role_results.get(role.id)
         average = result.overall.score if result else None
@@ -629,7 +648,7 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session, pers
                 suppressed_sections.add(section["id"])
             elif section["availability"] == "available":
                 section_candidate[section["id"]].append({"role_id": role.id, "role_name": role.name, "average_score": section["average_score"], "evaluatee_count": section["evaluatee_count"], "evaluator_count": section["evaluator_count"]})
-        if employee_ids or role_rows:
+        if role_rows:
             role_summaries.append({
                 "role_id": role.id,
                 "role_name": role.name,
@@ -647,7 +666,7 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session, pers
         "kpis": {"roles_in_campaign": len(role_summaries), "participating_employees": len(participating_employees), "completed_evaluations": sum(item["completed_evaluations"] for item in role_summaries), "roles_with_reportable_results": sum(1 for item in role_summaries if item["average_score"] is not None)},
         "roles": role_summaries,
         "section_comparison": comparison,
-        "notes": {"scoring": "Normalized Section scores use submitted schema-v2 snapshots and evaluated-employee weighting.", "role_history": "Evaluation records do not snapshot company roles; role breakdowns use current company roles.", "confidentiality": "Authorized campaign managers may view aggregate role scores regardless of cohort size." if aggregate_access else f"A Section requires {min_aggregate_evaluatees()} evaluated employees; evaluator-role results also require {min_aggregate_evaluatees()} distinct peer evaluators."},
+        "notes": {"scoring": "Normalized Section scores use submitted schema-v2 snapshots and evaluated-employee weighting.", "role_history": "Company roles are recorded when evaluations are issued; later role changes do not alter this campaign.", "confidentiality": "Authorized campaign managers may view aggregate role scores regardless of cohort size." if aggregate_access else f"A Section requires {min_aggregate_evaluatees()} evaluated employees; evaluator-role results also require {min_aggregate_evaluatees()} distinct peer evaluators."},
     }
 
 
@@ -664,13 +683,7 @@ def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Se
     employees_by_id = users_by_id(db)
     role_map = {employee_id: role.id for employee_id, (_employee, role) in employees_by_id.items()}
     scored, names = _section_report_data(rows, db)
-    role_employee_ids = {employee_id for employee_id, (_, role) in employees_by_id.items() if role.id == role_id}
-    if perspective == "evaluator":
-        role_rows = [row for row in rows if row[0].evaluator_id in role_employee_ids and row[0].evaluator_id != row[0].evaluatee_id]
-        role_scored = [item for item in scored if item.evaluator_id in role_employee_ids and item.evaluator_id != item.evaluatee_id]
-    else:
-        role_rows = [row for row in rows if row[0].evaluatee_id in role_employee_ids and row[0].evaluator_id != row[0].evaluatee_id]
-        role_scored = [item for item in scored if item.evaluatee_id in role_employee_ids and item.evaluator_id != item.evaluatee_id]
+    role_rows, role_scored, role_employee_ids = _role_slice(rows, scored, role_map, role_id, perspective == "evaluator")
     role_result = (section_scoring_service.evaluator_role_scores(scored, campaign_id, role_map, aggregate_access=aggregate_access) if perspective == "evaluator"
                     else section_scoring_service.role_scores(scored, campaign_id, role_map, aggregate_access=aggregate_access)).get(role_id)
     section_rows = _section_score_rows(role_result, role_scored, names) if role_result else []
@@ -688,8 +701,7 @@ def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Se
         if group_result and not aggregate_access:
             group_result = section_scoring_service.suppress_small_complements(group_result, role_scored, group_scored)
             group_result = section_scoring_service.suppress_small_complements(group_result, scored, group_scored)
-        # A group nested under a current-role filter is also a mutable role slice.
-        group_visible = group_result if aggregate_access else None
+        group_visible = group_result
         group_breakdown.append({"group_id": group.id, "group_name": group.name, "employee_count": len(group_employee_ids), "completed_evaluations": len({row[0].id for row in group_rows if status_key(row[2], row[0].finish_date) == "completed"}), "average_score": group_visible.overall.score if group_visible else None, "score_availability": group_visible.overall.availability if group_visible else "suppressed" if group_result else "no_data"})
     return {
         "campaign": overview["campaign"],

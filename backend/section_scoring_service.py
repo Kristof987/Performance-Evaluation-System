@@ -39,6 +39,16 @@ class EvaluationSections:
     section_ids: frozenset[int]
     sections: dict[int, float]
     question_keys: dict[int, frozenset[str]] = field(default_factory=dict)
+    # Company roles frozen at issuance; None falls back to the employee's current role.
+    evaluator_role_id: int | None = None
+    evaluatee_role_id: int | None = None
+
+
+def role_of(evaluation: "EvaluationSections", current_roles: Mapping[int, int], *, evaluator: bool = False) -> int | None:
+    snapshot = evaluation.evaluator_role_id if evaluator else evaluation.evaluatee_role_id
+    if snapshot is not None:
+        return snapshot
+    return current_roles.get(evaluation.evaluator_id if evaluator else evaluation.evaluatee_id)
 
 
 @dataclass(frozen=True)
@@ -186,6 +196,7 @@ def score_evaluation(assignment: models.FilledForm, *, status_name: str | None =
         assignment.company_group_id, assignment.finish_date, snapshot_section_ids(assignment.form_snapshot),
         {section_id: mean(values) for section_id, values in by_section.items()},
         {section_id: frozenset(keys) for section_id, keys in question_keys.items()},
+        getattr(assignment, "evaluator_company_role_id", None), getattr(assignment, "evaluatee_company_role_id", None),
     )
 
 
@@ -297,7 +308,7 @@ def _unsafe_role_group_sections(evaluations: Sequence[EvaluationSections], roles
     for item in evaluations:
         if item.evaluator_id == item.evaluatee_id:
             continue
-        role = roles.get(item.evaluator_id if evaluator else item.evaluatee_id)
+        role = role_of(item, roles, evaluator=evaluator)
         if role is None:
             continue
         for section_id in item.sections:
@@ -342,30 +353,28 @@ def group_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, ev
 def role_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluatee_roles: Mapping[int, int], *, aggregate_access: bool = False) -> dict[int, AggregateScores]:
     """Use the evaluated employee's company role, never the evaluator's role."""
     scoped = [evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id]
-    role_ids = {evaluatee_roles[evaluation.evaluatee_id] for evaluation in scoped if evaluation.evaluatee_id in evaluatee_roles}
+    role_ids = {role for evaluation in scoped if (role := role_of(evaluation, evaluatee_roles)) is not None}
     unsafe = set() if aggregate_access else _unsafe_role_group_sections(scoped, evaluatee_roles)
     results = {}
     for role_id in role_ids:
-        role_evaluations = [evaluation for evaluation in scoped if evaluatee_roles.get(evaluation.evaluatee_id) == role_id]
+        role_evaluations = [evaluation for evaluation in scoped if role_of(evaluation, evaluatee_roles) == role_id]
         if aggregate_access:
             results[role_id] = _aggregate(role_evaluations, 1, aggregate_access=True)
             continue
-        aggregate = _withhold_sections(suppress_small_complements(
+        # Roles are frozen at issuance, so a later promotion cannot shift a person between published cohorts.
+        results[role_id] = _withhold_sections(suppress_small_complements(
             _aggregate(role_evaluations, reporting_service.min_aggregate_evaluatees()), scoped, role_evaluations), unsafe)
-        # Current roles are mutable after answers are final; successive role
-        # breakdowns could otherwise isolate a person moved between roles.
-        results[role_id] = _withhold_sections(aggregate, set(aggregate.sections))
     return results
 
 
 def evaluator_role_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, evaluator_roles: Mapping[int, int], *, aggregate_access: bool = False) -> dict[int, AggregateScores]:
     """Explicit evaluator-role perspective: require both cohort and reviewer privacy."""
     scoped = [evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id and evaluation.evaluator_id != evaluation.evaluatee_id]
-    role_ids = {evaluator_roles[evaluation.evaluator_id] for evaluation in scoped if evaluation.evaluator_id in evaluator_roles}
+    role_ids = {role for evaluation in scoped if (role := role_of(evaluation, evaluator_roles, evaluator=True)) is not None}
     results = {}
     unsafe = set() if aggregate_access else _unsafe_role_group_sections(scoped, evaluator_roles, evaluator=True)
     for role_id in role_ids:
-        role_evaluations = [evaluation for evaluation in scoped if evaluator_roles.get(evaluation.evaluator_id) == role_id]
+        role_evaluations = [evaluation for evaluation in scoped if role_of(evaluation, evaluator_roles, evaluator=True) == role_id]
         if aggregate_access:
             results[role_id] = _aggregate(role_evaluations, 1, aggregate_access=True)
             continue
@@ -374,8 +383,7 @@ def evaluator_role_scores(evaluations: Sequence[EvaluationSections], campaign_id
         for section_id, result in sections.items():
             if result.availability == "available" and len({evaluation.evaluator_id for evaluation in role_evaluations if section_id in evaluation.sections}) < reporting_service.min_aggregate_evaluatees():
                 sections[section_id] = ScoreResult(None, "suppressed")
-        aggregate = _withhold_sections(suppress_small_complements(AggregateScores(sections, _overall(sections)), scoped, role_evaluations), unsafe)
-        results[role_id] = _withhold_sections(aggregate, set(aggregate.sections))
+        results[role_id] = _withhold_sections(suppress_small_complements(AggregateScores(sections, _overall(sections)), scoped, role_evaluations), unsafe)
     return results
 
 

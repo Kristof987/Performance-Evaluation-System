@@ -162,6 +162,35 @@ export async function fetchPeople(getAccessToken: AccessTokenGetter, signal: Abo
   };
 }
 
+export type CompanyRoleUsage = {
+  id: number;
+  name: string;
+  employee_count: number;
+  used_in_campaigns: boolean;
+  archived: boolean;
+};
+
+async function companyRolesResponse(response: Response, fallback: string): Promise<CompanyRoleUsage[]> {
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null;
+    throw new Error(typeof detail === 'string' ? detail : fallback);
+  }
+  return (await response.json()) as CompanyRoleUsage[];
+}
+
+export async function fetchCompanyRoles(getAccessToken: AccessTokenGetter) {
+  return companyRolesResponse(await authenticatedApiFetch(getAccessToken, '/people/company-roles'),
+    'Company roles could not be loaded.');
+}
+
+/** Deletes an unused role; a role that campaigns refer to is archived instead. */
+export async function deleteCompanyRole(getAccessToken: AccessTokenGetter, roleId: number) {
+  return companyRolesResponse(await authenticatedApiFetch(getAccessToken, `/people/company-roles/${roleId}`, {
+    method: 'DELETE',
+  }), 'The company role could not be removed.');
+}
+
 export async function updateEmployeeSystemRole(getAccessToken: AccessTokenGetter, employeeId: number,
   systemRoleId: number): Promise<NamedOption> {
   const response = await authenticatedApiFetch(getAccessToken, `/people/employees/${employeeId}/system-role`, {

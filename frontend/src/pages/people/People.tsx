@@ -29,6 +29,9 @@ import {
   resendInvitation,
   updateEmployee,
   updateEmployeeSystemRole,
+  deleteCompanyRole,
+  fetchCompanyRoles,
+  type CompanyRoleUsage,
   updateGroup,
   type Employee,
   type NamedOption,
@@ -139,12 +142,14 @@ function PeopleHeader({
   onAddGroup,
   canAddEmployee,
   canAddGroup,
+  onManageRoles,
 }: {
   activeTab: PeopleTab;
   onAddEmployee: () => void;
   onAddGroup: () => void;
   canAddEmployee: boolean;
   canAddGroup: boolean;
+  onManageRoles?: () => void;
 }) {
   return (
     <section className="people-header">
@@ -152,13 +157,22 @@ function PeopleHeader({
         <h1>People</h1>
         <p>Manage employees and groups in your organization.</p>
       </div>
-      {(activeTab === 'employees' ? canAddEmployee : canAddGroup) && <button
-        className="btn btn-primary people-button"
-        type="button"
-        onClick={activeTab === 'employees' ? onAddEmployee : onAddGroup}
-      >
-        {activeTab === 'employees' ? 'Add employee' : 'Add group'}
-      </button>}
+      <div className="people-header-actions">
+        {activeTab === 'employees' && onManageRoles && <button
+          className="btn btn-secondary people-button"
+          type="button"
+          onClick={onManageRoles}
+        >
+          Company roles
+        </button>}
+        {(activeTab === 'employees' ? canAddEmployee : canAddGroup) && <button
+          className="btn btn-primary people-button"
+          type="button"
+          onClick={activeTab === 'employees' ? onAddEmployee : onAddGroup}
+        >
+          {activeTab === 'employees' ? 'Add employee' : 'Add group'}
+        </button>}
+      </div>
     </section>
   );
 }
@@ -806,6 +820,10 @@ export default function People() {
   const [systemRoleDraft, setSystemRoleDraft] = useState<{ employeeId: number; roleId: number } | null>(null);
   const [systemRoleMessage, setSystemRoleMessage] = useState<{ employeeId: number; tone: 'success' | 'error'; text: string } | null>(null);
   const [isSavingSystemRole, setIsSavingSystemRole] = useState(false);
+  const [companyRoleUsage, setCompanyRoleUsage] = useState<CompanyRoleUsage[] | null>(null);
+  const [isCompanyRolesOpen, setIsCompanyRolesOpen] = useState(false);
+  const [companyRoleMessage, setCompanyRoleMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [removingCompanyRoleId, setRemovingCompanyRoleId] = useState<number | null>(null);
   const [isPeopleLoading, setIsPeopleLoading] = useState(true);
   const [peopleError, setPeopleError] = useState('');
   // Tab, filters, sorting, pages and the open drawer live in the URL, so links and refreshes keep the view.
@@ -1375,6 +1393,40 @@ export default function People() {
     }
   }
 
+  function applyCompanyRoleUsage(usage: CompanyRoleUsage[]) {
+    setCompanyRoleUsage(usage);
+    setCompanyRoles(usage.filter((role) => !role.archived).map((role) => ({ id: role.id, name: role.name })));
+  }
+
+  async function openCompanyRoles() {
+    setIsCompanyRolesOpen(true);
+    setCompanyRoleMessage(null);
+    setCompanyRoleUsage(null);
+    try {
+      applyCompanyRoleUsage(await fetchCompanyRoles(getAccessTokenSilently));
+    } catch (error) {
+      handleAccessError(error);
+      setCompanyRoleMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Company roles could not be loaded.' });
+    }
+  }
+
+  async function handleRemoveCompanyRole(role: CompanyRoleUsage) {
+    if (removingCompanyRoleId !== null) return;
+    setRemovingCompanyRoleId(role.id);
+    setCompanyRoleMessage(null);
+    try {
+      applyCompanyRoleUsage(await deleteCompanyRole(getAccessTokenSilently, role.id));
+      setCompanyRoleMessage({ tone: 'success', text: role.used_in_campaigns
+        ? `“${role.name}” archived. Past campaign reports keep showing it.`
+        : `“${role.name}” deleted.` });
+    } catch (error) {
+      handleAccessError(error);
+      setCompanyRoleMessage({ tone: 'error', text: error instanceof Error ? error.message : 'The company role could not be removed.' });
+    } finally {
+      setRemovingCompanyRoleId(null);
+    }
+  }
+
   async function handleSaveSystemRole(employee: Employee, roleId: number) {
     if (isSavingSystemRole || !canAssignRoles) return;
     setIsSavingSystemRole(true);
@@ -1467,6 +1519,7 @@ export default function People() {
             onAddGroup={openAddGroupModal}
             canAddEmployee={canManageEmployees}
             canAddGroup={canManageGroups}
+            onManageRoles={canManageEmployees ? () => void openCompanyRoles() : undefined}
           />
 
           <PeopleTabs activeTab={activePeopleTab} onChange={handlePeopleTabChange} />
@@ -2047,6 +2100,43 @@ export default function People() {
           </div>
         )}
       </DetailDrawer>
+
+      {isCompanyRolesOpen && (
+        <div className="modal-backdrop open" role="presentation"
+          onClick={(event) => { if (event.target === event.currentTarget) setIsCompanyRolesOpen(false); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="companyRolesTitle">
+            <div className="modal-head">
+              <div>
+                <h2 id="companyRolesTitle">Company roles</h2>
+                <p>A role in use by employees cannot be removed. Roles that past campaigns refer to are archived, so their reports keep the name.</p>
+              </div>
+              <button className="close" type="button" onClick={() => setIsCompanyRolesOpen(false)} aria-label="Close company roles">×</button>
+            </div>
+            <div className="modal-body">
+              {companyRoleMessage && <p className={companyRoleMessage.tone === 'success' ? 'people-invite-success' : 'people-invite-error'}
+                role={companyRoleMessage.tone === 'success' ? 'status' : 'alert'}>{companyRoleMessage.text}</p>}
+              {companyRoleUsage === null && !companyRoleMessage && <p className="people-empty-inline">Loading…</p>}
+              {companyRoleUsage !== null && companyRoleUsage.filter((role) => !role.archived).length === 0 && <p className="people-empty-inline">No company roles yet.</p>}
+              {companyRoleUsage !== null && <ul className="people-role-list">
+                {companyRoleUsage.filter((role) => !role.archived).map((role) => (
+                  <li key={role.id}>
+                    <div>
+                      <strong>{role.name}</strong>
+                      <span>{role.employee_count} {role.employee_count === 1 ? 'employee' : 'employees'}{role.used_in_campaigns ? ' · used in campaigns' : ''}</span>
+                    </div>
+                    <button className="btn btn-secondary people-button danger-action" type="button"
+                      disabled={role.employee_count > 0 || removingCompanyRoleId !== null}
+                      title={role.employee_count > 0 ? 'Move its employees to another role first.' : undefined}
+                      onClick={() => void handleRemoveCompanyRole(role)}>
+                      {removingCompanyRoleId === role.id ? 'Removing...' : role.used_in_campaigns ? 'Archive' : 'Delete'}
+                    </button>
+                  </li>
+                ))}
+              </ul>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {pendingMemberRemoval !== null && (
         <div className="modal-backdrop open" role="presentation">

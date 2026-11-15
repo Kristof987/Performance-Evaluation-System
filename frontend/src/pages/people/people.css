@@ -1277,3 +1277,38 @@ select + .people-new-role-input {
   object-fit: cover;
   width: 100%;
 }
+
+.people-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.people-role-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.people-role-list li {
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.people-role-list li div {
+  display: grid;
+  gap: 2px;
+}
+
+.people-role-list li span {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}

@@ -23,6 +23,7 @@ def _fingerprint(db: Session, campaign_id: int, report: dict, questions: list[di
     for assignment, _form, status in sorted(rows, key=lambda row: row[0].id):
         completed = reporting_service.status_key(status, assignment.finish_date) == "completed"
         source = [assignment.id, assignment.company_group_id, assignment.evaluator_id, assignment.evaluatee_id,
+                  assignment.evaluator_company_role_id, assignment.evaluatee_company_role_id,
                   assignment.form_id, status, assignment.finish_date.isoformat() if assignment.finish_date else None,
                   assignment.form_snapshot if completed else None, assignment.answers if completed else None]
         digest.update(json.dumps(source, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode())
@@ -34,7 +35,9 @@ def _fingerprint(db: Session, campaign_id: int, report: dict, questions: list[di
         if table is models.campaign_company_groups:
             statement = statement.where(table.c.campaign_id == campaign_id)
         digest.update(json.dumps([tuple(row) for row in db.execute(statement)], separators=(",", ":")).encode())
-    employee_ids = {row[0].evaluatee_id for row in rows} | {row[0].evaluator_id for row in rows}
+    # Current roles only matter for assignments that have not frozen theirs at issuance.
+    employee_ids = ({row[0].evaluatee_id for row in rows if row[0].evaluatee_company_role_id is None}
+                    | {row[0].evaluator_id for row in rows if row[0].evaluator_company_role_id is None})
     roles = db.query(models.Employee.id, models.Employee.company_role_id).filter(models.Employee.id.in_(employee_ids)).order_by(models.Employee.id).all() if employee_ids else []
     digest.update(json.dumps([tuple(item) for item in roles], separators=(",", ":")).encode())
     rules = db.query(models.CampaignEvaluationRule).filter(models.CampaignEvaluationRule.campaign_id == campaign_id).order_by(models.CampaignEvaluationRule.id).all()

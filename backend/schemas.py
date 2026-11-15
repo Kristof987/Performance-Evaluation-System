@@ -299,6 +299,14 @@ class PeopleCompanyRole(BaseModel):
     name: str
 
 
+class CompanyRoleUsage(BaseModel):
+    id: int
+    name: str
+    employee_count: int
+    used_in_campaigns: bool
+    archived: bool
+
+
 class PeopleSystemRole(BaseModel):
     id: int
     name: str

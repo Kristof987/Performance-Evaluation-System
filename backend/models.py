@@ -163,6 +163,11 @@ class FilledForm(Base):
         nullable=False,
     )
 
+    # Company roles at issuance, so reports keep history when people are promoted later.
+    # NULL while the assignment is still planned: until then the current role applies.
+    evaluator_company_role_id = Column(Integer, ForeignKey("company_roles.id"), nullable=True)
+    evaluatee_company_role_id = Column(Integer, ForeignKey("company_roles.id"), nullable=True)
+
     form_id = Column(
         Integer,
         ForeignKey("forms.id"),
@@ -458,6 +463,8 @@ class CompanyRole(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False)
     description = Column(String, nullable=True)
+    # Archived roles disappear from pickers but keep their name in historical reports.
+    archived_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class SystemRole(Base):

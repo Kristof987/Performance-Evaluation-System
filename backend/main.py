@@ -340,10 +340,8 @@ def get_people(db: Session = Depends(get_db),
         .order_by(models.Employee.is_active.desc(), models.Employee.full_name.asc())
         .all()
     )
-    roles_by_id = {
-        role.id: role.name
-        for role in db.query(models.CompanyRole).all()
-    }
+    company_roles = db.query(models.CompanyRole).all()
+    roles_by_id = {role.id: role.name for role in company_roles}
     groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
     groups_by_id = {group.id: group for group in groups}
     group_member_counts = {group.id: 0 for group in groups}
@@ -394,8 +392,8 @@ def get_people(db: Session = Depends(get_db),
             for employee in employees
         ],
         "groups": [serialize_group(group) for group in groups],
-        "company_roles": [{"id": role_id, "name": name}
-                          for role_id, name in sorted(roles_by_id.items(), key=lambda item: item[1].lower())],
+        "company_roles": [{"id": role.id, "name": role.name}
+                          for role in sorted(company_roles, key=lambda item: item.name.lower()) if role.archived_at is None],
         "system_roles": [{"id": role.id, "name": role.name, "description": role.description}
                          for role in db.query(models.SystemRole).order_by(models.SystemRole.id).all()],
     }
@@ -599,6 +597,9 @@ def get_or_create_company_role(role_name: str, db: Session):
         company_role = models.CompanyRole(name=role_name)
         db.add(company_role)
         db.flush()
+    elif company_role.archived_at is not None:
+        # Typing an archived role's name brings it back instead of creating a near-duplicate.
+        company_role.archived_at = None
     return company_role
 
 
@@ -788,6 +789,47 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
         "profile_image_url": person.profile_image_url,
         **account_fields(user, db),
     }
+
+
+def company_role_usage(db: Session) -> list[dict]:
+    employee_counts = dict(db.query(models.Employee.company_role_id, func.count(models.Employee.id))
+                           .group_by(models.Employee.company_role_id).all())
+    used = set()
+    for column in (models.FilledForm.evaluator_company_role_id, models.FilledForm.evaluatee_company_role_id,
+                   models.CampaignEvaluationRule.evaluator_role_id, models.CampaignEvaluationRule.evaluatee_role_id):
+        used.update(role_id for (role_id,) in db.query(column).filter(column.isnot(None)).distinct().all())
+    return [{"id": role.id, "name": role.name, "employee_count": employee_counts.get(role.id, 0),
+             "used_in_campaigns": role.id in used, "archived": role.archived_at is not None}
+            for role in db.query(models.CompanyRole).order_by(func.lower(models.CompanyRole.name)).all()]
+
+
+@app.get("/people/company-roles", response_model=list[schemas.CompanyRoleUsage])
+def get_company_roles(db: Session = Depends(get_db),
+                      _reader: models.User = Depends(require_permission("employees.read"))):
+    return company_role_usage(db)
+
+
+@app.delete("/people/company-roles/{role_id}", response_model=list[schemas.CompanyRoleUsage])
+def delete_company_role(role_id: int, db: Session = Depends(get_db),
+                        actor: models.User = Depends(require_permission("employees.manage"))):
+    """Unused roles are deleted; roles that campaigns refer to are archived so their reports keep the name."""
+    role = db.query(models.CompanyRole).filter(models.CompanyRole.id == role_id).with_for_update().first()
+    if role is None:
+        raise HTTPException(status_code=404, detail="Company role not found")
+    usage = next(item for item in company_role_usage(db) if item["id"] == role_id)
+    if usage["employee_count"]:
+        count = usage["employee_count"]
+        raise HTTPException(status_code=409, detail=f"Move the {count} employee{'s' if count != 1 else ''} with this role to another role first")
+    if usage["used_in_campaigns"]:
+        if role.archived_at is None:
+            role.archived_at = datetime.now(timezone.utc)
+        summary = f"Company role archived: {role.name}"
+    else:
+        db.delete(role)
+        summary = f"Company role deleted: {role.name}"
+    workspace_settings_service.record_audit(db, "accounts", actor, summary, {"role": role.name})
+    db.commit()
+    return company_role_usage(db)
 
 
 @app.put("/people/employees/{employee_id}/system-role", response_model=schemas.SystemRoleOption)
@@ -1371,10 +1413,20 @@ def issue_activation_snapshots(campaign: models.Campaign, db: Session,
             continue
         assignment.form_snapshot = form_snapshot_service.create_form_snapshot(form, db)
         assignment.snapshot_status = "verified"
+        snapshot_assignment_roles(assignment, db)
         issued_count += 1
 
     campaign_lifecycle.record_snapshot_issuance(db, campaign, issued_count, actor_user_id=actor_user_id)
     return errors
+
+
+def snapshot_assignment_roles(assignment: models.FilledForm, db: Session) -> None:
+    """Freeze both company roles when an assignment is issued."""
+    for employee_id, field in ((assignment.evaluator_id, "evaluator_company_role_id"),
+                               (assignment.evaluatee_id, "evaluatee_company_role_id")):
+        if getattr(assignment, field) is None:
+            person = db.get(models.Employee, employee_id)
+            setattr(assignment, field, person.company_role_id if person else None)
 
 
 def assignment_is_immutable(assignment):
@@ -1383,6 +1435,10 @@ def assignment_is_immutable(assignment):
 
 
 def ensure_group_membership_mutable(group_id: int | None, employee_id: int, db: Session, *, role_change: bool = False):
+    """Issued evaluations freeze group and company role, so history survives promotions and moves.
+
+    Only a running campaign still needs the person where it planned them.
+    """
     assignment_query = db.query(models.FilledForm).filter(
         or_(models.FilledForm.evaluator_id == employee_id, models.FilledForm.evaluatee_id == employee_id),
     )
@@ -1390,16 +1446,25 @@ def ensure_group_membership_mutable(group_id: int | None, employee_id: int, db: 
         assignment_query = assignment_query.filter(models.FilledForm.company_group_id == group_id)
     existing_assignments = assignment_query.all()
     campaign_ids = {assignment.campaign_id for assignment in existing_assignments}
-    campaigns = (db.query(models.Campaign).filter(models.Campaign.id.in_(campaign_ids))
-                 .order_by(models.Campaign.id).with_for_update().all()) if campaign_ids else []
-    if any(campaign.status in {
-        models.CampaignStatus.ACTIVE.value, models.CampaignStatus.PAUSED.value,
-        models.CampaignStatus.REVIEW.value, models.CampaignStatus.CLOSED.value,
-    } for campaign in campaigns):
-        raise HTTPException(status_code=409, detail="Employees with active or historical campaign assignments cannot be removed or change roles")
-    if any(assignment_is_immutable(assignment) for assignment in existing_assignments):
-        detail = "Employee role cannot change while this group has issued evaluations" if role_change else "Employee cannot be removed from this group while issued evaluations reference them"
-        raise HTTPException(status_code=409, detail=detail)
+    campaigns = {campaign.id: campaign for campaign in (db.query(models.Campaign).filter(models.Campaign.id.in_(campaign_ids))
+                 .order_by(models.Campaign.id).with_for_update().all() if campaign_ids else [])}
+    running = {models.CampaignStatus.ACTIVE.value, models.CampaignStatus.PAUSED.value, models.CampaignStatus.REVIEW.value}
+
+    def campaign_status(assignment):
+        campaign = campaigns.get(assignment.campaign_id)
+        return campaign.status if campaign else None
+
+    if role_change:
+        # An unissued row in a running campaign would be issued later with a form chosen for the old role.
+        if any(campaign_status(assignment) in running and not assignment_is_immutable(assignment)
+               for assignment in existing_assignments):
+            raise HTTPException(status_code=409, detail="Employee role cannot change while a running campaign still has unissued evaluations for them")
+        return
+    if any(campaign_status(assignment) in running for assignment in existing_assignments):
+        raise HTTPException(status_code=409, detail="Employees cannot be removed from a group while a running campaign evaluates them there")
+    if any(assignment_is_immutable(assignment) and campaign_status(assignment) != models.CampaignStatus.CLOSED.value
+           for assignment in existing_assignments):
+        raise HTTPException(status_code=409, detail="Employee cannot be removed from this group while issued evaluations reference them")
 
 
 @app.get("/users/{user_id}/assigned-evaluations", response_model=list[schemas.AssignedEvaluationResponse])
@@ -3163,11 +3228,13 @@ def issued_role_pair_keys(campaign_id: int, db: Session):
     issued = [assignment for assignment in assignments if assignment_is_immutable(assignment)]
     employee_ids = {employee_id for assignment in issued for employee_id in (assignment.evaluator_id, assignment.evaluatee_id)}
     roles = {person.id: person.company_role_id for person in db.query(models.Employee).filter(models.Employee.id.in_(employee_ids)).all()} if employee_ids else {}
-    return {
-        (assignment.company_group_id, roles[assignment.evaluator_id], roles[assignment.evaluatee_id])
-        for assignment in issued
-        if assignment.evaluator_id in roles and assignment.evaluatee_id in roles
-    }
+    keys = set()
+    for assignment in issued:
+        evaluator_role = reporting_service.assignment_role_id(assignment, roles, evaluator=True)
+        evaluatee_role = reporting_service.assignment_role_id(assignment, roles)
+        if evaluator_role is not None and evaluatee_role is not None:
+            keys.add((assignment.company_group_id, evaluator_role, evaluatee_role))
+    return keys
 
 
 def get_or_create_default_form_status(db: Session):

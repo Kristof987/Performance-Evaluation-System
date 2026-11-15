@@ -147,8 +147,8 @@ def _collect(rows: list[Any], db: Session, *, include_text: bool = False):
             mode = metadata["required_modes"][0]
             if mode not in definitions[key]["required_modes"]:
                 definitions[key]["required_modes"].append(mode)
-            issued_scopes[key].add((assignment.company_group_id, roles.get(assignment.evaluatee_id),
-                                    roles.get(assignment.evaluator_id), assignment.evaluatee_id,
+            issued_scopes[key].add((assignment.company_group_id, reporting_service.assignment_role_id(assignment, roles),
+                                    reporting_service.assignment_role_id(assignment, roles, evaluator=True), assignment.evaluatee_id,
                                     "self" if assignment.evaluator_id == assignment.evaluatee_id else "peer"))
             if question_id not in answers or question_id in repeated:
                 continue
@@ -170,8 +170,8 @@ def _collect(rows: list[Any], db: Session, *, include_text: bool = False):
                         value = True  # Ordinary analytics retains availability, not written feedback.
             if valid:
                 observations.append(Observation(assignment.id, assignment.evaluatee_id, assignment.evaluator_id,
-                                                assignment.company_group_id, roles.get(assignment.evaluatee_id),
-                                                roles.get(assignment.evaluator_id), key, value))
+                                                assignment.company_group_id, reporting_service.assignment_role_id(assignment, roles),
+                                                reporting_service.assignment_role_id(assignment, roles, evaluator=True), key, value))
     section_names = {section.id: section.name for section in db.query(models.Section).filter(models.Section.id.in_(section_ids)).all()} if section_ids else {}
     for definition in definitions.values():
         if definition["section_id"] in section_names:
