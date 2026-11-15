@@ -42,7 +42,7 @@ function DashboardTopbar({ userName, currentDate }: DashboardTopbarProps) {
         </div>
         <div className="hr-insights-footer">
           {activeTip.sourceLabel && activeTip.sourceUrl ? (
-            <a href={activeTip.sourceUrl}>{activeTip.sourceLabel}</a>
+            <a href={activeTip.sourceUrl} target="_blank" rel="noopener noreferrer">{activeTip.sourceLabel}</a>
           ) : (
             <span>Curated HR practice</span>
           )}

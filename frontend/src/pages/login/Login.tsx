@@ -4,6 +4,7 @@ import { Compass } from 'lucide-react';
 import { getAuthenticatedDashboardPath, isHrOrManagerRole } from '../layout/sidebar-user';
 import { API_BASE_URL, AUTH0_CONFIGURED } from '../../config';
 import Auth0SignIn from './Auth0SignIn';
+import { safeReturnPath } from '../../auth/return-path';
 import { useAppAuth } from '../../auth/AppAuth';
 import './Login.css';
 
@@ -20,11 +21,11 @@ function Login() {
   const location = useLocation();
   useEffect(() => {
     if (state.status !== 'authenticated') return;
-    const saved = state.mode === 'auth0' ? sessionStorage.getItem('auth0ReturnTo') : (location.state as { from?: string } | null)?.from;
+    const saved = safeReturnPath(state.mode === 'auth0'
+      ? sessionStorage.getItem('auth0ReturnTo') : (location.state as { from?: unknown } | null)?.from);
     sessionStorage.removeItem('auth0ReturnTo');
     const dashboard = getAuthenticatedDashboardPath(state.user.permissions);
-    const target = saved?.startsWith('/') && !saved.startsWith('//') && !saved.startsWith('/\\') && saved !== '/'
-      ? saved : dashboard;
+    const target = saved && saved !== '/' ? saved : dashboard;
     navigate(target, { replace: true });
   }, [state, navigate, location.state]);
   if (state.status === 'authenticated') return <main role="status">Opening your dashboard...</main>;
@@ -68,9 +69,9 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
 
       const loggedInUser = await response.json();
       if (!await selectDevelopmentUser(loggedInUser)) return;
-      const from = (location.state as { from?: unknown } | null)?.from;
+      const from = safeReturnPath((location.state as { from?: unknown } | null)?.from);
       const landing = isHrOrManagerRole(loggedInUser.role_name ?? null) ? '/hr-home' : '/employee-home';
-      navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : landing, { replace: true });
+      navigate(from ?? landing, { replace: true });
     } catch (cause) {
       setErrorMessage(cause instanceof Error ? cause.message : 'Could not connect to Compass. Please try again.');
     } finally {

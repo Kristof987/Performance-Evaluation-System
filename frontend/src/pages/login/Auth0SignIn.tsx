@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useLocation } from 'react-router';
 import { useAppAuth } from '../../auth/AppAuth';
+import { safeReturnPath } from '../../auth/return-path';
 
 export default function Auth0SignIn() {
   const { error, loginWithRedirect } = useAuth0();
@@ -12,10 +13,8 @@ export default function Auth0SignIn() {
   async function signIn() {
     setLoginError(false);
     clearDevelopmentUser();
-    const from = (location.state as { from?: unknown } | null)?.from;
-    if (typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/\\')) {
-      sessionStorage.setItem('auth0ReturnTo', from);
-    }
+    const from = safeReturnPath((location.state as { from?: unknown } | null)?.from);
+    if (from) sessionStorage.setItem('auth0ReturnTo', from);
     try {
       await loginWithRedirect();
     } catch {

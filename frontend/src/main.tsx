@@ -68,9 +68,16 @@ function EmployeeHomeRoute() {
   return <ProtectedPage rule={ACCESS.evaluations}><EmployeeHome /></ProtectedPage>
 }
 
+/** IDs in the path (:id, :campaignId...) must be positive whole numbers; anything else is a broken link. */
+function ValidIds({ children }: { children: ReactNode }) {
+  const params = useParams()
+  const invalid = Object.entries(params).some(([key, value]) => /id$/i.test(key) && !/^[1-9]\d{0,15}$/.test(value ?? ''))
+  return invalid ? <NotFound /> : children
+}
+
 /** A route's tab title plus its access check. Pages that know a more specific name refine the title. */
 function page(title: string[], element: ReactNode, rule?: AccessRule) {
-  return <><PageTitle parts={title} /><ProtectedPage rule={rule}>{element}</ProtectedPage></>
+  return <><PageTitle parts={title} /><ProtectedPage rule={rule}><ValidIds>{element}</ValidIds></ProtectedPage></>
 }
 
 export default function AppRoutes() {
@@ -102,7 +109,7 @@ export default function AppRoutes() {
         <Route path="/reports/campaigns/:campaignId/employees/:employeeId" element={page(['Employee', 'Reports'], <EmployeeReportDetailPage />, ACCESS.reports)} />
         <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />
         <Route path="/settings/:section" element={page(['Settings'], <SettingsPage />, ACCESS.settings)} />
-        <Route path="*" element={<><PageTitle parts={['Page not found']} /><NotFound /></>} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   )
