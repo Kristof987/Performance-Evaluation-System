@@ -9,14 +9,12 @@ import type {
 import { emptyCampaignForm, validateCampaignTimes } from '../campaign.utils';
 import { createCampaign, fetchCampaigns } from '../campaign.api';
 import { formatUserName } from '../../layout/sidebar-user';
-import { useAuth0 } from '@auth0/auth0-react';
 import { useAppAuth } from '../../../auth/AppAuth';
 import { ApiAccessError } from '../../../auth/authenticated-api';
 
 export function useCampaigns() {
   const navigate = useNavigate();
-  const { getAccessTokenSilently } = useAuth0();
-  const { state, retryAuth0 } = useAppAuth();
+  const { state, retryAuth0, getAccessToken: getAccessTokenSilently } = useAppAuth();
   const user = state.status === 'authenticated' && state.mode === 'auth0' ? state.user : null;
   const canManageCampaigns = user?.permissions.includes('campaigns.manage') ?? false;
   const [campaignList, setCampaignList] = useState<Campaign[]>([]);

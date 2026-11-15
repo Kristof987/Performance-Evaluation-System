@@ -19,8 +19,11 @@ import { budapestInstant, budapestLocal, mapCampaignFromResponse } from './campa
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
 
 export class CampaignRequestError extends Error {
-  constructor(public readonly status: number, message: string) {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
   }
 }
 

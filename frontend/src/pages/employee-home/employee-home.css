@@ -582,8 +582,8 @@
 
 .employee-no-results-visual {
   align-items: center;
-  background: #f7f9ff;
-  border: 1px solid #d8e1fb;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
   border-radius: 30px;
   color: var(--color-primary);
   display: flex;
@@ -714,8 +714,8 @@
 
 .active-review-icon {
   align-items: center;
-  background: #f4f6ff;
-  border: 1px solid #c8d2f5;
+  background: var(--color-primary-soft);
+  border: 1px solid var(--color-border);
   border-radius: 28px;
   color: var(--color-primary);
   display: flex;

@@ -5,7 +5,7 @@
 .questionnaire-rating-options input { height: 1px; opacity: 0; position: absolute; width: 1px; }
 .questionnaire-rating-options label span { align-items: center; background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: 10px; color: var(--color-text-secondary); display: flex; font-size: 14px; font-weight: 750; height: 44px; justify-content: center; transition: background-color 0.15s, border-color 0.15s, color 0.15s; }
 .questionnaire-rating-options label:hover span { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary); }
-.questionnaire-rating-options input:checked + span { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-surface); }
+.questionnaire-rating-options input:checked + span { background: var(--color-primary-solid); border-color: var(--color-primary-solid); color: var(--color-on-primary); }
 .questionnaire-rating-options input:focus-visible + span { outline: 2px solid var(--color-primary); outline-offset: 3px; }
 .questionnaire-rating-options input:disabled + span { cursor: not-allowed; opacity: 0.65; }
 .questionnaire-rating-endpoints { color: var(--color-text-secondary); display: flex; font-size: 12px; gap: 12px; justify-content: space-between; line-height: 1.45; }
@@ -28,7 +28,7 @@
 .questionnaire-question-title > span:first-child { color: var(--color-primary); flex: 0 0 auto; font-size: 14px; font-weight: 750; }
 .questionnaire-question-title label, .questionnaire-question-title strong { font: inherit; min-width: 0; overflow-wrap: anywhere; }
 .questionnaire-question-title [aria-label="required"] { color: var(--color-danger); }
-.questionnaire-textarea { border: 1px solid var(--color-border-strong); border-radius: 10px; font: 500 14px var(--font-sans); min-height: 108px; padding: 12px 14px; resize: vertical; width: 100%; }
+.questionnaire-textarea { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-border-strong); border-radius: 10px; font: 500 14px var(--font-sans); min-height: 108px; padding: 12px 14px; resize: vertical; width: 100%; }
 .questionnaire-textarea:focus-visible { border-color: var(--color-primary); outline: 2px solid var(--color-primary); outline-offset: 1px; }
 
 /* Preview uses independent native inputs but the same visual language as completion. */
@@ -39,7 +39,7 @@
 .forms-preview-question .forms-preview-scale { border: 0; display: flex; flex-wrap: nowrap; gap: 8px; margin: 0; min-width: 0; padding: 2px 2px 4px; }
 .forms-preview-question .forms-preview-scale label { align-items: center; background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: 10px; color: var(--color-text-secondary); display: flex; flex: 0 0 44px; font-size: 14px; font-weight: 750; height: 44px; justify-content: center; padding: 0; position: relative; transition: background-color 0.15s, border-color 0.15s, color 0.15s; }
 .forms-preview-question .forms-preview-scale label:hover { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary); }
-.forms-preview-question .forms-preview-scale label:has(input:checked) { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-surface); }
+.forms-preview-question .forms-preview-scale label:has(input:checked) { background: var(--color-primary-solid); border-color: var(--color-primary-solid); color: var(--color-on-primary); }
 .forms-preview-question .forms-preview-scale label:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .forms-preview-question .forms-preview-scale input { height: 1px; opacity: 0; position: absolute; width: 1px; }
 .forms-preview-question .forms-preview-endpoints { box-sizing: border-box; color: var(--color-text-secondary); display: flex; font-size: 12px; gap: 16px; justify-content: space-between; line-height: 1.4; min-width: 0; padding: 0 2px; width: 100%; }
@@ -51,7 +51,7 @@
 .forms-preview-question .forms-preview-choice-group label:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .forms-preview-question .forms-preview-choice-group input { accent-color: var(--color-primary); flex: 0 0 auto; height: 18px; margin: 0; width: 18px; }
 .forms-preview-question .forms-preview-choice-group label span { color: var(--color-text); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
-.forms-preview-question textarea { border: 1px solid var(--color-border-strong); border-radius: 10px; font: 500 14px var(--font-sans); min-height: 96px; padding: 11px 13px; resize: vertical; width: 100%; }
+.forms-preview-question textarea { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-border-strong); border-radius: 10px; font: 500 14px var(--font-sans); min-height: 96px; padding: 11px 13px; resize: vertical; width: 100%; }
 .forms-preview-question textarea:focus-visible { border-color: var(--color-primary); outline: 2px solid var(--color-primary); outline-offset: 1px; }
 @media (max-width: 600px) {
   .forms-preview-paper > h2 { padding: 18px; }

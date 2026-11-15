@@ -3,8 +3,11 @@ import { API_BASE_URL } from '../config';
 export type AccessTokenGetter = () => Promise<string>;
 
 export class ApiAccessError extends Error {
-  constructor(public readonly status: 401 | 403, detail?: string) {
+  readonly status: 401 | 403;
+
+  constructor(status: 401 | 403, detail?: string) {
     super(status === 401 ? 'Your session could not be verified. Sign in again.' : detail ?? 'You do not have permission to perform this action.');
+    this.status = status;
   }
 }
 

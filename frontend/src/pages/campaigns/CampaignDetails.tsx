@@ -104,6 +104,7 @@ export function CampaignDetails() {
     groupsMessage,
     rulesMessage,
     matrixMessage,
+    matrixSaveError,
     isSavingGroups,
     isSavingRules,
     isSavingMatrix,
@@ -121,6 +122,7 @@ export function CampaignDetails() {
     closeEdit,
     updateForm,
     toggleGroup,
+    discardGroups,
     updateRuleForm,
     toggleMatrixAssignment,
     applyMatrixSelectAll,
@@ -159,7 +161,10 @@ export function CampaignDetails() {
   const removedSelfForms = removalSelf.participants.filter((person) =>
     person.formId != null && !remainingParticipantIds.has(person.employeeId)).length;
   const setupDirty = hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges;
-  const pendingChanges = setupDirty || (isEditOpen && hasEditChanges);
+  const groupSaveBlocked = hasRuleChanges || hasMatrixChanges || hasSelfChanges;
+  const setupSaveBusy = isSavingGroups || isSavingMatrix || isSavingRules || isSavingSelf || isSavingSetup || isIssuingPlanned;
+  const pendingChanges = setupDirty || setupSaveBusy || (isEditOpen && hasEditChanges);
+  const matrixAutoSaveBlocked = hasSelfChanges || hasGroupChanges;
   const validSelfForms = new Set(selfEvaluations.forms.map((item) => item.id));
   const assignedSelfCount = selfEvaluations.participants.filter((person) => validSelfForms.has(selectedSelfForms[person.employeeId] ?? -1)).length;
   const selectedPairs = matrixSelectedCount(selectedMatrixAssignments);
@@ -275,6 +280,8 @@ export function CampaignDetails() {
   }, [tab, campaign?.id, campaign?.sent, campaign?.done, getAccessToken]);
 
   function changeTab(next: 'overview' | 'setup', section: SetupSection = lastSetupSection.current) {
+    if (setupSaveBusy) return false;
+    if (setupDirty && !groupsMessage && !matrixSaveError && !rulesMessage && !selfMessage) return false;
     if (next === tab && (next !== 'setup' || section === setupSection && requestedSection === section)) return true;
     if (tab === 'setup' && next === 'overview' && pendingChanges && !window.confirm('You have unsaved campaign changes. They will stay in this page, but will be lost if you leave or reload. Continue to Overview?')) return false;
     if (next === 'setup') lastSetupSection.current = section;
@@ -352,17 +359,52 @@ export function CampaignDetails() {
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
   }, [pendingChanges]);
 
-  function requestGroupSave() {
+  useEffect(() => {
+    if (!canEdit || !hasGroupChanges || isSavingGroups || isSavingSetup || isSetupPreviewLoading ||
+        groupSaveBlocked || groupsMessage || confirmGroupRemoval) return;
+    const timer = window.setTimeout(() => {
+      if (removedGroupIds.length && (campaign?.status === 'draft' || campaign?.status === 'scheduled')) {
+        setConfirmGroupRemoval(true);
+      } else {
+        void handleUpdateGroups();
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [canEdit, hasGroupChanges, isSavingGroups, isSavingSetup, isSetupPreviewLoading, groupSaveBlocked,
+    groupsMessage, confirmGroupRemoval, removedGroupIds.length, campaign?.status, handleUpdateGroups]);
+
+  useEffect(() => {
+    if (!canPlanPairs || !hasMatrixChanges || matrixPlanningReadiness !== 'ready' || matrixAutoSaveBlocked ||
+        isSavingMatrix || isSavingGroups || isSavingSetup || isSavingRules || isSavingSelf || isIssuingPlanned ||
+        isSetupPreviewLoading || setupPreviewError || matrixSaveError) return;
+    const timer = window.setTimeout(() => { void handleUpdateMatrix(); }, 500);
+    return () => window.clearTimeout(timer);
+  }, [canPlanPairs, hasMatrixChanges, matrixPlanningReadiness, matrixAutoSaveBlocked,
+    isSavingMatrix, isSavingGroups, isSavingSetup, isSavingRules, isSavingSelf, isIssuingPlanned,
+    isSetupPreviewLoading, setupPreviewError, matrixSaveError, handleUpdateMatrix]);
+
+  useEffect(() => {
+    if (!canAssignForms || !hasRuleChanges || setupSaveBusy || hasGroupChanges || hasMatrixChanges ||
+        isSetupPreviewLoading || setupPreviewError || rulesMessage) return;
+    const timer = window.setTimeout(() => { void handleUpdateRules(); }, 500);
+    return () => window.clearTimeout(timer);
+  }, [canAssignForms, hasRuleChanges, setupSaveBusy, hasGroupChanges, hasMatrixChanges,
+    isSetupPreviewLoading, setupPreviewError, rulesMessage, handleUpdateRules]);
+
+  useEffect(() => {
+    if (!canEdit || !hasSelfChanges || setupSaveBusy || hasGroupChanges || hasMatrixChanges ||
+        isSetupPreviewLoading || setupPreviewError || selfMessage) return;
+    const timer = window.setTimeout(() => { void handleUpdateSelfForms(); }, 500);
+    return () => window.clearTimeout(timer);
+  }, [canEdit, hasSelfChanges, setupSaveBusy, hasGroupChanges, hasMatrixChanges,
+    isSetupPreviewLoading, setupPreviewError, selfMessage, handleUpdateSelfForms]);
+
+  function retryGroupSave() {
     if (removedGroupIds.length && (campaign?.status === 'draft' || campaign?.status === 'scheduled')) {
       setConfirmGroupRemoval(true);
     } else {
       handleUpdateGroups();
     }
-  }
-
-  function requestSetupSave() {
-    if (removedGroupIds.length) setConfirmGroupRemoval(true);
-    else handleUpdateSetup();
   }
 
   function navigateToIssue(issue: CampaignIssue) {
@@ -513,16 +555,6 @@ export function CampaignDetails() {
             <button type="button" className={setupSection === 'questionnaires' ? 'active' : ''} aria-current={setupSection === 'questionnaires' ? 'page' : undefined} onClick={() => changeTab('setup', 'questionnaires')}><ListChecks size={17} aria-hidden="true" /><strong>Questionnaire assignments</strong></button>
             <button type="button" className={setupSection === 'self' ? 'active' : ''} aria-current={setupSection === 'self' ? 'page' : undefined} onClick={() => changeTab('setup', 'self')}><UserRound size={17} aria-hidden="true" /><strong>Self-evaluations</strong></button>
           </nav>
-        {campaign.status === 'scheduled' && setupSection !== 'pairs' && setupSection !== 'questionnaires' && (
-          <div className="campaign-heading-actions">
-            <span role="status">{setupPreviewError ? 'Setup preview unavailable' : isSetupPreviewLoading ? 'Loading selected group setup...' :
-              hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges ? 'Unsaved setup changes' : 'Setup saved'}</span>
-            {canEdit && <button className="btn btn-primary" type="button" onClick={requestSetupSave}
-              disabled={isSavingSetup || isSetupPreviewLoading || !!setupPreviewError || !(hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges)}>
-              {isSavingSetup ? 'Saving setup...' : 'Save setup changes'}
-            </button>}
-          </div>
-        )}
         {setupPreviewError && <div className="campaign-save-message" role="alert">{setupPreviewError}</div>}
 
         {setupSection === 'groups' && <div className="campaign-groups-workspace"><section className="campaign-groups-card" id="campaign-groups" tabIndex={-1}>
@@ -531,14 +563,7 @@ export function CampaignDetails() {
               <h2>Campaign groups</h2>
               <p>Select which company groups are included in this campaign.</p>
             </div>
-            {canEdit && campaign.status !== 'scheduled' && <button
-              className={hasGroupChanges ? 'btn btn-primary' : 'btn btn-secondary'}
-              type="button"
-              disabled={isSavingGroups || !hasGroupChanges}
-               onClick={requestGroupSave}
-            >
-              {isSavingGroups ? 'Saving...' : 'Save groups'}
-            </button>}
+            {canEdit && <span className="campaign-group-autosave" role="status">{isSavingGroups || isSavingSetup ? 'Saving groups...' : hasGroupChanges ? groupsMessage ? 'Not saved' : 'Waiting to save...' : 'Saved automatically'}</span>}
           </div>
 
           {campaignGroups.availableGroups.length === 0 ? (
@@ -556,7 +581,7 @@ export function CampaignDetails() {
                   <input
                     type="checkbox"
                     checked={selectedGroupIds.includes(group.id)}
-                      disabled={!canEdit || (selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id))}
+                      disabled={!canEdit || isSavingGroups || isSavingSetup || groupSaveBlocked || (selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id))}
                     title={groupsWithIssuedAssignments.has(group.id) ? 'This group has issued evaluations and cannot be removed.' : undefined}
                     onChange={() => toggleGroup(group.id)}
                   />
@@ -574,11 +599,13 @@ export function CampaignDetails() {
 
           <div className="campaign-groups-footer">
             <span>{countLabel(selectedGroupIds.length, 'group')} selected</span>
-            {groupsMessage !== '' && <strong>{groupsMessage}</strong>}
+            {groupsMessage !== '' && <strong role="alert">{groupsMessage}</strong>}
           </div>
+          {canEdit && groupSaveBlocked && <p className="campaign-setup-guidance">Save or discard questionnaire, matrix and self-evaluation changes before changing campaign groups.</p>}
+          {canEdit && hasGroupChanges && !isSavingGroups && !isSavingSetup && groupsMessage && <div className="campaign-heading-actions"><button className="btn btn-secondary" type="button" disabled={groupSaveBlocked} onClick={retryGroupSave}>Retry saving</button><button className="btn btn-secondary" type="button" onClick={discardGroups}>Discard group changes</button></div>}
         </section>
         <CampaignGroupPreview employees={previewEmployees} selectedGroups={selectedPreviewGroups} loading={peopleLoading} error={!getAccessToken ? 'Employee preview is unavailable.' : peopleError} />
-        <div className="campaign-groups-next"><div><strong>What happens next?</strong><p>After selecting campaign groups, plan who evaluates whom in Evaluation assignments.</p>{hasGroupChanges && <small role="status">Save group changes before continuing. Your selection remains staged while you switch workspaces.</small>}</div><button className="btn btn-primary" type="button" disabled={!selectedGroupIds.length || hasGroupChanges || isSetupPreviewLoading || !!setupPreviewError} onClick={() => changeTab('setup', 'pairs')}>Continue to evaluation assignments <ArrowUpRight size={16} aria-hidden="true" /></button></div>
+        <div className="campaign-groups-next"><div><strong>What happens next?</strong><p>Group selections save automatically. Continue to plan who evaluates whom.</p>{hasGroupChanges && <small role="status">{groupsMessage ? 'Group changes were not saved. Retry or discard them before continuing.' : 'Wait for automatic saving before continuing.'}</small>}</div><button className="btn btn-primary" type="button" disabled={!selectedGroupIds.length || hasGroupChanges || isSavingGroups || isSavingSetup || !!groupsMessage || isSetupPreviewLoading || !!setupPreviewError} onClick={() => changeTab('setup', 'pairs')}>Continue to evaluation assignments <ArrowUpRight size={16} aria-hidden="true" /></button></div>
         </div>}
 
         {setupSection === 'pairs' && <section className="campaign-rules-card campaign-matrix-workspace" id="campaign-evaluation-matrix" tabIndex={-1}>
@@ -591,26 +618,25 @@ export function CampaignDetails() {
               rules={evaluationRules}
               selfForms={selectedSelfForms}
               selection={selectedMatrixAssignments}
-              dirty={campaign.status === 'scheduled' ? setupDirty : hasMatrixChanges}
               matrixDirty={hasMatrixChanges}
               rulesDirty={false}
-              staged={campaign.status === 'scheduled'}
-              editable={canPlanPairs && matrixPlanningReadiness === 'ready'}
-              disabledReason={!canPlanPairs ? 'This campaign is read-only.' : matrixPlanningReadiness === 'groups' ? 'Select and save campaign groups before editing the matrix.' : matrixPlanningReadiness === 'empty' ? 'Selected groups have no active employees.' : ''}
+              editable={canPlanPairs && matrixPlanningReadiness === 'ready' && !matrixAutoSaveBlocked && !isSavingGroups && !isSavingRules && !isSavingSelf && !isIssuingPlanned && !(matrixSaveError && !hasMatrixChanges)}
+              disabledReason={!canPlanPairs ? 'This campaign is read-only.' : matrixAutoSaveBlocked ? 'Save or discard group and self-evaluation changes before editing the matrix.' : matrixPlanningReadiness === 'groups' ? 'Select and save campaign groups before editing the matrix.' : matrixPlanningReadiness === 'empty' ? 'Selected groups have no active employees.' : matrixSaveError && !hasMatrixChanges ? 'Reload to refresh the saved matrix details.' : ''}
               minimum={matrixMinimum}
               onMinimumChange={setMatrixMinimum}
               saving={isSavingMatrix || isSavingSetup}
-              saveDisabled={campaign.status === 'scheduled' ? !canPlanPairs || isSavingSetup || isSetupPreviewLoading || !!setupPreviewError || !setupDirty : !canPlanPairs || isSavingMatrix || !hasMatrixChanges || matrixPlanningReadiness !== 'ready'}
+              saveDisabled={!canPlanPairs || matrixAutoSaveBlocked || isSavingMatrix || isSavingGroups || isSavingSetup || isSavingRules || isSavingSelf || isIssuingPlanned || isSetupPreviewLoading || !!setupPreviewError || !hasMatrixChanges || matrixPlanningReadiness !== 'ready'}
+              saveError={matrixSaveError}
+              autosaveBlockedReason={matrixAutoSaveBlocked ? 'Save or discard group and self-evaluation changes before the matrix can save automatically.' : ''}
               message={matrixMessage}
               onToggle={toggleMatrixAssignment}
               onAddAll={applyMatrixSelectAll}
               onAddSelf={applyMatrixSelfEvaluations}
               onGenerate={applyMatrixMinimumReviewers}
               onClear={applyMatrixDeleteAll}
-              onSave={campaign.status === 'scheduled' ? requestSetupSave : handleUpdateMatrix}
+              onSave={handleUpdateMatrix}
               onDiscard={discardMatrix}
             /> : <><div className="campaign-matrix-inline-header"><div><h2>Evaluation matrix</h2><p>Select which employees evaluate which other employees.</p></div></div>{matrixNotice}<div className="campaign-groups-empty">Select at least one campaign group before setting up evaluations.</div></>}
-          {!activeMatrixGroup && campaign.status === 'scheduled' && canEdit && <div className="campaign-matrix-footer"><span>Changes are staged until Save setup changes is clicked.</span><button className="btn btn-primary" type="button" disabled={isSavingSetup || isSetupPreviewLoading || !!setupPreviewError || !setupDirty} onClick={requestSetupSave}>{isSavingSetup ? 'Saving...' : 'Save setup changes'}</button></div>}
         </section>}
 
         {setupSection === 'questionnaires' && <section className="campaign-rules-card campaign-questionnaire-workspace" id="campaign-form-assignment-rules" tabIndex={-1}>
@@ -619,17 +645,7 @@ export function CampaignDetails() {
               <h2>Questionnaire assignments</h2>
               <p>Assign questionnaires to evaluator–evaluatee role relationships.</p>
             </div>
-            {hasRuleChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
-             {canAssignForms && hasRuleChanges && <button className="btn btn-secondary" type="button" onClick={discardRules}>Discard changes</button>}
-              {canAssignForms && campaign.status !== 'scheduled' && <button
-              className={hasRuleChanges ? 'btn btn-primary' : 'btn btn-secondary'}
-              type="button"
-              disabled={isSavingRules || !hasRuleChanges}
-              onClick={handleUpdateRules}
-            >
-              {isSavingRules ? 'Saving...' : 'Save assignments'}
-             </button>}
-              {canAssignForms && campaign.status === 'scheduled' && <button className="btn btn-primary" type="button" disabled={isSavingSetup || isSetupPreviewLoading || !!setupPreviewError || !setupDirty} onClick={requestSetupSave}>{isSavingSetup ? 'Saving...' : 'Save setup changes'}</button>}
+            {canAssignForms && <div className="campaign-assignment-autosave"><span role="status">{isSavingRules ? 'Saving questionnaires...' : hasRuleChanges ? rulesMessage ? 'Not saved' : hasGroupChanges || hasMatrixChanges ? 'Waiting for groups and matrix...' : 'Waiting to save...' : rulesMessage ? 'Saved; refresh required' : 'Saved automatically'}</span>{hasRuleChanges && !setupSaveBusy && <button className="btn btn-secondary" type="button" onClick={discardRules}>Discard changes</button>}{hasRuleChanges && rulesMessage && <button className="btn btn-secondary" type="button" disabled={setupSaveBusy || hasGroupChanges || hasMatrixChanges || isSetupPreviewLoading || !!setupPreviewError} onClick={handleUpdateRules}>Retry saving</button>}</div>}
           </div>
           {!isSetupPreviewLoading && savedPairCount === 0 && selectedGroupIds.length > 0 && <div className="campaign-questionnaire-empty-plan" role="alert"><strong>No saved evaluation pairs yet.</strong><span>{selectedPairs > 0 ? 'Save your staged matrix selections first. ' : 'Select and save evaluation pairs first. '}You can review optional role assignments here, but required questionnaires are determined by saved pairs.</span><button className="campaign-link" type="button" onClick={() => changeTab('setup', 'pairs')}>Open evaluation assignments</button></div>}
 
@@ -688,7 +704,7 @@ export function CampaignDetails() {
                                        className="form-control"
                                        aria-label={`${group.groupName}: ${pair.evaluatorRoleName} evaluates ${pair.evaluateeRoleName} form`}
                                        value={selectedRuleFormIds[ruleKey] ?? ''}
-                                           disabled={!canAssignForms || ruleLocked || isSavingMatrix}
+                                           disabled={!canAssignForms || ruleLocked || setupSaveBusy || hasGroupChanges || hasMatrixChanges || (!!rulesMessage && !hasRuleChanges)}
                                         title={ruleLocked ? 'Issued evaluations use this form rule. The rule is locked.' : undefined}
                                       onChange={(event) =>
                                         updateRuleForm(
@@ -722,11 +738,11 @@ export function CampaignDetails() {
             </div>
           )}
 
-          <div className="campaign-rule-totals"><span>{countLabel(displayedRelationships, 'role relationship')} displayed · {formProgress.configured} of {formProgress.required} required configured{formProgress.missing > 0 && ` · ${countLabel(formProgress.missing, 'missing assignment')}`}</span>{rulesMessage && <strong role="status">{rulesMessage}</strong>}</div>
-          <div className="campaign-rule-next"><div><strong>What happens next?</strong><p>Review optional self-evaluations, or finish any missing questionnaires before issuance.</p>{isSetupPreviewLoading || setupPreviewError ? <small>{setupPreviewError ? 'The setup preview is unavailable.' : 'Loading required questionnaire relationships.'}</small> : formProgress.missing > 0 ? <small>{countLabel(formProgress.missing, 'selected role relationship')} {formProgress.missing === 1 ? 'still needs' : 'still need'} a questionnaire before issuance.</small> : hasRuleChanges ? <small>Changes are staged. Save {campaign.status === 'scheduled' ? 'setup changes' : 'assignments'} to persist them before issuance.</small> : missingPlannedForms ? <small>Planned self-evaluation pairs need individual questionnaires before issuance.</small> : savedPairCount > 0 ? <small>Required questionnaires are assigned. Planned pairs are ready for issuance when the campaign lifecycle allows it.</small> : <small>Save evaluation pairs first to determine which questionnaires are required.</small>}</div>
-            <button className="btn btn-secondary" type="button" onClick={() => changeTab('setup', 'self')}>Continue to self-evaluations <ArrowUpRight size={16} aria-hidden="true" /></button>
+          <div className="campaign-rule-totals"><span>{countLabel(displayedRelationships, 'role relationship')} displayed · {formProgress.configured} of {formProgress.required} required configured{formProgress.missing > 0 && ` · ${countLabel(formProgress.missing, 'missing assignment')}`}</span>{rulesMessage && <strong role="alert">{rulesMessage}</strong>}</div>
+          <div className="campaign-rule-next"><div><strong>What happens next?</strong><p>Review optional self-evaluations, or finish any missing questionnaires before issuance.</p>{isSetupPreviewLoading || setupPreviewError ? <small>{setupPreviewError ? 'The setup preview is unavailable.' : 'Loading required questionnaire relationships.'}</small> : formProgress.missing > 0 ? <small>{countLabel(formProgress.missing, 'selected role relationship')} {formProgress.missing === 1 ? 'still needs' : 'still need'} a questionnaire before issuance.</small> : hasRuleChanges ? <small>{rulesMessage ? 'Automatic saving failed. Retry or discard changes before issuance.' : 'Questionnaire changes are saving automatically. Wait before continuing.'}</small> : missingPlannedForms ? <small>Planned self-evaluation pairs need individual questionnaires before issuance.</small> : savedPairCount > 0 ? <small>Required questionnaires are assigned. Planned pairs are ready for issuance when the campaign lifecycle allows it.</small> : <small>Save evaluation pairs first to determine which questionnaires are required.</small>}</div>
+            <button className="btn btn-secondary" type="button" disabled={setupSaveBusy || hasRuleChanges} onClick={() => changeTab('setup', 'self')}>Continue to self-evaluations <ArrowUpRight size={16} aria-hidden="true" /></button>
           </div>
-          {unissuedPairCount > 0 && <div className="campaign-rule-issue"><div><strong>{countLabel(unissuedPairCount, 'planned evaluation')} pending issuance</strong><p>{campaign.status === 'paused' ? 'Ready pairs will be issued on resume; employees cannot access them while paused.' : campaign.status === 'draft' || campaign.status === 'scheduled' ? 'Validated plans are issued during campaign activation.' : formProgress.missing > 0 || missingPlannedForms ? 'Assign and save questionnaires for every planned pair before issuing.' : setupDirty ? 'Save or discard staged setup changes before issuing.' : 'Issue validated plans with immutable questionnaire snapshots.'}</p></div>{canAssignForms && (campaign.status === 'active' || campaign.status === 'review') && <button className="btn btn-primary" type="button" disabled={isIssuingPlanned || setupDirty || formProgress.missing > 0 || missingPlannedForms} onClick={() => { if (window.confirm(`Issue ${countLabel(unissuedPairCount, 'planned evaluation')}? Questionnaire snapshots become immutable once issued.`)) void handleIssuePlanned(); }}>{isIssuingPlanned ? 'Issuing...' : 'Issue ready evaluations'}</button>}</div>}
+          {unissuedPairCount > 0 && <div className="campaign-rule-issue"><div><strong>{countLabel(unissuedPairCount, 'planned evaluation')} pending issuance</strong><p>{campaign.status === 'paused' ? 'Ready pairs will be issued on resume; employees cannot access them while paused.' : campaign.status === 'draft' || campaign.status === 'scheduled' ? 'Validated plans are issued during campaign activation.' : formProgress.missing > 0 || missingPlannedForms ? 'Assign questionnaires for every planned pair before issuing; changes save automatically.' : setupDirty || setupSaveBusy ? 'Wait for automatic saving, or resolve any unsaved changes, before issuing.' : 'Issue validated plans with immutable questionnaire snapshots.'}</p></div>{canAssignForms && (campaign.status === 'active' || campaign.status === 'review') && <button className="btn btn-primary" type="button" disabled={setupSaveBusy || setupDirty || formProgress.missing > 0 || missingPlannedForms || !!rulesMessage || !!selfMessage || !!matrixSaveError || !!groupsMessage} onClick={() => { if (window.confirm(`Issue ${countLabel(unissuedPairCount, 'planned evaluation')}? Questionnaire snapshots become immutable once issued.`)) void handleIssuePlanned(); }}>{isIssuingPlanned ? 'Issuing...' : 'Issue ready evaluations'}</button>}</div>}
           {issuanceMessage && <p className="campaign-rule-issue-feedback" role="alert">{issuanceMessage}</p>}
         </section>}
 
@@ -736,13 +752,9 @@ export function CampaignDetails() {
               <h2>Self-evaluations</h2>
               <p>Optionally assign a self-evaluation questionnaire to individual employees.</p>
             </div>
-            {hasSelfChanges && <span className="campaign-rules-unsaved" role="status">Unsaved changes</span>}
-            {canEdit && hasSelfChanges && <button className="btn btn-secondary" type="button" disabled={isSavingSelf} onClick={discardSelfForms}>Discard changes</button>}
-             {canEdit && campaign.status !== 'scheduled' && <button className={hasSelfChanges ? 'btn btn-primary' : 'btn btn-secondary'} type="button" disabled={isSavingSelf || !hasSelfChanges || hasMatrixChanges} onClick={handleUpdateSelfForms}>
-               {isSavingSelf ? 'Saving...' : 'Save self-evaluations'}
-             </button>}
+            {canEdit && <div className="campaign-assignment-autosave"><span role="status">{isSavingSelf ? 'Saving self-evaluations...' : hasSelfChanges ? selfMessage ? 'Not saved' : hasGroupChanges || hasMatrixChanges ? 'Waiting for groups and matrix...' : 'Waiting to save...' : selfMessage ? 'Saved; refresh required' : 'Saved automatically'}</span>{hasSelfChanges && !setupSaveBusy && <button className="btn btn-secondary" type="button" onClick={discardSelfForms}>Discard changes</button>}{hasSelfChanges && selfMessage && <button className="btn btn-secondary" type="button" disabled={setupSaveBusy || hasGroupChanges || hasMatrixChanges || isSetupPreviewLoading || !!setupPreviewError} onClick={handleUpdateSelfForms}>Retry saving</button>}</div>}
           </div>
-           {campaign.status !== 'scheduled' && hasMatrixChanges && hasSelfChanges && <p role="status">Save or discard matrix selections before changing self-evaluation forms.</p>}
+           {(hasMatrixChanges || hasGroupChanges) && <p className="campaign-setup-guidance" role="status">Wait for matrix and group changes to save, or discard them, before changing self-evaluation questionnaires.</p>}
            {isSetupPreviewLoading && campaign.status === 'scheduled' ? (
              <div className="campaign-groups-empty">Loading selected group participants...</div>
            ) : selfEvaluations.participants.length === 0 ? (
@@ -758,7 +770,7 @@ export function CampaignDetails() {
                    return <tr key={person.employeeId}>
                      <th scope="row"><strong>{person.name}</strong><small>{person.roleName}</small></th>
                      <td>{person.groupNames.join(', ')}</td>
-                     <td><select className="form-control" aria-label={`Self-evaluation questionnaire for ${person.name}${locked ? ', issued and locked' : ''}`} title={locked ? 'Issued self-evaluation is protected.' : undefined} value={selectedSelfForms[person.employeeId] ?? ''} disabled={!canEdit || locked || isSavingSelf || isSavingMatrix} onChange={(event) => updateSelfForm(person.employeeId, event.target.value === '' ? null : Number(event.target.value))}>
+                     <td><select className="form-control" aria-label={`Self-evaluation questionnaire for ${person.name}${locked ? ', issued and locked' : ''}`} title={locked ? 'Issued self-evaluation is protected.' : undefined} value={selectedSelfForms[person.employeeId] ?? ''} disabled={!canEdit || locked || setupSaveBusy || hasMatrixChanges || hasGroupChanges || (!!selfMessage && !hasSelfChanges)} onChange={(event) => updateSelfForm(person.employeeId, event.target.value === '' ? null : Number(event.target.value))}>
                        <option value="">No form</option>{selfEvaluations.forms.map((form) => <option key={form.id} value={form.id}>{form.name}</option>)}
                      </select></td>
                      <td><span className={`campaign-rule-row-status ${locked ? 'locked' : assigned ? 'assigned' : 'optional'}`}><span aria-hidden="true" />{locked ? 'Locked' : assigned ? 'Assigned' : 'Optional'}</span></td>
@@ -767,7 +779,7 @@ export function CampaignDetails() {
                </table></div>
              </div>
            )}
-            {selfMessage && <div className="campaign-rule-totals"><strong role="status">{selfMessage}</strong></div>}
+            {selfMessage && <div className="campaign-rule-totals"><strong role="alert">{selfMessage}</strong></div>}
         </section>}
 
         </div>}
@@ -824,8 +836,8 @@ export function CampaignDetails() {
          </CampaignModal>
        )}
 
-       {confirmGroupRemoval && (
-        <CampaignModal mode="remove-group" onClose={() => { if (!isSavingSetup) setConfirmGroupRemoval(false); }}>
+        {confirmGroupRemoval && (
+        <CampaignModal mode="remove-group" onClose={() => { if (!isSavingSetup) { discardGroups(); setConfirmGroupRemoval(false); } }}>
           <div className="campaign-copy-preview">
             <p>Remove <strong>{removedGroupNames.join(', ')}</strong> from this campaign? The group records, Forms, Templates and Sections remain available.</p>
             <dl className="campaign-copy-counts">
@@ -835,11 +847,12 @@ export function CampaignDetails() {
               <div><dt>Planned evaluator-evaluatee assignments affected</dt><dd>{removedAssignments.filter((item) => !item.issued).length}</dd></div>
               <div><dt>Issued assignments protected</dt><dd>{removedAssignments.filter((item) => item.issued).length}</dd></div>
             </dl>
-            <p>Participants and self-evaluations shared with remaining groups stay. Eligible shared planned assignments move to a remaining group; issued evaluations cannot be removed. The resulting Scheduled configuration must still be valid.</p>
+            <p>Participants and self-evaluations shared with remaining groups stay. Eligible shared planned assignments move to a remaining group; issued evaluations cannot be removed. If a Scheduled campaign becomes incomplete, it returns to Draft.</p>
+            {groupsMessage && <p className="campaign-save-message" role="alert">{groupsMessage}</p>}
             <div className="campaign-modal-actions">
-              <button className="btn btn-secondary" type="button" disabled={isSavingSetup} onClick={() => setConfirmGroupRemoval(false)}>Cancel</button>
+              <button className="btn btn-secondary" type="button" disabled={isSavingSetup} onClick={() => { discardGroups(); setConfirmGroupRemoval(false); }}>Cancel</button>
               <button className="btn btn-primary" type="button" disabled={isSavingSetup || removedAssignments.some((item) => item.issued)}
-                onClick={async () => { await handleUpdateSetup(); setConfirmGroupRemoval(false); }}>
+                onClick={async () => { if (await handleUpdateSetup()) setConfirmGroupRemoval(false); }}>
                 {isSavingSetup ? 'Saving...' : 'Remove and save setup'}
               </button>
             </div>

@@ -102,7 +102,7 @@
   align-items: center;
   background: var(--color-primary);
   border-radius: 9px;
-  color: #fff;
+  color: var(--color-on-primary);
   display: flex;
   flex-shrink: 0;
   height: 30px;
@@ -160,7 +160,7 @@
 
 .forms-editor-nav-item.active {
   background: var(--color-primary-dark);
-  color: #fff;
+  color: var(--color-on-primary);
   font-weight: 600;
 }
 
@@ -298,7 +298,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-mode-switch {
-  background: #f6f7fb;
+  background: var(--color-surface-subtle);
   border-bottom: 1px solid #eef0f6;
   display: grid;
   gap: 6px;
@@ -341,7 +341,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-create-tabs button {
-  background: #fafbff;
+  background: var(--color-surface-subtle);
   border: 1px solid #eef0f6;
   border-radius: 10px;
   color: var(--color-text-secondary);
@@ -351,7 +351,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-create-tabs button.active {
-  background: #f3f5ff;
+  background: var(--color-primary-soft);
   border-color: #dfe3fb;
   color: var(--color-primary);
 }
@@ -362,6 +362,8 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-template-select {
+  background: var(--color-surface);
+  color: var(--color-text);
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font: 650 13px Inter, system-ui, sans-serif;
@@ -455,16 +457,16 @@ button.forms-editor-nav-item {
 @media (max-width: 600px) { .forms-ai-options { grid-template-columns: 1fr; } .forms-ai-modal .forms-editor-modal-actions { flex-wrap: wrap; } }
 
 .forms-editor-modal-message {
-  background: #fff8ef;
-  border: 1px solid #f2dfc7;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning);
   border-radius: 10px;
-  color: #8a5524;
+  color: var(--color-warning);
   font-size: 13px;
   padding: 10px 12px;
 }
 
 .forms-danger-action {
-  color: #9a3412 !important;
+  color: var(--color-danger) !important;
 }
 
 .forms-page .btn:not(.forms-editor-icon-btn) {
@@ -477,9 +479,9 @@ button.forms-editor-nav-item {
 }
 
 .forms-page .btn.btn-primary {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-solid);
+  border-color: var(--color-primary-solid);
+  color: var(--color-on-primary);
 }
 
 .forms-editor-workspace {
@@ -546,7 +548,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-form-item.active {
-  background: #f3f5ff;
+  background: var(--color-primary-soft);
   border-color: #dfe3fb;
 }
 
@@ -565,7 +567,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-template-item {
-  background: #fafbff;
+  background: var(--color-surface-subtle);
   border-color: #eef0f6;
 }
 
@@ -580,6 +582,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-form-title input {
+  background: var(--color-surface);
   border: 0;
   color: var(--color-text);
   font: 750 22px Inter, system-ui, sans-serif;
@@ -588,6 +591,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-form-title textarea {
+  background: var(--color-surface);
   border: 0;
   color: var(--color-text-secondary);
   font: 500 14px Inter, system-ui, sans-serif;
@@ -755,7 +759,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-field .form-label {
-  color: #30344d;
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 750;
 }
@@ -770,6 +774,8 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-field textarea {
+  background: var(--color-surface);
+  color: var(--color-text);
   min-height: 72px;
   overflow: auto;
   resize: vertical;
@@ -787,10 +793,10 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-message {
-  background: #fff8ef;
-  border: 1px solid #f2dfc7;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning);
   border-radius: 999px;
-  color: #8a5524;
+  color: var(--color-warning);
   display: inline-flex;
   font: 700 12px var(--font-sans);
   margin: 10px auto 0;
@@ -799,9 +805,9 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-message.success {
-  background: #eefaf2;
-  border-color: #bfe7c8;
-  color: #24743c;
+  background: var(--color-success-bg);
+  border-color: var(--color-success);
+  color: var(--color-success);
 }
 
 .forms-editor-state {
@@ -1023,7 +1029,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-new-form-menu button:hover,
-.forms-new-form-menu button:focus-visible { background: #eff6ff; }
+.forms-new-form-menu button:focus-visible { background: var(--color-primary-soft); }
 .forms-new-form-menu button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
 .forms-new-form-menu svg { color: var(--color-primary); flex-shrink: 0; }
 .forms-new-form-menu strong, .forms-new-form-menu small { display: block; }
@@ -1101,7 +1107,7 @@ button.forms-editor-nav-item {
 .forms-page-tab.active {
   background: var(--color-primary-dark);
   border-color: var(--color-primary-dark);
-  color: #fff;
+  color: var(--color-on-primary);
 }
 
 .forms-editor-workspace {
@@ -1137,7 +1143,7 @@ button.forms-editor-nav-item {
 .forms-overview-list .forms-editor-form-item:last-child { border-bottom: 0; }
 .forms-overview-list .forms-editor-form-item:hover,
 .forms-overview-list .forms-editor-form-item:focus-visible {
-  background: #f3f7ff;
+  background: var(--color-primary-soft);
   border-color: var(--color-border);
 }
 .forms-overview-list .forms-editor-form-item:focus-visible {
@@ -1270,12 +1276,12 @@ button.forms-editor-nav-item {
 
 .forms-editor-form-item:hover,
 .forms-editor-template-item:hover {
-  background: #fafbff;
+  background: var(--color-surface-subtle);
   border-color: #eef0f6;
 }
 
 .forms-editor-form-item.active {
-  background: #f3f5ff;
+  background: var(--color-primary-soft);
   border-color: #d6dcfb;
   box-shadow: inset 3px 0 0 var(--color-primary);
 }
@@ -1364,7 +1370,7 @@ button.forms-editor-nav-item {
 .forms-editor-delete-link {
   background: transparent;
   border: 0;
-  color: #9a3412;
+  color: var(--color-danger);
   cursor: pointer;
   font: 700 12px var(--font-sans);
   border-radius: 6px;
@@ -1375,7 +1381,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-delete-link:hover:not(:disabled) {
-  background: #fff1ed;
+  background: var(--color-danger-bg);
 }
 
 .forms-editor-q-main:focus-visible,
@@ -1393,8 +1399,8 @@ button.forms-editor-nav-item {
 
 .forms-danger-button,
 .forms-page .forms-danger-button {
-  border-color: #f2c6b8 !important;
-  color: #9a3412 !important;
+  border-color: var(--color-danger) !important;
+  color: var(--color-danger) !important;
 }
 
 .forms-editor-header-actions .btn,
@@ -1513,11 +1519,11 @@ button.forms-editor-nav-item {
 }
 
 .forms-editor-question:hover {
-  background: #fafbff;
+  background: var(--color-surface-subtle);
 }
 
 .forms-editor-question.active {
-  background: #f7f8ff;
+  background: var(--color-primary-soft);
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px rgba(69, 83, 196, 0.08);
 }
@@ -1808,7 +1814,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-option-empty {
-  background: #fafbff;
+  background: var(--color-surface-subtle);
   border: 1px solid #eef0f6;
   border-radius: 10px;
   color: var(--color-text-muted);
@@ -1817,7 +1823,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-option-error {
-  color: #9a3412;
+  color: var(--color-danger);
   font: 700 12px var(--font-sans);
 }
 
@@ -1903,7 +1909,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-preview-body {
-  background: #f8f9fc;
+  background: var(--color-surface-subtle);
   min-height: 0;
   overflow-y: auto;
   padding: 20px;
@@ -1976,7 +1982,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-preview-question-title span[aria-label="required"] {
-  color: #9a3412;
+  color: var(--color-danger);
 }
 
 .forms-preview-help {
@@ -1987,6 +1993,8 @@ button.forms-editor-nav-item {
 }
 
 .forms-preview-control {
+  background: var(--color-surface);
+  color: var(--color-text);
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font: 500 14px var(--font-sans);
@@ -2008,7 +2016,7 @@ button.forms-editor-nav-item {
 }
 
 .forms-preview-empty-control {
-  background: #fafbff;
+  background: var(--color-surface-subtle);
   border: 1px solid #eef0f6;
   border-radius: 10px;
   margin-top: 12px;

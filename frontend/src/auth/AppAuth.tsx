@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { fetchAuthMe, type AuthMe } from '../pages/login/auth-me';
 import type { SidebarUser } from '../pages/layout/sidebar-user';
@@ -101,6 +101,11 @@ export function Auth0AppAuthProvider({ children }: { children: ReactNode }) {
     result: AppAuthState;
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const getAuth0AccessToken = useCallback(async () => {
+    const token = await getAccessTokenSilently();
+    if (!token) throw new Error('An Auth0 access token could not be acquired.');
+    return token;
+  }, [getAccessTokenSilently]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -118,13 +123,13 @@ export function Auth0AppAuthProvider({ children }: { children: ReactNode }) {
     clearDevelopmentUser();
     const controller = new AbortController();
     let active = true;
-    fetchAuthMe(getAccessTokenSilently, controller.signal)
+    fetchAuthMe(getAuth0AccessToken, controller.signal)
       .then((result) => {
         if (!active) return;
         let next: AppAuthState;
         if (result.status === 'unlinked') next = { status: 'unlinked', mode: 'auth0' };
         else if (result.status === 'forbidden') next = { status: 'error', mode: 'auth0', reason: 'forbidden' };
-        else if (result.user.is_active && result.user.employee?.is_active
+        else if (result.status === 'linked' && result.user.is_active && result.user.employee?.is_active
           && result.user.system_role_name && Array.isArray(result.user.permissions)) {
           next = { status: 'authenticated', mode: 'auth0', user: { ...result.user, employee: result.user.employee } };
         } else next = { status: 'error', mode: 'auth0', reason: 'forbidden' };
@@ -134,7 +139,7 @@ export function Auth0AppAuthProvider({ children }: { children: ReactNode }) {
         if (active) setResolution({ subject: user?.sub, result: { status: 'error', mode: 'auth0', reason: 'network' } });
       });
     return () => { active = false; controller.abort(); };
-  }, [isAuthenticated, user?.sub, getAccessTokenSilently, attempt]);
+  }, [isAuthenticated, user?.sub, getAuth0AccessToken, attempt]);
 
   let state: AppAuthState;
   if (isAuthenticated) state = resolution?.subject === user?.sub && resolution
@@ -170,6 +175,6 @@ export function Auth0AppAuthProvider({ children }: { children: ReactNode }) {
     clearDevelopmentUser,
     signOut,
     retryAuth0,
-    getAccessToken: state.mode === 'development' ? getDevelopmentAccessToken : getAccessTokenSilently,
+    getAccessToken: state.mode === 'development' ? getDevelopmentAccessToken : getAuth0AccessToken,
   }}>{children}</AppAuthContext.Provider>;
 }

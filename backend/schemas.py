@@ -309,6 +309,38 @@ class AccountSettingsProfile(BaseModel):
     last_login: datetime | None = None
 
 
+class SecuritySettingsResponse(BaseModel):
+    sign_in_method: Literal["auth0", "development"]
+    identity_provider: str
+    password_reset_available: bool
+    mfa_available: bool
+    enrolled_factors: list[str]
+    last_login: datetime | None
+    timezone: str
+
+
+class SettingsActionResponse(BaseModel):
+    message: str
+
+
+class PreferencesUpdate(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    theme: Literal["system", "light", "dark"] = "system"
+    language: Literal["en", "hu"] = "en"
+    date_format: Literal["locale", "iso"] = "locale"
+    notify_new_assignment: bool = True
+    notify_deadline_reminder: bool = True
+    notify_results_available: bool = True
+    notify_campaign_status: bool = True
+    reminder_days_before_deadline: int = Field(default=3, ge=1, le=14)
+
+
+class PreferencesResponse(PreferencesUpdate):
+    model_config = {"from_attributes": True}
+    updated_at: datetime | None = None
+
+
 class PeopleEmployeeCreate(BaseModel):
     name: str
     email: EmailStr

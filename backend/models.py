@@ -194,6 +194,35 @@ class FilledForm(Base):
     )
 
 
+class PasswordResetRequest(Base):
+    __tablename__ = "password_reset_requests"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    requested_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class UserPreferences(Base):
+    __tablename__ = "user_preferences"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    theme = Column(String(8), nullable=False, server_default="system")
+    language = Column(String(2), nullable=False, server_default="en")
+    date_format = Column(String(8), nullable=False, server_default="locale")
+    notify_new_assignment = Column(Boolean, nullable=False, server_default=text("true"))
+    notify_deadline_reminder = Column(Boolean, nullable=False, server_default=text("true"))
+    notify_results_available = Column(Boolean, nullable=False, server_default=text("true"))
+    notify_campaign_status = Column(Boolean, nullable=False, server_default=text("true"))
+    reminder_days_before_deadline = Column(Integer, nullable=False, server_default="3")
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        CheckConstraint("theme IN ('system', 'light', 'dark')", name="ck_user_preferences_theme"),
+        CheckConstraint("language IN ('en', 'hu')", name="ck_user_preferences_language"),
+        CheckConstraint("date_format IN ('locale', 'iso')", name="ck_user_preferences_date_format"),
+        CheckConstraint("reminder_days_before_deadline BETWEEN 1 AND 14", name="ck_user_preferences_reminder"),
+    )
+
+
 class EmployeeAIAnalysis(Base):
     __tablename__ = "employee_ai_analyses"
 

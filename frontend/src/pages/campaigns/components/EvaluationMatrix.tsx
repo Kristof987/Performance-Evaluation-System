@@ -12,16 +12,16 @@ type Props = {
   rules: CampaignEvaluationRules;
   selfForms: Record<number, number | null>;
   selection: MatrixSelection;
-  dirty: boolean;
   matrixDirty: boolean;
   rulesDirty: boolean;
-  staged?: boolean;
   editable: boolean;
   disabledReason: string;
   minimum: string;
   onMinimumChange: (minimum: string) => void;
   saving: boolean;
   saveDisabled: boolean;
+  saveError: string;
+  autosaveBlockedReason: string;
   message: string;
   onToggle: (groupId: number, evaluatorId: number, evaluateeId: number) => void;
   onAddAll: (groupId: number) => void;
@@ -52,7 +52,7 @@ function MatrixRequirementIndicator({ reason }: { reason: string }) {
   return <><span ref={indicator} className="campaign-matrix-requirement" tabIndex={0} role="img" aria-label={reason} onMouseEnter={show} onMouseLeave={() => setPosition(null)} onFocus={show} onBlur={() => setPosition(null)}><AlertCircle size={14} aria-hidden="true" /></span>{position && createPortal(<span className="campaign-matrix-requirement-popover" role="tooltip" style={position}>{reason}</span>, document.body)}</>;
 }
 
-export default function EvaluationMatrix({ group, notice, groups, onGroupChange, rules, selfForms, selection, dirty, matrixDirty, rulesDirty, staged = false, editable, disabledReason, minimum, onMinimumChange, saving, saveDisabled, message, onToggle, onAddAll, onAddSelf, onGenerate, onClear, onSave, onDiscard }: Props) {
+export default function EvaluationMatrix({ group, notice, groups, onGroupChange, rules, selfForms, selection, matrixDirty, rulesDirty, editable, disabledReason, minimum, onMinimumChange, saving, saveDisabled, saveError, autosaveBlockedReason, message, onToggle, onAddAll, onAddSelf, onGenerate, onClear, onSave, onDiscard }: Props) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [validationMessage, setValidationMessage] = useState('');
   const confirmRef = useRef<HTMLDivElement>(null);
@@ -144,17 +144,19 @@ export default function EvaluationMatrix({ group, notice, groups, onGroupChange,
           <div className="campaign-matrix-clear-tools"><button ref={clearTrigger} className="btn btn-secondary campaign-matrix-danger-btn" type="button" disabled={saving || !editable || rulesDirty || clearable === 0} onClick={() => setConfirmClear(true)}>Clear editable selections</button></div>
         </div>
         <div className="campaign-matrix-footer">
-            <span>{dirty ? 'Unsaved changes · ' : ''}Changes are staged until {staged ? 'Save setup changes' : 'Save matrix'} is clicked.{validationMessage || message ? ` ${validationMessage || message}` : ''}</span>
+            <div className="campaign-matrix-autosave-feedback">
+              <span role="status">{saving ? 'Saving evaluation assignments...' : matrixDirty ? saveError ? 'Changes not saved.' : autosaveBlockedReason || 'Waiting to save automatically...' : saveError ? 'Saved; refresh required.' : 'Evaluation assignments saved automatically.'} No questionnaires are issued by automatic saving.</span>
+              {saveError && <span className="campaign-matrix-autosave-error" role="alert">{saveError}</span>}
+              {(validationMessage || message) && <span role="status">{validationMessage || message}</span>}
+            </div>
             <div className="campaign-matrix-save-actions">
-              {matrixDirty && editable && <button className="btn btn-secondary" type="button" disabled={saving} onClick={onDiscard}>Discard changes</button>}
-              <button className="btn btn-primary" type="button" disabled={saveDisabled} onClick={onSave}>
-                {saving ? 'Saving...' : staged ? 'Save setup changes' : 'Save matrix'}
-              </button>
+              {matrixDirty && !saving && <button className="btn btn-secondary" type="button" onClick={onDiscard}>Discard changes</button>}
+              {matrixDirty && saveError && <button className="btn btn-secondary" type="button" disabled={saveDisabled} onClick={onSave}>Retry saving</button>}
             </div>
         </div>
          {confirmClear && <div ref={confirmRef} className="campaign-matrix-confirm" role="alertdialog" aria-label="Clear matrix selections" aria-modal="true">
-           <div><h3>Clear matrix selections</h3><p>This removes editable selections in this group. Issued or completed evaluations will not be deleted.</p>
-             <div className="campaign-modal-actions"><button className="btn btn-secondary" type="button" onClick={() => { setConfirmClear(false); clearTrigger.current?.focus(); }}>Cancel</button><button className="btn btn-secondary campaign-matrix-danger-btn" type="button" onClick={() => { onClear(group.groupId); setConfirmClear(false); clearTrigger.current?.focus(); }}>Clear selections</button></div>
+           <div><h3>Clear matrix selections</h3><p>This removes editable selections in this group and saves automatically. Issued or completed evaluations will not be deleted.</p>
+              <div className="campaign-modal-actions"><button className="btn btn-secondary" type="button" onClick={() => { setConfirmClear(false); clearTrigger.current?.focus(); }}>Cancel</button><button className="btn btn-secondary campaign-matrix-danger-btn" type="button" disabled={saving || !editable} onClick={() => { onClear(group.groupId); setConfirmClear(false); clearTrigger.current?.focus(); }}>Clear selections</button></div>
            </div>
          </div>}
       </div>

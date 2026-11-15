@@ -326,7 +326,7 @@
 }
 
 .people-selected-row td {
-  background: #f7f8ff;
+  background: var(--color-primary-soft);
 }
 
 .people-page .table tbody tr {
@@ -334,12 +334,12 @@
 }
 
 .people-page .table tbody tr:hover td {
-  background: #fbfbfe;
+  background: var(--color-surface-subtle);
 }
 
 .people-page .table tbody tr.people-selected-row:hover td,
 .people-page .table tbody tr.people-selected-row td {
-  background: #f2f4ff;
+  background: var(--color-primary-soft);
 }
 
 .people-page .table tbody tr:focus-visible td {
@@ -466,8 +466,8 @@
 }
 
 .people-page .people-group-badge {
-  background: #f5f6fa;
-  border: 1px solid #e6e8f0;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
   border-radius: 7px;
   color: var(--color-text-secondary);
   font-weight: 650;
@@ -496,9 +496,9 @@
 
 
 .hint {
-  background: #fff8ef;
-  border: 1px solid #f2dfc7;
-  color: #8a5524;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-warning);
 }
 
 .hint p {
@@ -623,7 +623,7 @@
 .people-page .field .form-label {
   font-size: 13px;
   font-weight: 750;
-  color: #30344d;
+  color: var(--color-text-secondary);
 }
 
 .people-page .field .form-label span[aria-hidden='true'] {
@@ -677,8 +677,8 @@
 
 .group-selected-chip {
   align-items: center;
-  background: #f5f6fa;
-  border: 1px solid #e6e8f0;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   color: var(--color-text-secondary);
   display: inline-flex;
@@ -877,8 +877,8 @@
 }
 
 .upload-box {
-  border: 1px dashed #bfc5df;
-  background: #fafbff;
+  border: 1px dashed var(--color-border-strong);
+  background: var(--color-surface-subtle);
   border-radius: 14px;
   padding: 28px;
   text-align: center;

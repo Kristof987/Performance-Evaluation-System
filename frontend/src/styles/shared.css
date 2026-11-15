@@ -28,14 +28,14 @@
 }
 
 .btn-primary {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-solid);
+  border-color: var(--color-primary-solid);
+  color: var(--color-on-primary);
 }
 
 .btn-primary:hover {
-  background: var(--color-primary-dark);
-  border-color: var(--color-primary-dark);
+  background: var(--color-primary-solid-hover);
+  border-color: var(--color-primary-solid-hover);
 }
 
 .btn-secondary {
@@ -69,7 +69,7 @@
 }
 
 .form-label {
-  color: #30344d;
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 600;
 }

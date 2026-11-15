@@ -26,6 +26,8 @@ import { getAuthenticatedDashboardPath } from './pages/layout/sidebar-user'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
 import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './auth/AppAuth'
 import { Auth0Unavailable, Auth0PersonalResultsUnavailable, Auth0PermissionDenied } from './pages/layout/Auth0Transition'
+import PreferencesProvider from './pages/settings/PreferencesProvider'
+import { applyTheme, cachedTheme } from './pages/settings/theme'
 
 function RoleHome() {
   const { state } = useAppAuth()
@@ -89,7 +91,7 @@ function ProtectedPage({ children, hrOnly = false }: {
   return <Auth0Unavailable />
 }
 
-function AppRoutes() {
+export default function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
@@ -125,6 +127,8 @@ function AppRoutes() {
   )
 }
 
+applyTheme(cachedTheme())
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {AUTH0_CONFIGURED ? (
@@ -134,8 +138,8 @@ createRoot(document.getElementById('root')!).render(
         authorizationParams={{ redirect_uri: window.location.origin, audience: AUTH0_AUDIENCE }}
         cacheLocation="memory"
       >
-        <Auth0AppAuthProvider><AppRoutes /></Auth0AppAuthProvider>
+        <Auth0AppAuthProvider><PreferencesProvider><AppRoutes /></PreferencesProvider></Auth0AppAuthProvider>
       </Auth0Provider>
-    ) : <DevelopmentAppAuthProvider><AppRoutes /></DevelopmentAppAuthProvider>}
+    ) : <DevelopmentAppAuthProvider><PreferencesProvider><AppRoutes /></PreferencesProvider></DevelopmentAppAuthProvider>}
   </StrictMode>,
 )
