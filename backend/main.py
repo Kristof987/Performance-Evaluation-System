@@ -36,6 +36,7 @@ from ai_generation_service import AnalysisGenerationError
 import schemas
 import auth0_management
 import preferences_service
+import workspace_settings_service
 
 #Base.metadata.create_all(bind=engine)
 
@@ -124,8 +125,8 @@ def get_current_employee(user: models.User = Depends(get_current_user)) -> model
     return employee
 
 
-def require_permission(permission_name: str) -> Callable[..., models.User]:
-    """Use as Depends(require_permission("campaigns.manage")) on secured routes."""
+def require_permission(*permission_names: str) -> Callable[..., models.User]:
+    """Use as Depends(require_permission("campaigns.manage")); several names mean any of them."""
     def check_permission(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)) -> models.User:
         grant = (
             db.query(models.SystemPermission.id)
@@ -137,7 +138,7 @@ def require_permission(permission_name: str) -> Callable[..., models.User]:
                   models.SystemPermission.id == models.system_role_permissions.c.permission_id)
             .filter(models.User.id == user.id)
             .filter(models.User.is_active.is_(True))
-            .filter(models.SystemPermission.name == permission_name)
+            .filter(models.SystemPermission.name.in_(permission_names))
             .first()
         )
         if grant is None:
@@ -423,6 +424,53 @@ def get_my_preferences(db: Session = Depends(get_db),
 def patch_my_preferences(update: schemas.PreferencesUpdate, db: Session = Depends(get_db),
                          actor: models.User = Depends(require_permission("settings.manage_self"))):
     return preferences_service.update_preferences(actor, update, db)
+
+
+def ai_workspace_status(db: Session) -> schemas.AIWorkspaceStatus:
+    settings = workspace_settings_service.get_settings(db)
+    return schemas.AIWorkspaceStatus(
+        **settings.model_dump(),
+        default_model=os.getenv("OPENAI_ANALYSIS_MODEL", "").strip() or None,
+        api_key_configured=bool(os.getenv("OPENAI_API_KEY", "").strip()),
+    )
+
+
+@app.get("/workspace/settings", response_model=schemas.AIWorkspaceStatus)
+def get_workspace_settings(db: Session = Depends(get_db),
+                           _actor: models.User = Depends(require_permission("workspace.manage"))):
+    return ai_workspace_status(db)
+
+
+@app.patch("/workspace/settings", response_model=schemas.AIWorkspaceStatus)
+def patch_workspace_settings(update: schemas.WorkspaceSettingsUpdate, db: Session = Depends(get_db),
+                             actor: models.User = Depends(require_permission("workspace.manage"))):
+    workspace_settings_service.update_settings(actor, update, db)
+    return ai_workspace_status(db)
+
+
+@app.get("/workspace/permissions", response_model=schemas.PermissionMatrixResponse)
+def get_permission_matrix(db: Session = Depends(get_db),
+                          _actor: models.User = Depends(require_permission("permissions.manage", "workspace.manage"))):
+    return workspace_settings_service.permission_matrix(db)
+
+
+@app.put("/workspace/permissions", response_model=schemas.PermissionMatrixResponse)
+def put_permission_matrix(update: schemas.PermissionMatrixUpdate, db: Session = Depends(get_db),
+                          actor: models.User = Depends(require_permission("permissions.manage"))):
+    return workspace_settings_service.update_permission_matrix(actor, update, db)
+
+
+@app.get("/workspace/audit", response_model=schemas.AuditLogResponse)
+def get_audit_log(
+    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions"] | None = Query(default=None),
+    campaign_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=10_000),
+    db: Session = Depends(get_db),
+    _actor: models.User = Depends(require_permission("audit.read")),
+):
+    return workspace_settings_service.audit_log(db, category=category, campaign_id=campaign_id,
+                                                limit=limit, offset=offset)
 
 
 def get_or_create_company_role(role_name: str, db: Session):
@@ -1976,7 +2024,7 @@ def get_employee_ai_analyses(
 @app.post("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis/generate", status_code=202)
 def generate_employee_ai_report(
     campaign_id: int, employee_id: int, db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("campaigns.manage")),
+    actor: models.User = Depends(require_permission("ai_analysis.generate")),
 ):
     return ai_generation_jobs.start(db, campaign_id, "employee", employee_id, actor=actor)
 
@@ -2000,7 +2048,7 @@ def employee_ai_generation_job_status(
 @app.put("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis/{analysis_id}")
 def edit_employee_ai_report(
     campaign_id: int, employee_id: int, analysis_id: int, payload: EmployeeAIAnalysis,
-    db: Session = Depends(get_db), actor: models.User = Depends(require_permission("campaigns.manage")),
+    db: Session = Depends(get_db), actor: models.User = Depends(require_permission("ai_analysis.generate")),
 ):
     try:
         return ai_workflow_service.edit(db, campaign_id, employee_id, analysis_id, payload, actor=actor)
@@ -2011,7 +2059,7 @@ def edit_employee_ai_report(
 @app.post("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis/{analysis_id}/approve")
 def approve_employee_ai_report(
     campaign_id: int, employee_id: int, analysis_id: int, db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("campaigns.manage")),
+    actor: models.User = Depends(require_permission("ai_analysis.approve")),
 ):
     return ai_workflow_service.approve(db, campaign_id, employee_id, analysis_id, actor=actor)
 
@@ -2023,7 +2071,7 @@ def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
         return ai_aggregate_workflow_service.list_analyses(db, campaign_id, scope_type, scope_id, actor=actor)
 
     def generate(campaign_id: int, scope_id: int | None = None, db: Session = Depends(get_db),
-                 actor: models.User = Depends(require_permission("campaigns.manage"))):
+                 actor: models.User = Depends(require_permission("ai_analysis.generate"))):
         return ai_generation_jobs.start(db, campaign_id, scope_type, scope_id, actor=actor)
 
     def latest_job(campaign_id: int, scope_id: int | None = None, db: Session = Depends(get_db),
@@ -2037,7 +2085,7 @@ def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
 
     def edit(campaign_id: int, analysis_id: int, payload: EmployeeAIAnalysis,
              scope_id: int | None = None, db: Session = Depends(get_db),
-             actor: models.User = Depends(require_permission("campaigns.manage"))):
+             actor: models.User = Depends(require_permission("ai_analysis.generate"))):
         try:
             return ai_aggregate_workflow_service.edit(db, campaign_id, scope_type, scope_id,
                                                         analysis_id, payload, actor=actor)
@@ -2046,7 +2094,7 @@ def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
 
     def approve(campaign_id: int, analysis_id: int, scope_id: int | None = None,
                 db: Session = Depends(get_db),
-                actor: models.User = Depends(require_permission("campaigns.manage"))):
+                actor: models.User = Depends(require_permission("ai_analysis.approve"))):
         return ai_aggregate_workflow_service.approve(db, campaign_id, scope_type, scope_id, analysis_id, actor=actor)
 
     app.add_api_route(route, history, methods=["GET"], name=f"get_{scope_type}_ai_analysis")
@@ -3558,6 +3606,8 @@ def get_forms(db: Session = Depends(get_db),
 @app.post("/forms/ai/generate", response_model=schemas.FormAIGenerateResponse)
 def generate_form_draft(request: schemas.FormAIGenerateRequest, db: Session = Depends(get_db),
                         _manager: models.User = Depends(require_permission("forms.manage"))):
+    workspace_settings_service.require_ai_enabled(db)
+
     def validation_errors(draft: dict) -> list[str]:
         if not all(section["section_id"] is not None for section in draft["sections"]):
             return []  # Proposed sections have no DB IDs until HR approves them.

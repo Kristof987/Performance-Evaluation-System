@@ -76,6 +76,9 @@ export type AnalysisVersion = {
 export type AIAnalysisHistory = {
   versions: AnalysisVersion[];
   can_manage: boolean;
+  can_generate?: boolean;
+  can_approve?: boolean;
+  ai_enabled?: boolean;
   has_eligible_evidence: boolean;
   scope_label?: string;
 };

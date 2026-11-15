@@ -339,6 +339,75 @@ class PreferencesResponse(PreferencesUpdate):
     updated_at: datetime | None = None
 
 
+class WorkspaceSettingsUpdate(BaseModel):
+    model_config = {"extra": "forbid", "strict": True, "str_strip_whitespace": True}
+
+    min_individual_peer_reviewers: int = Field(default=2, ge=2, le=20)
+    min_aggregate_evaluatees: int = Field(default=2, ge=2, le=20)
+    ai_enabled: bool = True
+    ai_model: str | None = Field(default=None, max_length=100, pattern=r"^[A-Za-z0-9._:-]*$")
+
+
+class WorkspaceSettingsResponse(BaseModel):
+    min_individual_peer_reviewers: int
+    min_aggregate_evaluatees: int
+    ai_enabled: bool
+    ai_model: str | None
+    updated_at: datetime | None = None
+
+
+class AIWorkspaceStatus(WorkspaceSettingsResponse):
+    default_model: str | None
+    api_key_configured: bool
+
+
+class PermissionMatrixRole(BaseModel):
+    id: int
+    name: str
+    active_users: int
+    permissions: list[str]
+
+
+class PermissionMatrixPermission(BaseModel):
+    name: str
+    description: str
+
+
+class PermissionMatrixResponse(BaseModel):
+    roles: list[PermissionMatrixRole]
+    permissions: list[PermissionMatrixPermission]
+
+
+class PermissionMatrixRoleUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    role_id: int
+    permissions: list[str]
+
+
+class PermissionMatrixUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    roles: list[PermissionMatrixRoleUpdate]
+
+
+class AuditLogEntry(BaseModel):
+    id: str
+    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions"]
+    occurred_at: datetime
+    actor_user_id: int | None
+    actor_name: str | None = None
+    is_automatic: bool
+    campaign_id: int | None
+    campaign_name: str | None = None
+    summary: str
+
+
+class AuditLogResponse(BaseModel):
+    entries: list[AuditLogEntry]
+    has_more: bool
+
+
 class PeopleEmployeeCreate(BaseModel):
     name: str
     email: EmailStr

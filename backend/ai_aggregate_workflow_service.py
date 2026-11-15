@@ -8,6 +8,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 import models
+import workspace_settings_service
 import reporting_service
 from ai_aggregate_service import (
     build_campaign_analysis_context, build_group_analysis_context, build_role_analysis_context,
@@ -16,7 +17,7 @@ from ai_analysis_models import AggregateAnalysisContext, EmployeeAIAnalysis
 from ai_generation_service import (
     AnalysisGenerationError, generate_aggregate_ai_analysis_from_context, validate_aggregate_ai_analysis,
 )
-from ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, _requires_fact_contract, _requires_unified_facts, can_manage
+from ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, _requires_fact_contract, _requires_unified_facts, APPROVE, GENERATE, capabilities, has_permission
 
 
 def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
@@ -30,8 +31,8 @@ def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | Non
     raise HTTPException(status_code=404, detail="Analysis scope not found")
 
 
-def _writable(db: Session, campaign_id: int, actor: models.User) -> None:
-    if not can_manage(actor, db):
+def _writable(db: Session, campaign_id: int, actor: models.User, permission: str = GENERATE) -> None:
+    if not has_permission(actor, db, permission):
         raise HTTPException(status_code=403, detail="Analysis management permission required")
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign.is_archived:
@@ -125,12 +126,13 @@ def list_analyses(db: Session, campaign_id: int, scope_type: str, scope_id: int 
         if not historical:
             raise error
         return {"versions": [_serialize(record, "") for record in historical],
-                "can_manage": False, "has_eligible_evidence": False,
+                "can_manage": False, "can_generate": False, "can_approve": False,
+                "ai_enabled": workspace_settings_service.ai_enabled(db), "has_eligible_evidence": False,
                 "scope_label": f"Historical {scope_type} report"}
     records = _query(db, context).order_by(models.AggregateAIAnalysis.version.desc()).all()
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     return {"versions": [_serialize(record, context.source_fingerprint) for record in records],
-            "can_manage": can_manage(actor, db) and not campaign.is_archived,
+            **capabilities(actor, db, archived=campaign.is_archived),
             "has_eligible_evidence": bool(context.evidence), "scope_label": context.scope_label}
 
 
@@ -216,11 +218,11 @@ def edit(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, a
 def approve(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
             analysis_id: int, *, actor: models.User) -> dict:
     _context(db, campaign_id, scope_type, scope_id, actor)
-    _writable(db, campaign_id, actor)
+    _writable(db, campaign_id, actor, APPROVE)
     db.rollback()
     _lock_campaign(db, campaign_id)
     context = _context(db, campaign_id, scope_type, scope_id, actor)
-    _writable(db, campaign_id, actor)
+    _writable(db, campaign_id, actor, APPROVE)
     record = _record(db, context, analysis_id)
     if record.status != "draft":
         raise HTTPException(status_code=409, detail="Only Draft versions can be approved")

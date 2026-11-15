@@ -3,23 +3,25 @@ import { useEffect, useState } from 'react';
 import AppLayout from '../layout/AppLayout';
 import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
-import SettingsNavigation, { type SettingsSection } from './SettingsNavigation';
+import SettingsNavigation from './SettingsNavigation';
+import { canOpenSection, isSettingsSection } from './settings-sections';
 import ProfileSettings from './sections/ProfileSettings';
 import SecuritySettings from './sections/SecuritySettings';
-import { fetchAccountSettingsProfile, type AccountSettingsProfile } from './settings.api';
-import './settings.css';
-import { usePreferences } from './preferences-context';
 import PreferenceSettings from './sections/PreferenceSettings';
-
-function isSettingsSection(value: string | undefined): value is SettingsSection {
-  return value === 'profile' || value === 'security' || value === 'notifications' || value === 'appearance';
-}
+import PrivacySettings from './sections/PrivacySettings';
+import AISettings from './sections/AISettings';
+import PermissionsSettings from './sections/PermissionsSettings';
+import AuditLogSettings from './sections/AuditLogSettings';
+import { fetchAccountSettingsProfile, type AccountSettingsProfile } from './settings.api';
+import { usePreferences } from './preferences-context';
+import './settings.css';
 
 export default function SettingsPage() {
   const { section } = useParams();
   const { state, getAccessToken } = useAppAuth();
   const preferenceState = usePreferences();
   const userId = state.status === 'authenticated' ? state.user.id : null;
+  const permissions = state.status === 'authenticated' ? state.user.permissions : [];
   const [result, setResult] = useState<{
     owner: number; profile: AccountSettingsProfile | null; error: string;
   } | null>(null);
@@ -45,24 +47,32 @@ export default function SettingsPage() {
   }, [userId, getAccessToken]);
 
   if (!isSettingsSection(section)) return <Navigate to="/settings/profile" replace />;
+  if (userId !== null && !canOpenSection(section, permissions)) return <Navigate to="/settings/profile" replace />;
 
   const loading = userId !== null && profile === null && error === '';
+  const workspace = section === 'privacy' || section === 'ai' || section === 'permissions' || section === 'audit';
 
   return <AppLayout activePage="settings" pageClassName="settings-page">
     <main className="main-content settings-main">
       <header className="settings-header">
         <h1>Settings</h1>
-        <p>Manage your account and preferences.</p>
+        <p>Manage your account, preferences and workspace.</p>
       </header>
       <div className="settings-layout">
-        <SettingsNavigation />
+        <SettingsNavigation permissions={permissions} />
         <div className="settings-content">
           {userId === null && <div className="card card-padded settings-state" role="alert">Sign in again to view settings.</div>}
-          {loading && <div className="card card-padded settings-state">Loading settings...</div>}
-          {error && <div className="card card-padded settings-state settings-error" role="alert">{error}</div>}
-          {profile && section === 'profile' && <ProfileSettings profile={profile} />}
-          {profile && section === 'security' && <SecuritySettings />}
-          {profile && (section === 'notifications' || section === 'appearance') && (
+          {userId !== null && workspace && <>
+            {section === 'privacy' && <PrivacySettings />}
+            {section === 'ai' && <AISettings />}
+            {section === 'permissions' && <PermissionsSettings />}
+            {section === 'audit' && <AuditLogSettings />}
+          </>}
+          {!workspace && loading && <div className="card card-padded settings-state">Loading settings...</div>}
+          {!workspace && error && <div className="card card-padded settings-state settings-error" role="alert">{error}</div>}
+          {!workspace && profile && section === 'profile' && <ProfileSettings profile={profile} />}
+          {!workspace && profile && section === 'security' && <SecuritySettings />}
+          {!workspace && profile && (section === 'notifications' || section === 'appearance') && (
             preferenceState.loading ? <div className="card card-padded" role="status">Loading preferences...</div>
               : preferenceState.error ? <div className="card card-padded settings-error" role="alert">
                 {preferenceState.error}<button className="btn btn-secondary" type="button"

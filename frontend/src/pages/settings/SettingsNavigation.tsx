@@ -1,25 +1,18 @@
 import { NavLink } from 'react-router';
-import { Bell, Palette, ShieldCheck, UserRound } from 'lucide-react';
+import { canOpenSection, SETTINGS_GROUPS } from './settings-sections';
 
-export type SettingsSection = 'profile' | 'security' | 'notifications' | 'appearance';
-
-const sections: { id: SettingsSection; label: string; description: string }[] = [
-  { id: 'profile', label: 'My profile', description: 'Account details' },
-  { id: 'security', label: 'Security', description: 'Sign-in status' },
-  { id: 'notifications', label: 'Notifications', description: 'Update preferences' },
-  { id: 'appearance', label: 'Appearance', description: 'Theme and display' },
-];
-
-const icons = { profile: UserRound, security: ShieldCheck, notifications: Bell, appearance: Palette };
-
-export default function SettingsNavigation() {
+export default function SettingsNavigation({ permissions }: { permissions: string[] }) {
   return <nav className="settings-navigation" aria-label="Settings sections">
-    {sections.map((section) => {
-      const Icon = icons[section.id];
-      return <NavLink key={section.id} to={`/settings/${section.id}`}
-        className={({ isActive }) => isActive ? 'settings-nav-item active' : 'settings-nav-item'}>
-        <Icon size={18} aria-hidden="true" /><div><strong>{section.label}</strong><span>{section.description}</span></div>
-      </NavLink>;
+    {SETTINGS_GROUPS.map((group) => {
+      const items = group.items.filter((item) => canOpenSection(item.id, permissions));
+      if (!items.length) return null;
+      return <div className="settings-nav-group" key={group.label}>
+        <span className="settings-nav-heading">{group.label}</span>
+        {items.map(({ id, label, description, icon: Icon }) => <NavLink key={id} to={`/settings/${id}`}
+          className={({ isActive }) => isActive ? 'settings-nav-item active' : 'settings-nav-item'}>
+          <Icon size={18} aria-hidden="true" /><div><strong>{label}</strong><span>{description}</span></div>
+        </NavLink>)}
+      </div>;
     })}
   </nav>;
 }

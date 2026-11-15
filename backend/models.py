@@ -223,6 +223,39 @@ class UserPreferences(Base):
     )
 
 
+class WorkspaceSettings(Base):
+    """One row per workspace scope; a missing row means every default applies."""
+    __tablename__ = "workspace_settings"
+
+    scope_key = Column(String(32), primary_key=True, default="default")
+    min_individual_peer_reviewers = Column(Integer, nullable=False, server_default="2")
+    min_aggregate_evaluatees = Column(Integer, nullable=False, server_default="2")
+    ai_enabled = Column(Boolean, nullable=False, server_default=text("true"))
+    ai_model = Column(String(100), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("min_individual_peer_reviewers BETWEEN 2 AND 20", name="ck_workspace_min_peer_reviewers"),
+        CheckConstraint("min_aggregate_evaluatees BETWEEN 2 AND 20", name="ck_workspace_min_aggregate_evaluatees"),
+    )
+
+
+class SettingsAuditEvent(Base):
+    __tablename__ = "settings_audit_events"
+
+    id = Column(Integer, primary_key=True)
+    category = Column(String(16), nullable=False)
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    summary = Column(String(500), nullable=False)
+    details = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+
+    __table_args__ = (
+        CheckConstraint("category IN ('privacy', 'ai', 'permissions')", name="ck_settings_audit_category"),
+    )
+
+
 class EmployeeAIAnalysis(Base):
     __tablename__ = "employee_ai_analyses"
 

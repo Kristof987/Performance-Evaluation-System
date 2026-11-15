@@ -19,6 +19,7 @@ const generationErrors: Record<string, string> = {
   scope_unavailable: 'The report scope is no longer available. No analysis was saved.',
   generation_conflict: 'The report changed or generation could not be completed. Review the report before retrying.',
   analysis_generation_failed: 'Generation failed without a saved analysis. Retry explicitly.',
+  analysis_disabled: 'AI features were turned off in workspace settings before this generation started.',
 };
 
 export function generationErrorMessage(code: string | null) {

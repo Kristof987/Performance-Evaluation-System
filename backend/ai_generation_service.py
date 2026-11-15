@@ -10,6 +10,8 @@ import logging
 import math
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
@@ -343,9 +345,22 @@ class AnalysisGenerationError(Exception):
         super().__init__(code)
 
 
-def _configuration() -> tuple[str, str, float, int]:
+# Set by the generation worker from workspace settings; empty means the environment default.
+_model_override: ContextVar[str | None] = ContextVar("analysis_model_override", default=None)
+
+
+@contextmanager
+def model_override(model: str | None):
+    token = _model_override.set(model)
+    try:
+        yield
+    finally:
+        _model_override.reset(token)
+
+
+def _configuration(model: str | None = None) -> tuple[str, str, float, int]:
     key = os.getenv("OPENAI_API_KEY", "").strip()
-    model = os.getenv("OPENAI_ANALYSIS_MODEL", "").strip()
+    model = (model or _model_override.get() or os.getenv("OPENAI_ANALYSIS_MODEL", "")).strip()
     if not key or not model:
         raise AnalysisGenerationError("analysis_not_configured")
     try:

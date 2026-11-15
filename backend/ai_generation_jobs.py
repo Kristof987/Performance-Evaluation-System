@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 
 import models
 import reporting_service
+import workspace_settings_service
 from ai_analysis_service import build_employee_analysis_context
-from ai_generation_service import AnalysisGenerationError
+from ai_generation_service import AnalysisGenerationError, model_override
 from ai_workflow_service import _writable, generate as generate_employee
 from ai_aggregate_workflow_service import _context as aggregate_context, _writable as aggregate_writable, generate as generate_aggregate
 from database import SessionLocal
@@ -64,6 +65,7 @@ def _serialize(job: models.AIAnalysisGenerationJob) -> dict:
 def start(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, *, actor: models.User) -> dict:
     _subject_query(db, campaign_id, scope_type, scope_id)
     _authorize(db, campaign_id, scope_type, scope_id, actor, write=True)
+    workspace_settings_service.require_ai_enabled(db)
     existing = _subject_query(db, campaign_id, scope_type, scope_id).filter(
         models.AIAnalysisGenerationJob.status.in_(("queued", "running")),
     ).first()
@@ -167,11 +169,18 @@ def _execute(job_id: int, token: str) -> None:
         actor = db.get(models.User, job.requested_by_user_id)
         if actor is None:
             raise HTTPException(status_code=403, detail="Requesting user is no longer available")
-        if job.scope_type == "employee":
-            generate_employee(db, job.campaign_id, job.scope_id, actor=actor, job_id=job_id, worker_token=token)
-        else:
-            generate_aggregate(db, job.campaign_id, job.scope_type, job.scope_id,
-                               actor=actor, job_id=job_id, worker_token=token)
+        settings = workspace_settings_service.get_settings(db)
+        if not settings.ai_enabled:
+            # The job was queued before AI features were switched off.
+            db.rollback()
+            _fail(db, job_id, token, "analysis_disabled")
+            return
+        with model_override(settings.ai_model):
+            if job.scope_type == "employee":
+                generate_employee(db, job.campaign_id, job.scope_id, actor=actor, job_id=job_id, worker_token=token)
+            else:
+                generate_aggregate(db, job.campaign_id, job.scope_type, job.scope_id,
+                                   actor=actor, job_id=job_id, worker_token=token)
     except AnalysisGenerationError as error:
         db.rollback()
         _fail(db, job_id, token, error.code if error.code in {

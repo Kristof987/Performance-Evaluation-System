@@ -278,7 +278,12 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     });
   }
 
-  const mayWrite = history?.can_manage && !selected?.outdated;
+  // Older API responses only carried can_manage, which meant both generate and approve.
+  const canGenerate = history?.can_generate ?? history?.can_manage ?? false;
+  const canEdit = history?.can_manage ?? false;
+  const canApprove = history?.can_approve ?? history?.can_manage ?? false;
+  const aiEnabled = history?.ai_enabled ?? true;
+  const mayWrite = !selected?.outdated;
   const copy = scopeCopy[scope.type];
   return <section className="reports-card reports-ai-panel" aria-label={copy.heading}>
     <div className="reports-section-heading"><h2>{copy.heading}</h2>{scope.type !== 'employee' && history?.scope_label && <strong>{history.scope_label}</strong>}<p>{copy.description}</p></div>
@@ -293,11 +298,12 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
         {history.versions.length > 0 && <label>Analysis version<select className="form-control" value={selected?.id ?? ''} onChange={(event) => { setEditing(null); setSelectedId(Number(event.target.value)); setNotice(''); }}>
           {history.versions.map((version) => <option key={version.id} value={version.id}>Version {version.version} · {version.status === 'draft' ? 'Draft' : 'Approved'}{version.is_current_approved ? ' · Current approved' : ''}{version.outdated ? ' · Outdated' : ''}</option>)}
         </select></label>}
-         {history.can_manage && <button type="button" className="btn btn-primary" disabled={busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={() => {
+         {canGenerate && <button type="button" className="btn btn-primary" disabled={busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={() => {
            if (history.versions.length > 0 && !window.confirm('Regenerate? This may incur API cost. A new Draft will be created; earlier versions remain available.')) return;
            void startGeneration();
          }}>{busy === 'generate' ? 'Starting generation...' : jobActive ? 'Generation in progress...' : job?.status === 'failed' ? 'Retry generation' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
       </div>
+      {!aiEnabled && <p className="reports-ai-notice" role="status">AI features are turned off in workspace settings. Saved analyses stay available to read.</p>}
       {!history.has_eligible_evidence && <p className="reports-ai-warning">No reportable submitted evidence is available. Insufficient data is not an indication of low performance.</p>}
        {!selected && <p className="reports-ai-intro">{copy.intro} AI conclusions are not shown until explicitly generated, reviewed and approved by an authorized manager.</p>}
       {selected && <>
@@ -311,9 +317,9 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
             {editing && (editing[section].length < 5) && Object.keys(selected.evidence).length > 0 && <button type="button" className="btn btn-secondary btn-small" onClick={() => addFinding(section)}>Add finding</button>}
           </div>)}
         </div>
-        {history.can_manage && <div className="reports-ai-actions">
+        {(canEdit || canApprove) && <div className="reports-ai-actions">
            {editing ? <><button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (editing) void perform('save', () => saveAIAnalysis(getAccessToken, scope, selected.id, editing)); }}>{busy === 'save' ? 'Saving...' : 'Save as new Draft'}</button><button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={() => setEditing(null)}>Cancel editing</button></>
-             : selected.status === 'draft' && mayWrite && <><button type="button" className="btn btn-secondary" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}>Edit Draft</button><button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (window.confirm('Approve this specific analysis version? Approved content becomes read-only and replaces the current approved designation.')) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? 'Approving...' : 'Approve Analysis'}</button></>}
+             : selected.status === 'draft' && mayWrite && <>{canEdit && <button type="button" className="btn btn-secondary" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}>Edit Draft</button>}{canApprove && <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (window.confirm('Approve this specific analysis version? Approved content becomes read-only and replaces the current approved designation.')) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? 'Approving...' : 'Approve Analysis'}</button>}</>}
         </div>}
       </>}
     </>}

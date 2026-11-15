@@ -260,7 +260,7 @@ def employee_scores(evaluations: Sequence[EvaluationSections], campaign_id: int,
     scoped = [evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id and evaluation.evaluatee_id == evaluatee_id]
     section_ids = set().union(*(evaluation.section_ids for evaluation in scoped)) if scoped else set()
     peer, self_values = _reviewer_sections(scoped, evaluatee_id)
-    peer_sections = _section_results(section_ids, {section_id: list(reviewers.values()) for section_id, reviewers in peer.items()}, 1 if aggregate_access else reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS)
+    peer_sections = _section_results(section_ids, {section_id: list(reviewers.values()) for section_id, reviewers in peer.items()}, 1 if aggregate_access else reporting_service.min_individual_peer_reviewers())
     sparse = set() if aggregate_access else _sparse_question_sections(scoped, evaluatee_id)
     peer_sections = {section_id: ScoreResult(None, "suppressed") if section_id in sparse and result.availability == "available" else result
                      for section_id, result in peer_sections.items()}
@@ -280,7 +280,7 @@ def _aggregate(evaluations: Sequence[EvaluationSections], minimum_evaluatees: in
             values[section_id].append(mean(reviewers.values()))
             # An aggregate and all other employee scores could otherwise recover
             # an individual Section score withheld for having only one reviewer.
-            if not aggregate_access and len(reviewers) < reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS:
+            if not aggregate_access and len(reviewers) < reporting_service.min_individual_peer_reviewers():
                 unsafe_sections.add(section_id)
     sections = _section_results(section_ids, values, minimum_evaluatees)
     sections = {section_id: ScoreResult(None, "suppressed") if section_id in unsafe_sections and result.availability == "available" else result
@@ -289,7 +289,7 @@ def _aggregate(evaluations: Sequence[EvaluationSections], minimum_evaluatees: in
 
 
 def campaign_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, *, aggregate_access: bool = False) -> AggregateScores:
-    return _aggregate([evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id], 1 if aggregate_access else reporting_service.MIN_AGGREGATE_EVALUATEES, aggregate_access=aggregate_access)
+    return _aggregate([evaluation for evaluation in evaluations if evaluation.campaign_id == campaign_id], 1 if aggregate_access else reporting_service.min_aggregate_evaluatees(), aggregate_access=aggregate_access)
 
 
 def _unsafe_role_group_sections(evaluations: Sequence[EvaluationSections], roles: Mapping[int, int], *, evaluator: bool = False) -> set[int]:
@@ -303,7 +303,7 @@ def _unsafe_role_group_sections(evaluations: Sequence[EvaluationSections], roles
         for section_id in item.sections:
             cells[(section_id, item.company_group_id, role)].add(item.evaluatee_id)
     return {section_id for (section_id, _group_id, _role_id), contributors in cells.items()
-            if len(contributors) < reporting_service.MIN_AGGREGATE_EVALUATEES}
+            if len(contributors) < reporting_service.min_aggregate_evaluatees()}
 
 
 def _withhold_sections(aggregate: AggregateScores, section_ids: set[int]) -> AggregateScores:
@@ -319,7 +319,7 @@ def group_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, ev
     results = {}
     for group_id in group_ids:
         cohort = [evaluation for evaluation in scoped if evaluation.company_group_id == group_id]
-        result = _aggregate(cohort, 1 if aggregate_access else reporting_service.MIN_AGGREGATE_EVALUATEES,
+        result = _aggregate(cohort, 1 if aggregate_access else reporting_service.min_aggregate_evaluatees(),
                             aggregate_access=aggregate_access)
         results[group_id] = result if aggregate_access else suppress_small_complements(result, scoped, cohort)
     if aggregate_access:
@@ -351,7 +351,7 @@ def role_scores(evaluations: Sequence[EvaluationSections], campaign_id: int, eva
             results[role_id] = _aggregate(role_evaluations, 1, aggregate_access=True)
             continue
         aggregate = _withhold_sections(suppress_small_complements(
-            _aggregate(role_evaluations, reporting_service.MIN_AGGREGATE_EVALUATEES), scoped, role_evaluations), unsafe)
+            _aggregate(role_evaluations, reporting_service.min_aggregate_evaluatees()), scoped, role_evaluations), unsafe)
         # Current roles are mutable after answers are final; successive role
         # breakdowns could otherwise isolate a person moved between roles.
         results[role_id] = _withhold_sections(aggregate, set(aggregate.sections))
@@ -369,10 +369,10 @@ def evaluator_role_scores(evaluations: Sequence[EvaluationSections], campaign_id
         if aggregate_access:
             results[role_id] = _aggregate(role_evaluations, 1, aggregate_access=True)
             continue
-        aggregate = _aggregate(role_evaluations, reporting_service.MIN_AGGREGATE_EVALUATEES)
+        aggregate = _aggregate(role_evaluations, reporting_service.min_aggregate_evaluatees())
         sections = dict(aggregate.sections)
         for section_id, result in sections.items():
-            if result.availability == "available" and len({evaluation.evaluator_id for evaluation in role_evaluations if section_id in evaluation.sections}) < reporting_service.MIN_AGGREGATE_EVALUATEES:
+            if result.availability == "available" and len({evaluation.evaluator_id for evaluation in role_evaluations if section_id in evaluation.sections}) < reporting_service.min_aggregate_evaluatees():
                 sections[section_id] = ScoreResult(None, "suppressed")
         aggregate = _withhold_sections(suppress_small_complements(AggregateScores(sections, _overall(sections)), scoped, role_evaluations), unsafe)
         results[role_id] = _withhold_sections(aggregate, set(aggregate.sections))
@@ -388,6 +388,6 @@ def suppress_small_complements(aggregate: AggregateScores, population: Sequence[
         included_assignments = {item.assignment_id for item in cohort}
         remaining = len({item.evaluatee_id for item in population if item.assignment_id not in included_assignments
                          and item.evaluator_id != item.evaluatee_id and section_id in item.sections})
-        if 0 < remaining < reporting_service.MIN_AGGREGATE_EVALUATEES:
+        if 0 < remaining < reporting_service.min_aggregate_evaluatees():
             sections[section_id] = ScoreResult(None, "suppressed")
     return AggregateScores(sections, _overall(sections))

@@ -225,8 +225,8 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
     for key, definition in sorted(definitions.items()):
         peer_items = observations[(key, "peer")]
         peer_reviewers = {evaluator_by_form[references[item[2]].filled_form_id] for item in peer_items}
-        peer = _statistics(peer_items, minimum=reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS
-                            if len(peer_reviewers) >= reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS else len(peer_items) + 1)
+        peer = _statistics(peer_items, minimum=reporting_service.min_individual_peer_reviewers()
+                            if len(peer_reviewers) >= reporting_service.min_individual_peer_reviewers() else len(peer_items) + 1)
         if peer.availability == "available" and key not in released_peer_keys:
             peer = QuantitativeStatistics(availability="suppressed")
         self_result = _statistics(observations[(key, "self")])

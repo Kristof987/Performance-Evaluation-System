@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 import models
 import reporting_service
+import workspace_settings_service
 from ai_analysis_models import EmployeeAIAnalysis, EmployeeAnalysisContext
 from ai_analysis_service import build_employee_analysis_context
 from ai_generation_service import (
@@ -18,17 +19,33 @@ from ai_generation_service import (
 )
 
 
-def can_manage(actor: models.User, db: Session) -> bool:
+GENERATE = "ai_analysis.generate"
+APPROVE = "ai_analysis.approve"
+
+
+def has_permission(actor: models.User, db: Session, permission: str) -> bool:
     return db.query(models.User.id).join(models.SystemRole, models.SystemRole.id == models.User.system_role_id).join(
         models.system_role_permissions, models.system_role_permissions.c.system_role_id == models.SystemRole.id,
     ).join(models.SystemPermission, models.SystemPermission.id == models.system_role_permissions.c.permission_id).filter(
         models.User.id == actor.id, models.User.is_active.is_(True),
-        models.SystemPermission.name == "campaigns.manage",
+        models.SystemPermission.name == permission,
     ).first() is not None
 
 
-def _writable(context: EmployeeAnalysisContext, db: Session, actor: models.User) -> None:
-    if not can_manage(actor, db):
+def can_manage(actor: models.User, db: Session) -> bool:
+    return has_permission(actor, db, GENERATE)
+
+
+def capabilities(actor: models.User, db: Session, *, archived: bool) -> dict:
+    """Flags the Reports UI uses to show generate, edit and approve controls."""
+    enabled = workspace_settings_service.ai_enabled(db)
+    can_generate = has_permission(actor, db, GENERATE) and not archived
+    return {"can_manage": can_generate, "can_generate": can_generate and enabled,
+            "can_approve": has_permission(actor, db, APPROVE) and not archived, "ai_enabled": enabled}
+
+
+def _writable(context: EmployeeAnalysisContext, db: Session, actor: models.User, permission: str = GENERATE) -> None:
+    if not has_permission(actor, db, permission):
         raise HTTPException(status_code=403, detail="Analysis management permission required")
     campaign = db.query(models.Campaign).filter(models.Campaign.id == context.campaign_id).first()
     if campaign.is_archived:
@@ -150,7 +167,7 @@ def list_analyses(db: Session, campaign_id: int, employee_id: int, *, actor: mod
     ).order_by(models.EmployeeAIAnalysis.version.desc()).all()
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     return {"versions": [_serialize(item, fingerprint) for item in records],
-            "can_manage": can_manage(actor, db) and not campaign.is_archived,
+            **capabilities(actor, db, archived=campaign.is_archived),
             "has_eligible_evidence": bool(context.evidence_references)}
 
 
@@ -267,11 +284,11 @@ def edit(db: Session, campaign_id: int, employee_id: int, analysis_id: int,
 
 def approve(db: Session, campaign_id: int, employee_id: int, analysis_id: int, *, actor: models.User) -> dict:
     initial = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-    _writable(initial, db, actor)
+    _writable(initial, db, actor, APPROVE)
     db.rollback()
     _lock_campaign(db, campaign_id)
     context = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-    _writable(context, db, actor)
+    _writable(context, db, actor, APPROVE)
     record = _record(db, campaign_id, employee_id, analysis_id)
     if record.status != "draft":
         raise HTTPException(status_code=409, detail="Only Draft versions can be approved")

@@ -78,7 +78,7 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
         completed = report["kpis"]["completed_evaluations"]
         cohort_count = len({row[0].evaluatee_id for row in role_rows})
 
-    minimum = reporting_service.MIN_AGGREGATE_EVALUATEES
+    minimum = reporting_service.min_aggregate_evaluatees()
     if cohort_count < minimum and not aggregate_access:
         return AggregateAnalysisContext(
             campaign_id=campaign_id, scope_type=scope_type, scope_id=scope_id, scope_label=label,

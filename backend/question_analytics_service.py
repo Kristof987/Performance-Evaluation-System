@@ -243,7 +243,7 @@ def _release_plan(population: list[Observation], *, stable: bool, evaluation_typ
     if not stable:
         return ({("employee", item.evaluatee_id) for item in population}
                 if evaluation_type == "self" else set())
-    minimum = reporting_service.MIN_AGGREGATE_EVALUATEES
+    minimum = reporting_service.min_aggregate_evaluatees()
     evaluatees = {item.evaluatee_id for item in population}
     evaluators = {item.evaluator_id for item in population}
     selected: set[tuple[str, int | None]] = set()
@@ -267,7 +267,7 @@ def _release_plan(population: list[Observation], *, stable: bool, evaluation_typ
     if evaluation_type == "self" or not rows:
         for employee_id in sorted(evaluatees):
             items = [item for item in population if item.evaluatee_id == employee_id]
-            if evaluation_type == "self" or len({item.evaluator_id for item in items}) >= reporting_service.MIN_INDIVIDUAL_PEER_REVIEWERS:
+            if evaluation_type == "self" or len({item.evaluator_id for item in items}) >= reporting_service.min_individual_peer_reviewers():
                 if evaluation_type == "self":
                     add(("employee", employee_id), items)
                 else:

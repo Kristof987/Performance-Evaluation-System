@@ -1,4 +1,5 @@
 from collections import defaultdict
+from contextvars import ContextVar
 from datetime import date
 from hashlib import sha256
 from typing import Any
@@ -9,13 +10,28 @@ from sqlalchemy.orm import Session
 
 import models
 import campaign_lifecycle
+import workspace_settings_service
 from business_calendar import business_date
 
 
 COMPLETED_STATUSES = {"completed", "submitted"}
-MIN_AGGREGATE_EVALUATEES = 2
-MIN_INDIVIDUAL_PEER_REVIEWERS = 2
 REPORTABLE_CAMPAIGN_STATUSES = tuple(status.value for status in campaign_lifecycle.REPORTABLE_STATUSES)
+
+
+# Suppression thresholds come from workspace settings. They are loaded once per report
+# request in require_reports_access, which every report, analytics and AI entry point calls.
+_privacy_thresholds: ContextVar[tuple[int, int]] = ContextVar("privacy_thresholds", default=(
+    workspace_settings_service.DEFAULT_MIN_INDIVIDUAL_PEER_REVIEWERS,
+    workspace_settings_service.DEFAULT_MIN_AGGREGATE_EVALUATEES,
+))
+
+
+def min_individual_peer_reviewers() -> int:
+    return _privacy_thresholds.get()[0]
+
+
+def min_aggregate_evaluatees() -> int:
+    return _privacy_thresholds.get()[1]
 
 
 def status_key(status_name: str | None, finish_date: date | None) -> str:
@@ -47,6 +63,7 @@ def _has_permission(actor: models.User, db: Session, permission: str) -> bool:
 def require_reports_access(campaign_id: int | None, actor: models.User, db: Session) -> models.Campaign | None:
     if not _has_permission(actor, db, "reports.read"):
         raise HTTPException(status_code=403, detail="User is not authorized to view reports")
+    _privacy_thresholds.set(workspace_settings_service.privacy_thresholds(db))
 
     if campaign_id is None:
         return None
@@ -348,7 +365,7 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
             "self_evaluation_policy": "Default performance analytics exclude self-evaluations where evaluator_id equals evaluatee_id.",
             "participant_deduplication": "Campaign employee counts deduplicate by stable employee id.",
             "group_attribution": "Group summaries use FilledForm.company_group_id, the assignment attribution captured when the matrix is saved.",
-            "confidentiality": "Aggregate statistics are available to authorized campaign managers; raw answers and reviewer identities are separately protected." if aggregate_access else f"Section scores require at least {MIN_AGGREGATE_EVALUATEES} evaluated employees; group slices with a smaller complementary cohort are also suppressed.",
+            "confidentiality": "Aggregate statistics are available to authorized campaign managers; raw answers and reviewer identities are separately protected." if aggregate_access else f"Section scores require at least {min_aggregate_evaluatees()} evaluated employees; group slices with a smaller complementary cohort are also suppressed.",
         },
     }
 
@@ -429,7 +446,7 @@ def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> 
             "groups_with_reportable_results": reportable_groups,
         },
         "groups": group_summaries,
-        "notes": {"scoring": "Section peer scores use submitted schema-v2 snapshots and normalized 1-5 ratings.", "group_attribution": "Group scores use the group stored with each evaluation assignment.", "confidentiality": "Authorized campaign managers may view aggregate scores regardless of cohort size." if aggregate_access else f"At least {MIN_AGGREGATE_EVALUATEES} evaluated employees must contribute per Section; small complementary cohorts are suppressed."},
+        "notes": {"scoring": "Section peer scores use submitted schema-v2 snapshots and normalized 1-5 ratings.", "group_attribution": "Group scores use the group stored with each evaluation assignment.", "confidentiality": "Authorized campaign managers may view aggregate scores regardless of cohort size." if aggregate_access else f"At least {min_aggregate_evaluatees()} evaluated employees must contribute per Section; small complementary cohorts are suppressed."},
     }
 
 
@@ -565,7 +582,7 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session, pers
         "kpis": {"roles_in_campaign": len(role_summaries), "participating_employees": len(participating_employees), "completed_evaluations": sum(item["completed_evaluations"] for item in role_summaries), "roles_with_reportable_results": sum(1 for item in role_summaries if item["average_score"] is not None)},
         "roles": role_summaries,
         "section_comparison": comparison,
-        "notes": {"scoring": "Normalized Section scores use submitted schema-v2 snapshots and evaluated-employee weighting.", "role_history": "Evaluation records do not snapshot company roles; role breakdowns use current company roles.", "confidentiality": "Authorized campaign managers may view aggregate role scores regardless of cohort size." if aggregate_access else f"A Section requires {MIN_AGGREGATE_EVALUATEES} evaluated employees; evaluator-role results also require {MIN_AGGREGATE_EVALUATEES} distinct peer evaluators."},
+        "notes": {"scoring": "Normalized Section scores use submitted schema-v2 snapshots and evaluated-employee weighting.", "role_history": "Evaluation records do not snapshot company roles; role breakdowns use current company roles.", "confidentiality": "Authorized campaign managers may view aggregate role scores regardless of cohort size." if aggregate_access else f"A Section requires {min_aggregate_evaluatees()} evaluated employees; evaluator-role results also require {min_aggregate_evaluatees()} distinct peer evaluators."},
     }
 
 
@@ -720,7 +737,7 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
             "assigned_self_evaluations": configured_self,
         },
         "employees": employees,
-        "notes": {"employee_participation": "Employees include assigned campaign evaluatees and campaign group members, deduplicated by employee ID.", "scoring": "Submitted schema-v2 snapshot ratings are normalized to 1-5 and aggregated by Section, peer evaluator and employee.", "individual_privacy": "Authorized campaign managers may view aggregate employee scores; raw peer feedback remains protected." if aggregate_access else f"Individual peer Section scores require at least {MIN_INDIVIDUAL_PEER_REVIEWERS} distinct peer evaluators."},
+        "notes": {"employee_participation": "Employees include assigned campaign evaluatees and campaign group members, deduplicated by employee ID.", "scoring": "Submitted schema-v2 snapshot ratings are normalized to 1-5 and aggregated by Section, peer evaluator and employee.", "individual_privacy": "Authorized campaign managers may view aggregate employee scores; raw peer feedback remains protected." if aggregate_access else f"Individual peer Section scores require at least {min_individual_peer_reviewers()} distinct peer evaluators."},
     }
 
 
@@ -839,7 +856,7 @@ def build_employee_report_detail(campaign_id: int, employee_id: int, actor: mode
         "sections": sections,
         "section_availability": availability,
         "self_peer_comparison": build_section_self_peer_comparison(employee_result, names),
-        "coverage": {"peer_assigned": len({row[0].id for row in peer_rows}), "peer_completed": len({row[0].id for row in peer_completed_rows}), "peer_outstanding": max(0, len({row[0].id for row in peer_rows}) - len({row[0].id for row in peer_completed_rows})), "self_evaluation": self_status, "campaign_end_date": business_date(campaign.end_date), "distinct_peer_evaluators": distinct_peer_evaluators if aggregate_access or distinct_peer_evaluators >= MIN_INDIVIDUAL_PEER_REVIEWERS else None},
+        "coverage": {"peer_assigned": len({row[0].id for row in peer_rows}), "peer_completed": len({row[0].id for row in peer_completed_rows}), "peer_outstanding": max(0, len({row[0].id for row in peer_rows}) - len({row[0].id for row in peer_completed_rows})), "self_evaluation": self_status, "campaign_end_date": business_date(campaign.end_date), "distinct_peer_evaluators": distinct_peer_evaluators if aggregate_access or distinct_peer_evaluators >= min_individual_peer_reviewers() else None},
         "history": build_employee_history(employee_id, actor, db),
-        "notes": {"scoring": "Peer and self Section scores use submitted schema-v2 snapshots and normalized 1-5 ratings; Overall equally weights reportable Sections.", "individual_privacy": "Authorized campaign managers may view employee aggregate scores regardless of reviewer count." if aggregate_access else f"Individual peer Section scores require at least {MIN_INDIVIDUAL_PEER_REVIEWERS} distinct peer evaluators; suppressed results never enter Overall or Self comparisons.", "raw_feedback": "Raw written feedback and reviewer identities are not returned by Employee Reports."},
+        "notes": {"scoring": "Peer and self Section scores use submitted schema-v2 snapshots and normalized 1-5 ratings; Overall equally weights reportable Sections.", "individual_privacy": "Authorized campaign managers may view employee aggregate scores regardless of reviewer count." if aggregate_access else f"Individual peer Section scores require at least {min_individual_peer_reviewers()} distinct peer evaluators; suppressed results never enter Overall or Self comparisons.", "raw_feedback": "Raw written feedback and reviewer identities are not returned by Employee Reports."},
     }

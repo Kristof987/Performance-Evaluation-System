@@ -102,7 +102,8 @@ def generate(request: schemas.FormAIGenerateRequest, db: Session,
     sections = db.query(models.Section).filter(models.Section.scope_key == "default",
                                                 models.Section.is_archived.is_(False)).order_by(models.Section.name).all()
     try:
-        key, model, timeout, configured_tokens = ai_generation_service._configuration()
+        key, model, timeout, configured_tokens = ai_generation_service._configuration(
+            workspace_settings_service.ai_model(db))
     except ai_generation_service.AnalysisGenerationError:
         raise HTTPException(status_code=503, detail="AI generation is not configured") from None
     minimum, maximum = _RANGES[request.length]
