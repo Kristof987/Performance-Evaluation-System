@@ -60,8 +60,63 @@ def _has_permission(actor: models.User, db: Session, permission: str) -> bool:
     )
 
 
+# Team leads (reports.read_team) see reports only for the groups they lead. Team-enabled routes
+# call enter_report_scope first; every other report entry point keeps requiring reports.read.
+_team_groups: ContextVar[frozenset[int] | None] = ContextVar("report_team_groups", default=None)
+
+
+def led_group_ids(actor: models.User, db: Session) -> frozenset[int]:
+    if actor.employee is None:
+        return frozenset()
+    leaders = models.company_group_leaders.c
+    return frozenset(group_id for (group_id,) in db.query(leaders.company_group_id)
+                     .filter(leaders.employee_id == actor.employee.id).all())
+
+
+def enter_report_scope(actor: models.User, db: Session) -> frozenset[int] | None:
+    """Return None for workspace-wide report access, or the groups a team lead may see."""
+    if _has_permission(actor, db, "reports.read"):
+        _team_groups.set(None)
+        return None
+    if not _has_permission(actor, db, "reports.read_team"):
+        raise HTTPException(status_code=403, detail="User is not authorized to view reports")
+    groups = led_group_ids(actor, db)
+    _team_groups.set(groups)
+    return groups
+
+
+def team_employee_ids(campaign_id: int, groups: frozenset[int], actor: models.User, db: Session) -> set[int]:
+    """Employees evaluated in, or campaign members of, the given groups; never the lead themself."""
+    evaluatees = {evaluatee_id for (evaluatee_id,) in db.query(models.FilledForm.evaluatee_id)
+                  .filter(models.FilledForm.campaign_id == campaign_id)
+                  .filter(models.FilledForm.company_group_id.in_(groups)).distinct().all()} if groups else set()
+    campaign_groups = {group.id for group in assigned_campaign_groups(campaign_id, db)} & groups
+    if campaign_groups:
+        members = models.employee_company_groups.c
+        evaluatees.update(employee_id for (employee_id,) in db.query(members.employee_id)
+                          .filter(members.company_group_id.in_(campaign_groups)).all())
+    if actor.employee is not None:
+        evaluatees.discard(actor.employee.id)
+    return evaluatees
+
+
+def require_team_group(campaign_id: int, group_id: int, actor: models.User, db: Session) -> None:
+    groups = enter_report_scope(actor, db)
+    if groups is not None and group_id not in groups:
+        raise HTTPException(status_code=403, detail="You can only view reports of groups you lead")
+    require_reports_access(campaign_id, actor, db)
+
+
+def require_team_employee(campaign_id: int, employee_id: int, actor: models.User, db: Session) -> None:
+    groups = enter_report_scope(actor, db)
+    if groups is not None and employee_id not in team_employee_ids(campaign_id, groups, actor, db):
+        raise HTTPException(status_code=403, detail="You can only view reports of employees in groups you lead")
+    require_reports_access(campaign_id, actor, db)
+
+
 def require_reports_access(campaign_id: int | None, actor: models.User, db: Session) -> models.Campaign | None:
-    if not _has_permission(actor, db, "reports.read"):
+    if not _has_permission(actor, db, "reports.read") and not (
+            _team_groups.get() is not None and _has_permission(actor, db, "reports.read_team")):
         raise HTTPException(status_code=403, detail="User is not authorized to view reports")
     _privacy_thresholds.set(workspace_settings_service.privacy_thresholds(db))
 
@@ -99,12 +154,17 @@ def _report_campaign_option(campaign: models.Campaign) -> dict[str, Any]:
 
 
 def list_report_campaigns(actor: models.User, db: Session) -> list[dict[str, Any]]:
+    groups = enter_report_scope(actor, db)
     require_reports_access(None, actor, db)
+    query = db.query(models.Campaign)
+    if groups is not None:
+        attributed = db.query(models.FilledForm.campaign_id).filter(models.FilledForm.company_group_id.in_(groups))
+        assigned = db.query(models.campaign_company_groups.c.campaign_id).filter(
+            models.campaign_company_groups.c.company_group_id.in_(groups))
+        query = query.filter(models.Campaign.id.in_(attributed) | models.Campaign.id.in_(assigned))
     return [
         _report_campaign_option(campaign)
-        for campaign in db.query(models.Campaign)
-        .order_by(models.Campaign.start_date.desc(), models.Campaign.id.desc())
-        .all()
+        for campaign in query.order_by(models.Campaign.start_date.desc(), models.Campaign.id.desc()).all()
     ]
 
 
@@ -406,6 +466,11 @@ def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> 
     rows = campaign_report_rows(campaign.id, db)
     completed_rows = [row for row in rows if status_key(row[2], row[0].finish_date) == "completed"]
     groups = assigned_campaign_groups(campaign.id, db)
+    team_groups = _team_groups.get()
+    if team_groups is not None:
+        groups = [group for group in groups if group.id in team_groups]
+        rows = [row for row in rows if row[0].company_group_id in team_groups]
+        completed_rows = [row for row in completed_rows if row[0].company_group_id in team_groups]
     members_by_group, _ = membership_maps(db)
     scored, _names = _section_report_data(rows, db)
     group_roles = {employee_id: role.id for employee_id, (_employee, role) in users_by_id(db).items()}
@@ -686,6 +751,11 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
     aggregate_access = aggregate_reporting_access(campaign_id, actor, db)
     rows = campaign_report_rows(campaign.id, db)
     employees_by_id, group_names_by_employee, participant_ids = employee_base_context(campaign.id, rows, db)
+    team_groups = _team_groups.get()
+    if team_groups is not None:
+        team = team_employee_ids(campaign.id, team_groups, actor, db)
+        participant_ids &= team
+        rows = [row for row in rows if row[0].evaluatee_id in team]
     completed_peer_rows = [row for row in rows if row[0].evaluator_id != row[0].evaluatee_id and status_key(row[2], row[0].finish_date) == "completed"]
     peer_assigned_by_employee: dict[int, list[Any]] = defaultdict(list)
     peer_completed_by_employee: dict[int, list[Any]] = defaultdict(list)
@@ -772,6 +842,9 @@ def build_employee_history(employee_id: int, actor: models.User, db: Session) ->
         except HTTPException as error:
             if error.status_code != 404:
                 raise
+            continue
+        team_groups = _team_groups.get()
+        if team_groups is not None and employee_id not in team_employee_ids(campaign.id, team_groups, actor, db):
             continue
         rows = campaign_report_rows(campaign.id, db)
         scored, names = _section_report_data(rows, db)

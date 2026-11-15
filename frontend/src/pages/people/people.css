@@ -1240,6 +1240,25 @@
   margin: 0;
 }
 
+.people-system-role {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.people-system-role .form-control {
+  max-width: 220px;
+}
+
+select + .people-new-role-input {
+  margin-top: 8px;
+}
+
+.people-system-role + small {
+  display: block;
+  margin-top: 6px;
+}
+
 .people-invite-success {
   color: var(--color-success);
 }

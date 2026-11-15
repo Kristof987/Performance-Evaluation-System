@@ -18,18 +18,24 @@ export type Employee = {
   invitationSentAt: string | null;
   invitationError: string | null;
   photo: string | null;
+  systemRoleId: number | null;
+  systemRole: string | null;
 };
+
+export type NamedOption = { id: number; name: string; description?: string | null };
 
 export type Group = {
   id: number;
   name: string;
   description: string;
   memberCount: number;
+  leaderIds: number[];
 };
 
 export type GroupFormValues = {
   name: string;
   description: string;
+  leaderIds: number[];
 };
 
 export type EmployeeFormValues = {
@@ -56,6 +62,7 @@ type PeopleGroupResponse = {
   name: string;
   description: string | null;
   member_count: number;
+  leader_ids?: number[];
 };
 
 type PeopleEmployeeResponse = {
@@ -72,11 +79,15 @@ type PeopleEmployeeResponse = {
   invitation_sent_at?: string | null;
   invitation_error?: string | null;
   profile_image_url?: string | null;
+  system_role_id?: number | null;
+  system_role_name?: string | null;
 };
 
 type PeopleResponse = {
   employees: PeopleEmployeeResponse[];
   groups: PeopleGroupResponse[];
+  company_roles?: NamedOption[];
+  system_roles?: NamedOption[];
 };
 
 function mapGroup(group: PeopleGroupResponse): Group {
@@ -85,6 +96,7 @@ function mapGroup(group: PeopleGroupResponse): Group {
     name: group.name,
     description: group.description || 'No description provided.',
     memberCount: group.member_count,
+    leaderIds: group.leader_ids ?? [],
   };
 }
 
@@ -103,6 +115,8 @@ function mapEmployee(employee: PeopleEmployeeResponse): Employee {
     invitationSentAt: employee.invitation_sent_at ?? null,
     invitationError: employee.invitation_error ?? null,
     photo: employee.profile_image_url ?? null,
+    systemRoleId: employee.system_role_id ?? null,
+    systemRole: employee.system_role_name ?? null,
   };
 }
 
@@ -143,7 +157,24 @@ export async function fetchPeople(getAccessToken: AccessTokenGetter, signal: Abo
   return {
     employees: people.employees.map(mapEmployee),
     groups: people.groups.map(mapGroup),
+    companyRoles: people.company_roles ?? [],
+    systemRoles: people.system_roles ?? [],
   };
+}
+
+export async function updateEmployeeSystemRole(getAccessToken: AccessTokenGetter, employeeId: number,
+  systemRoleId: number): Promise<NamedOption> {
+  const response = await authenticatedApiFetch(getAccessToken, `/people/employees/${employeeId}/system-role`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ system_role_id: systemRoleId }),
+  });
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null;
+    throw new Error(typeof detail === 'string' ? detail : 'The system role could not be changed.');
+  }
+  return (await response.json()) as NamedOption;
 }
 
 export async function createEmployee(getAccessToken: AccessTokenGetter, form: EmployeeFormValues): Promise<Employee> {
@@ -223,6 +254,7 @@ export async function createGroup(getAccessToken: AccessTokenGetter, form: Group
     body: JSON.stringify({
       name: form.name,
       description: form.description || null,
+      leader_ids: form.leaderIds,
     }),
   });
   if (!response.ok) {
@@ -245,6 +277,7 @@ export async function updateGroup(
     body: JSON.stringify({
       name: form.name,
       description: form.description || null,
+      leader_ids: form.leaderIds,
     }),
   });
   if (!response.ok) {

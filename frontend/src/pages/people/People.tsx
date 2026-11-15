@@ -4,6 +4,7 @@ import AppLayout from '../layout/AppLayout';
 import Pagination from '../../components/Pagination';
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -27,8 +28,10 @@ import {
   removeGroupMember,
   resendInvitation,
   updateEmployee,
+  updateEmployeeSystemRole,
   updateGroup,
   type Employee,
+  type NamedOption,
   type EmployeeFormValues,
   type Group,
   type GroupFormValues,
@@ -88,7 +91,9 @@ const emptyEmployeeForm: EmployeeFormValues = {
 const emptyGroupForm: GroupFormValues = {
   name: '',
   description: '',
+  leaderIds: [],
 };
+const NEW_ROLE = '__new__';
 const employeeTemplateUrl = new URL(
   '../../resources/upload_employee_empty_template.xlsx',
   import.meta.url,
@@ -374,15 +379,19 @@ function useViewportDropdownPosition(
   return style;
 }
 
+/** Searchable multi-select of named items; used for group membership and for group leaders. */
 function GroupMultiSelect({
   groups,
   selectedGroupIds,
   onChange,
+  noun = 'groups',
 }: {
-  groups: Group[];
+  groups: Array<{ id: number; name: string }>;
   selectedGroupIds: number[];
   onChange: (groupIds: number[]) => void;
+  noun?: string;
 }) {
+  const optionsId = useId();
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -421,7 +430,7 @@ function GroupMultiSelect({
 
   return (
     <div className="group-multiselect" ref={rootRef}>
-      <div className="group-selected-list" aria-label="Selected groups">
+      <div className="group-selected-list" aria-label={`Selected ${noun}`}>
         {selectedGroups.length > 0 ? (
           selectedGroups.map((group) => (
             <span className="group-selected-chip" key={group.id}>
@@ -436,7 +445,7 @@ function GroupMultiSelect({
             </span>
           ))
         ) : (
-          <span className="group-empty-selection">No groups selected</span>
+          <span className="group-empty-selection">No {noun} selected</span>
         )}
       </div>
       <div className="group-search-control" ref={anchorRef}>
@@ -464,16 +473,16 @@ function GroupMultiSelect({
             });
           }
         }}
-          placeholder="Search and add groups..."
-          aria-label="Search groups"
+          placeholder={`Search and add ${noun}...`}
+          aria-label={`Search ${noun}`}
           aria-expanded={isOpen}
-          aria-controls="group-multiselect-options"
+          aria-controls={optionsId}
         />
         <button
           className="group-dropdown-toggle"
           type="button"
           onClick={() => setIsOpen((current) => !current)}
-          aria-label={isOpen ? 'Close group options' : 'Open group options'}
+          aria-label={isOpen ? `Close ${noun} options` : `Open ${noun} options`}
           aria-expanded={isOpen}
         >
           ▾
@@ -482,9 +491,9 @@ function GroupMultiSelect({
       {isOpen && createPortal(
         <div
           className="group-option-list"
-          id="group-multiselect-options"
+          id={optionsId}
           role="group"
-          aria-label="Available groups"
+          aria-label={`Available ${noun}`}
           ref={dropdownRef}
           style={dropdownStyle}
           onKeyDown={(event) => {
@@ -494,9 +503,9 @@ function GroupMultiSelect({
             }
           }}
         >
-          {groups.length === 0 && <span>No groups available.</span>}
+          {groups.length === 0 && <span>No {noun} available.</span>}
           {groups.length > 0 && filteredGroups.length === 0 && (
-            <span>No groups match your search.</span>
+            <span>No {noun} match your search.</span>
           )}
           {filteredGroups.map((group) => (
             <label className="group-option" key={group.id}>
@@ -782,7 +791,8 @@ export default function People() {
   const permissions = auth0User?.permissions ?? [];
   const canManageGroups = permissions.includes('groups.manage');
   const canManageEmployees = permissions.includes('employees.manage') && canManageGroups;
-  const canImportEmployees = canManageEmployees && permissions.includes('roles.assign');
+  const canAssignRoles = permissions.includes('roles.assign');
+  const canImportEmployees = canManageEmployees && canAssignRoles;
   const currentUser = auth0User;
 
   function handleAccessError(error: unknown) {
@@ -790,6 +800,12 @@ export default function People() {
   }
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [companyRoles, setCompanyRoles] = useState<NamedOption[]>([]);
+  const [systemRoles, setSystemRoles] = useState<NamedOption[]>([]);
+  const [isNewCompanyRole, setIsNewCompanyRole] = useState(false);
+  const [systemRoleDraft, setSystemRoleDraft] = useState<{ employeeId: number; roleId: number } | null>(null);
+  const [systemRoleMessage, setSystemRoleMessage] = useState<{ employeeId: number; tone: 'success' | 'error'; text: string } | null>(null);
+  const [isSavingSystemRole, setIsSavingSystemRole] = useState(false);
   const [isPeopleLoading, setIsPeopleLoading] = useState(true);
   const [peopleError, setPeopleError] = useState('');
   // Tab, filters, sorting, pages and the open drawer live in the URL, so links and refreshes keep the view.
@@ -860,15 +876,23 @@ export default function People() {
     groups.find((group) => group.id === selectedGroupId) ?? null;
   const selectedEmployee =
     employees.find((employee) => employee.id === selectedEmployeeId) ?? null;
+  const selectedGroupLeaders = selectedGroup
+    ? employees.filter((employee) => selectedGroup.leaderIds.includes(employee.id))
+    : [];
+  const leaderOptions = employees
+    .filter((employee) => employee.status === 'Active' || groupForm.leaderIds.includes(employee.id))
+    .map((employee) => ({ id: employee.id, name: employee.name }));
   const memberManagementGroup =
     selectedGroup ??
     (editingGroupId !== null
       ? groups.find((group) => group.id === editingGroupId) ?? null
       : null);
 
-  function applyPeopleData(people: { employees: Employee[]; groups: Group[] }) {
+  function applyPeopleData(people: { employees: Employee[]; groups: Group[]; companyRoles: NamedOption[]; systemRoles: NamedOption[] }) {
     setEmployees(people.employees);
     setGroups(people.groups);
+    setCompanyRoles(people.companyRoles);
+    setSystemRoles(people.systemRoles);
     setSelectedEmployeeId((current) =>
       current !== null && people.employees.some((employee) => employee.id === current)
         ? current
@@ -1064,7 +1088,11 @@ export default function People() {
   function openEditGroupModal(group: Group) {
     setShouldRestoreGroupDrawer(selectedGroupId === group.id);
     setEditingGroupId(group.id);
-    setGroupForm({ name: group.name, description: group.description });
+    setGroupForm({
+      name: group.name,
+      description: isEmptyDescription(group.description) ? '' : group.description,
+      leaderIds: group.leaderIds,
+    });
     setGroupFormMessage('');
     setGroupMemberMessage('');
     setGroupTab('groupManualPanel');
@@ -1107,6 +1135,7 @@ export default function People() {
       const payload = {
         name: groupForm.name.trim(),
         description: groupForm.description.trim(),
+        leaderIds: groupForm.leaderIds,
       };
       if (editingGroupId === null) {
         await createGroup(getAccessTokenSilently, payload);
@@ -1248,6 +1277,7 @@ export default function People() {
     setIsEmployeeModalOpen(false);
     setEditingEmployeeId(null);
     setEmployeeForm(emptyEmployeeForm);
+    setIsNewCompanyRole(false);
     setEmployeeFormErrors({});
     setEmployeeFormMessage('');
     setEmployeeImportFile(null);
@@ -1258,6 +1288,7 @@ export default function People() {
   function openAddEmployeeModal() {
     setEditingEmployeeId(null);
     setEmployeeForm(emptyEmployeeForm);
+    setIsNewCompanyRole(false);
     setEmployeeFormErrors({});
     setEmployeeFormMessage('');
     setEmployeeTab('manualPanel');
@@ -1266,6 +1297,7 @@ export default function People() {
 
   function openEditEmployeeModal(employee: Employee) {
     setEditingEmployeeId(employee.id);
+    setIsNewCompanyRole(false);
     setEmployeeForm({
       name: employee.name,
       role: employee.role,
@@ -1329,6 +1361,8 @@ export default function People() {
       setEmployeePage(1);
       setEditingEmployeeId(null);
       setEmployeeForm(emptyEmployeeForm);
+      setIsNewCompanyRole(false);
+    setIsNewCompanyRole(false);
       setEmployeeFormErrors({});
       setIsEmployeeModalOpen(false);
     } catch (error) {
@@ -1338,6 +1372,25 @@ export default function People() {
       );
     } finally {
       setIsSavingEmployee(false);
+    }
+  }
+
+  async function handleSaveSystemRole(employee: Employee, roleId: number) {
+    if (isSavingSystemRole || !canAssignRoles) return;
+    setIsSavingSystemRole(true);
+    setSystemRoleMessage(null);
+    try {
+      const role = await updateEmployeeSystemRole(getAccessTokenSilently, employee.id, roleId);
+      setEmployees((current) => current.map((item) => item.id === employee.id
+        ? { ...item, systemRoleId: role.id, systemRole: role.name } : item));
+      setSystemRoleDraft(null);
+      setSystemRoleMessage({ employeeId: employee.id, tone: 'success', text: `System role changed to ${role.name}.` });
+    } catch (error) {
+      handleAccessError(error);
+      setSystemRoleMessage({ employeeId: employee.id, tone: 'error',
+        text: error instanceof Error ? error.message : 'The system role could not be changed.' });
+    } finally {
+      setIsSavingSystemRole(false);
     }
   }
 
@@ -1783,6 +1836,44 @@ export default function People() {
                 <dd>{selectedEmployee.role}</dd>
               </div>
               <div>
+                <dt>System role</dt>
+                <dd>
+                  {canAssignRoles && selectedEmployee.userId !== null && selectedEmployee.systemRoleId !== null
+                    && selectedEmployee.id !== auth0User?.employee.id ? (
+                    <div className="people-system-role">
+                      <select
+                        className="form-control"
+                        aria-label={`System role of ${selectedEmployee.name}`}
+                        value={systemRoleDraft?.employeeId === selectedEmployee.id ? systemRoleDraft.roleId : selectedEmployee.systemRoleId}
+                        disabled={isSavingSystemRole}
+                        onChange={(event) => {
+                          setSystemRoleMessage(null);
+                          setSystemRoleDraft({ employeeId: selectedEmployee.id, roleId: Number(event.target.value) });
+                        }}
+                      >
+                        {systemRoles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+                      </select>
+                      {systemRoleDraft?.employeeId === selectedEmployee.id && systemRoleDraft.roleId !== selectedEmployee.systemRoleId && (
+                        <button
+                          className="btn btn-primary people-button"
+                          type="button"
+                          disabled={isSavingSystemRole}
+                          onClick={() => void handleSaveSystemRole(selectedEmployee, systemRoleDraft.roleId)}
+                        >
+                          {isSavingSystemRole ? 'Saving...' : 'Save'}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    selectedEmployee.systemRole ?? '—'
+                  )}
+                  {systemRoleMessage?.employeeId === selectedEmployee.id && (
+                    <small className={systemRoleMessage.tone === 'success' ? 'people-invite-success' : 'people-invite-error'}
+                      role={systemRoleMessage.tone === 'success' ? 'status' : 'alert'}>{systemRoleMessage.text}</small>
+                  )}
+                </dd>
+              </div>
+              <div>
                 <dt>Status</dt>
                 <dd>{selectedEmployee.status}</dd>
               </div>
@@ -1855,6 +1946,30 @@ export default function People() {
                   : selectedGroup.description}
               </p>
             </div>
+
+            <section className="people-drawer-section">
+              <div className="people-section-head">
+                <h3>Leaders</h3>
+                <span>See this group's reports</span>
+              </div>
+              {selectedGroupLeaders.length > 0 ? (
+                <div className="people-member-list">
+                  {selectedGroupLeaders.map((employee) => (
+                    <div className="people-member-row" key={employee.id}>
+                      <div className="person">
+                        <Avatar className="mini" name={employee.name} photo={employee.photo} />
+                        <div>
+                          <strong>{employee.name}</strong>
+                          <span>{employee.role}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="people-empty-inline">No leader assigned.</div>
+              )}
+            </section>
 
             <section className="people-drawer-section">
               <div className="people-section-head">
@@ -2057,16 +2172,41 @@ export default function People() {
                   <FieldError message={employeeFormErrors.name} />
                 </div>
                 <div className="form-field field">
-                  <label className="form-label">Role <span aria-hidden="true">*</span></label>
-                  <input
-                    className="form-control"
-                    placeholder="e.g. Engineering Manager"
-                    value={employeeForm.role}
-                    onChange={(event) =>
-                      updateEmployeeForm('role', event.target.value)
-                    }
-                    aria-invalid={employeeFormErrors.role ? true : undefined}
-                  />
+                  <label className="form-label" htmlFor="employeeRoleSelect">Role <span aria-hidden="true">*</span></label>
+                  {companyRoles.length > 0 && (
+                    <select
+                      className="form-control"
+                      id="employeeRoleSelect"
+                      value={isNewCompanyRole ? NEW_ROLE : employeeForm.role}
+                      onChange={(event) => {
+                        const creating = event.target.value === NEW_ROLE;
+                        setIsNewCompanyRole(creating);
+                        updateEmployeeForm('role', creating ? '' : event.target.value);
+                      }}
+                      aria-invalid={employeeFormErrors.role && !isNewCompanyRole ? true : undefined}
+                    >
+                      <option value="" disabled>Choose a role…</option>
+                      {employeeForm.role !== '' && !isNewCompanyRole
+                        && !companyRoles.some((role) => role.name === employeeForm.role)
+                        && <option value={employeeForm.role}>{employeeForm.role}</option>}
+                      {companyRoles.map((role) => <option key={role.id} value={role.name}>{role.name}</option>)}
+                      <option value={NEW_ROLE}>+ New role…</option>
+                    </select>
+                  )}
+                  {(isNewCompanyRole || companyRoles.length === 0) && (
+                    <input
+                      className="form-control people-new-role-input"
+                      id={companyRoles.length === 0 ? 'employeeRoleSelect' : undefined}
+                      placeholder="e.g. Engineering Manager"
+                      aria-label="New role name"
+                      autoFocus={isNewCompanyRole}
+                      value={employeeForm.role}
+                      onChange={(event) =>
+                        updateEmployeeForm('role', event.target.value)
+                      }
+                      aria-invalid={employeeFormErrors.role ? true : undefined}
+                    />
+                  )}
                   <FieldError message={employeeFormErrors.role} />
                 </div>
                 <div className="form-field field full">
@@ -2231,6 +2371,16 @@ export default function People() {
                         updateGroupForm('description', event.target.value)
                       }
                     />
+                  </div>
+                  <div className="form-field field full">
+                    <label className="form-label">Leaders <span className="optional-label">optional</span></label>
+                    <GroupMultiSelect
+                      groups={leaderOptions}
+                      selectedGroupIds={groupForm.leaderIds}
+                      onChange={(leaderIds) => updateGroupForm('leaderIds', leaderIds)}
+                      noun="leaders"
+                    />
+                    <small className="people-field-note">Leaders see this group's reports, even if they are not members.</small>
                   </div>
                 </div>
                 {groupFormMessage !== '' && (

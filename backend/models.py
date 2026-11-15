@@ -120,6 +120,13 @@ campaign_company_groups = Table(
     ),
 )
 
+company_group_leaders = Table(
+    "company_group_leaders",
+    Base.metadata,
+    Column("company_group_id", Integer, ForeignKey("company_groups.id", ondelete="CASCADE"), primary_key=True),
+    Column("employee_id", Integer, ForeignKey("employees.id", ondelete="CASCADE"), primary_key=True),
+)
+
 class FormStatus(Base):
     __tablename__ = "form_statuses"
 

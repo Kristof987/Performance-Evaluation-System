@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { useAppAuth } from '../../../auth/AppAuth';
-import { fetchPermissionMatrix, savePermissionMatrix, type PermissionMatrix } from '../workspace.api';
+import { createSystemRole, deleteSystemRole, fetchPermissionMatrix, savePermissionMatrix, type PermissionMatrix } from '../workspace.api';
 import SaveBar from './SaveBar';
 
 // Removing these from your own role would lock you out of this page.
@@ -28,6 +28,8 @@ export default function PermissionsSettings() {
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [copyFromRoleId, setCopyFromRoleId] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -60,6 +62,31 @@ export default function PermissionsSettings() {
     setMessage(''); setError('');
   }
 
+  async function changeRoles(action: () => Promise<PermissionMatrix>, success: string) {
+    setSaving(true); setError(''); setMessage('');
+    try {
+      const result = await action();
+      setMatrix(result); setDraft(grantsOf(result));
+      setMessage(success);
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The role could not be changed.');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addRole(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = newRoleName.trim();
+    if (!name) return;
+    const created = await changeRoles(() => createSystemRole(getAccessToken, {
+      name, copy_from_role_id: copyFromRoleId ? Number(copyFromRoleId) : null,
+    }), `Role “${name}” created. Assign it to people on the People page.`);
+    if (created) { setNewRoleName(''); setCopyFromRoleId(''); }
+  }
+
   async function save() {
     setSaving(true); setError(''); setMessage('');
     try {
@@ -79,9 +106,24 @@ export default function PermissionsSettings() {
       <div className="settings-panel-header"><h2 id="permissions-title">Permissions</h2>
         <p>Choose what each system role is allowed to do. Every change is recorded in the audit log.</p></div>
       {!canEdit && <p className="settings-note">You can view this matrix, but only roles with permission management can change it.</p>}
+      {canEdit && <form className="settings-role-create" onSubmit={(event) => void addRole(event)}>
+        <label><span>New role</span>
+          <input className="form-control" value={newRoleName} maxLength={60} placeholder="e.g. Team lead"
+            onChange={(event) => setNewRoleName(event.target.value)} /></label>
+        <label><span>Start from</span>
+          <select className="form-control" value={copyFromRoleId} onChange={(event) => setCopyFromRoleId(event.target.value)}>
+            <option value="">No permissions</option>
+            {matrix.roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+          </select></label>
+        <button className="btn btn-secondary" type="submit" disabled={saving || dirty || !newRoleName.trim()}
+          title={dirty ? 'Save or discard your changes first.' : undefined}>Add role</button>
+      </form>}
       <div className="settings-table-wrap"><table className="settings-table settings-permission-table">
         <thead><tr><th scope="col">Permission</th>{matrix.roles.map((role) => <th scope="col" key={role.id}>
           {role.name}<small>{role.active_users} {role.active_users === 1 ? 'user' : 'users'}{role.id === ownRoleId ? ' · your role' : ''}</small>
+          {canEdit && !role.built_in && <button className="settings-role-delete" type="button"
+            disabled={saving || dirty} title={dirty ? 'Save or discard your changes first.' : undefined}
+            onClick={() => void changeRoles(() => deleteSystemRole(getAccessToken, role.id), `Role “${role.name}” deleted.`)}>Delete</button>}
         </th>)}</tr></thead>
         <tbody>{areas.map((area) => <Fragment key={area}>
           <tr className="settings-table-group"><th scope="rowgroup" colSpan={matrix.roles.length + 1}>{area}</th></tr>

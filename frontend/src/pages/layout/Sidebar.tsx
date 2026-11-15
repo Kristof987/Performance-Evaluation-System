@@ -23,7 +23,7 @@ import {
   getUserInitials,
 } from './sidebar-user';
 import { useAppAuth } from '../../auth/AppAuth';
-import { ACCESS, hasAccess, type AccessRule } from '../../app/access';
+import { ACCESS, hasAccess, hasTeamReportsOnly, type AccessRule } from '../../app/access';
 
 export type SidebarPage =
   | 'hr-home'
@@ -72,6 +72,7 @@ export default function Sidebar({
   const location = useLocation();
   const reportCampaignId = /^\/reports\/campaigns\/(\d+)/.exec(location.pathname)?.[1];
   const reportBase = reportCampaignId ? `/reports/campaigns/${reportCampaignId}` : '/reports';
+  const teamReportsOnly = hasTeamReportsOnly(auth0User?.permissions ?? []);
   const sidebarPhoto = mediaUrl(useProfilePhoto(auth0User?.employee.id,
     auth0User ? auth0User.employee.profile_image_url : sidebarUser?.profile_image_url));
   const sidebarUserName = auth0User?.employee.full_name ?? (
@@ -232,7 +233,11 @@ export default function Sidebar({
           <ChartNoAxesCombined size={17} />
           <span className="nav-item-label">Reports</span>
         </Link>}
-        {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && <div className="sidebar-report-links" aria-label="Reports pages">
+        {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && teamReportsOnly && <div className="sidebar-report-links" aria-label="Reports pages">
+          <NavLink to={`${reportBase}/employees`}>Employees</NavLink>
+          <NavLink to={`${reportBase}/groups`}>Groups</NavLink>
+        </div>}
+        {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && !teamReportsOnly && <div className="sidebar-report-links" aria-label="Reports pages">
           <NavLink end to={reportBase}>Overview</NavLink>
           <NavLink to={`${reportBase}/detailed`} className={({ isActive }) => isActive || location.pathname.includes('/questions') || location.pathname.includes('/groups') || location.pathname.includes('/roles') ? 'active' : ''}>Detailed Results</NavLink>
           <NavLink to={`${reportBase}/employees`}>Employees</NavLink>

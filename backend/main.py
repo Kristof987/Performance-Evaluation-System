@@ -167,11 +167,14 @@ def sign_in_status(user: models.User | None) -> str:
     return "not_invited"
 
 
-def invitation_fields(user: models.User | None) -> dict:
+def account_fields(user: models.User | None, db: Session) -> dict:
+    system_role = db.get(models.SystemRole, user.system_role_id) if user else None
     return {"sign_in_status": sign_in_status(user),
             "sign_in_linked": bool(user and user.auth0_user_id),
             "invitation_sent_at": user.invitation_sent_at if user else None,
-            "invitation_error": user.invitation_error if user else None}
+            "invitation_error": user.invitation_error if user else None,
+            "system_role_id": system_role.id if system_role else None,
+            "system_role_name": system_role.name if system_role else None}
 
 
 INVITATION_ERROR_MESSAGES = {
@@ -205,6 +208,32 @@ def group_member_counts(group_ids: list[int], db: Session) -> dict[int, int]:
     return dict(db.query(models.employee_company_groups.c.company_group_id, func.count())
                 .filter(models.employee_company_groups.c.company_group_id.in_(group_ids))
                 .group_by(models.employee_company_groups.c.company_group_id).all())
+
+
+def group_leader_ids(group_ids: list[int] | None, db: Session) -> dict[int, list[int]]:
+    leaders = models.company_group_leaders.c
+    query = db.query(leaders.company_group_id, leaders.employee_id)
+    if group_ids is not None:
+        query = query.filter(leaders.company_group_id.in_(group_ids))
+    result: dict[int, list[int]] = {}
+    for group_id, employee_id in query.order_by(leaders.employee_id).all():
+        result.setdefault(group_id, []).append(employee_id)
+    return result
+
+
+def set_group_leaders(group_id: int, leader_ids: list[int], db: Session) -> list[int]:
+    """Leaders need not be members: a manager can lead a team without being evaluated in it."""
+    wanted = sorted(set(leader_ids))
+    if wanted:
+        found = {employee_id for (employee_id,) in db.query(models.Employee.id)
+                 .filter(models.Employee.id.in_(wanted), models.Employee.is_active.is_(True)).all()}
+        if found != set(wanted):
+            raise HTTPException(status_code=400, detail="Invalid group leader selection")
+    db.execute(models.company_group_leaders.delete().where(
+        models.company_group_leaders.c.company_group_id == group_id))
+    for employee_id in wanted:
+        db.execute(models.company_group_leaders.insert().values(company_group_id=group_id, employee_id=employee_id))
+    return wanted
 
 
 @app.get("/auth/me", response_model=schemas.AuthMeResponse)
@@ -242,35 +271,6 @@ def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Dep
                          "company_role_name": roles.company_role_name,
                          "is_active": employee.is_active,
                          "profile_image_url": employee.profile_image_url} if employee else None}
-
-
-@app.post("/users", response_model=schemas.UserResponse)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db),
-                _employee_manager: models.User = Depends(require_permission("employees.manage")),
-                _role_assigner: models.User = Depends(require_permission("roles.assign"))):
-    if user.company_role_id is not None and db.query(models.CompanyRole.id).filter(models.CompanyRole.id == user.company_role_id).first() is None:
-        raise HTTPException(status_code=400, detail="Company role not found")
-    if db.query(models.SystemRole.id).filter(models.SystemRole.id == user.system_role_id).first() is None:
-        raise HTTPException(status_code=400, detail="System role not found")
-    new_user = models.User(
-        username=user.username,
-        email=user.email,
-        password_hash="",
-        system_role_id=user.system_role_id,
-    )
-
-    db.add(new_user)
-    db.flush()
-    if user.company_role_id is not None:
-        db.add(models.Employee(user_id=new_user.id, full_name=user.username,
-                               company_role_id=user.company_role_id, is_active=True))
-    db.commit()
-    db.refresh(new_user)
-
-    return {**new_user.__dict__, "employee_id": new_user.employee.id if new_user.employee else None,
-            "full_name": new_user.employee.full_name if new_user.employee else None,
-            "company_role_id": new_user.employee.company_role_id if new_user.employee else None,
-            "profile_image_url": new_user.employee.profile_image_url if new_user.employee else None}
 
 
 def development_login_enabled() -> bool:
@@ -361,12 +361,15 @@ def get_people(db: Session = Depends(get_db),
         if membership.employee_id in group_ids_by_employee_id:
             group_ids_by_employee_id[membership.employee_id].append(group.id)
 
+    leader_ids_by_group = group_leader_ids(None, db)
+
     def serialize_group(group: models.CompanyGroup):
         return {
             "id": group.id,
             "name": group.name,
             "description": group.description,
             "member_count": group_member_counts.get(group.id, 0),
+            "leader_ids": leader_ids_by_group.get(group.id, []),
         }
 
     return {
@@ -386,11 +389,15 @@ def get_people(db: Session = Depends(get_db),
                 ],
                 "is_active": employee.is_active,
                 "profile_image_url": employee.profile_image_url,
-                **invitation_fields(employee.user),
+                **account_fields(employee.user, db),
             }
             for employee in employees
         ],
         "groups": [serialize_group(group) for group in groups],
+        "company_roles": [{"id": role_id, "name": name}
+                          for role_id, name in sorted(roles_by_id.items(), key=lambda item: item[1].lower())],
+        "system_roles": [{"id": role.id, "name": role.name, "description": role.description}
+                         for role in db.query(models.SystemRole).order_by(models.SystemRole.id).all()],
     }
 
 
@@ -557,6 +564,18 @@ def put_permission_matrix(update: schemas.PermissionMatrixUpdate, db: Session = 
     return workspace_settings_service.update_permission_matrix(actor, update, db)
 
 
+@app.post("/workspace/permissions/roles", response_model=schemas.PermissionMatrixResponse)
+def post_system_role(create: schemas.SystemRoleCreate, db: Session = Depends(get_db),
+                     actor: models.User = Depends(require_permission("permissions.manage"))):
+    return workspace_settings_service.create_system_role(actor, create, db)
+
+
+@app.delete("/workspace/permissions/roles/{role_id}", response_model=schemas.PermissionMatrixResponse)
+def delete_system_role(role_id: int, db: Session = Depends(get_db),
+                       actor: models.User = Depends(require_permission("permissions.manage"))):
+    return workspace_settings_service.delete_system_role(actor, role_id, db)
+
+
 @app.get("/workspace/audit", response_model=schemas.AuditLogResponse)
 def get_audit_log(
     category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts"] | None = Query(default=None),
@@ -581,19 +600,6 @@ def get_or_create_company_role(role_name: str, db: Session):
         db.add(company_role)
         db.flush()
     return company_role
-
-
-def get_or_create_system_role(role_name: str, db: Session):
-    system_role = (
-        db.query(models.SystemRole)
-        .filter(func.lower(models.SystemRole.name) == role_name.lower())
-        .first()
-    )
-    if system_role is None:
-        system_role = models.SystemRole(name=role_name)
-        db.add(system_role)
-        db.flush()
-    return system_role
 
 
 def employee_username(name: str, email: str, used: set[str]) -> str:
@@ -689,7 +695,7 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
             for group in groups
         ],
         "is_active": new_employee.is_active,
-        **invitation_fields(new_user),
+        **account_fields(new_user, db),
     }
 
 
@@ -780,8 +786,19 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
         ],
         "is_active": person.is_active,
         "profile_image_url": person.profile_image_url,
-        **invitation_fields(user),
+        **account_fields(user, db),
     }
+
+
+@app.put("/people/employees/{employee_id}/system-role", response_model=schemas.SystemRoleOption)
+def update_people_employee_system_role(employee_id: int, update: schemas.EmployeeSystemRoleUpdate,
+                                       db: Session = Depends(get_db),
+                                       actor: models.User = Depends(require_permission("roles.assign"))):
+    person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    if person is None or person.user is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    role = workspace_settings_service.change_user_system_role(actor, person.user, update.system_role_id, db)
+    return {"id": role.id, "name": role.name, "description": role.description}
 
 
 @app.post("/people/employees/{employee_id}/invitation", response_model=schemas.PeopleEmployeeResponse)
@@ -809,7 +826,7 @@ def resend_employee_invitation(employee_id: int, db: Session = Depends(get_db),
                     "member_count": counts.get(group.id, 0)} for group in groups],
         "is_active": person.is_active,
         "profile_image_url": person.profile_image_url,
-        **invitation_fields(user),
+        **account_fields(user, db),
     }
 
 
@@ -831,6 +848,8 @@ def create_people_group(group: schemas.PeopleGroupCreate, db: Session = Depends(
 
     new_group = models.CompanyGroup(name=name, description=description)
     db.add(new_group)
+    db.flush()
+    leader_ids = set_group_leaders(new_group.id, group.leader_ids or [], db)
     db.commit()
     db.refresh(new_group)
     return {
@@ -838,6 +857,7 @@ def create_people_group(group: schemas.PeopleGroupCreate, db: Session = Depends(
         "name": new_group.name,
         "description": new_group.description,
         "member_count": 0,
+        "leader_ids": leader_ids,
     }
 
 
@@ -864,6 +884,8 @@ def update_people_group(group_id: int, group: schemas.PeopleGroupUpdate, db: Ses
 
     existing_group.name = name
     existing_group.description = description
+    if group.leader_ids is not None:
+        set_group_leaders(group_id, group.leader_ids, db)
     db.commit()
     db.refresh(existing_group)
 
@@ -877,6 +899,7 @@ def update_people_group(group_id: int, group: schemas.PeopleGroupUpdate, db: Ses
         "name": existing_group.name,
         "description": existing_group.description,
         "member_count": member_count,
+        "leader_ids": group_leader_ids([group_id], db).get(group_id, []),
     }
 
 
@@ -1063,7 +1086,10 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
         email.lower()
         for (email,) in db.query(models.User.email).all()
     }
-    system_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()}
+    actor_permissions = workspace_settings_service.role_permissions(db, actor.system_role_id)
+    # Importing must not hand out more access than the importer holds.
+    system_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()
+                    if workspace_settings_service.role_permissions(db, role.id) <= actor_permissions}
 
     for row_number in range(2, worksheet.max_row + 1):
         values = [worksheet.cell(row_number, column).value for column in range(1, 5)]
@@ -1089,7 +1115,7 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
         if system_role_name == "":
             errors.append(f"Row {row_number}: Employee System Role is required.")
         elif system_role_name.casefold() not in system_roles:
-            errors.append(f"Row {row_number}: Employee System Role must be an existing system role.")
+            errors.append(f"Row {row_number}: Employee System Role must be an existing system role you are allowed to assign.")
 
         email_key = email.lower()
         if email_key != "" and email_key in seen_emails:
@@ -1992,7 +2018,7 @@ def get_campaign_completion_status(
 
 @app.get("/reports/campaigns", response_model=list[schemas.ReportCampaignOption])
 def get_report_campaigns(requester_user_id: int | None = Query(default=None), db: Session = Depends(get_db),
-                         actor: models.User = Depends(require_permission("reports.read"))):
+                         actor: models.User = Depends(require_permission("reports.read", "reports.read_team"))):
     reject_conflicting_requester(requester_user_id, actor)
     return reporting_service.list_report_campaigns(actor, db)
 
@@ -2052,13 +2078,22 @@ def get_campaign_report_questions(
     perspective: str = Query(default="evaluatee"),
     evaluation_type: Literal["peer", "self"] = Query(default="peer"),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
     if sum(value is not None for value in (group_id, role_id, employee_id)) > 1:
         raise HTTPException(status_code=400, detail="Select one Reports scope at a time")
     if perspective not in {"evaluatee", "evaluator"} or (perspective == "evaluator" and role_id is None):
         raise HTTPException(status_code=400, detail="Invalid question analytics perspective")
+    # Team leads may explore questions for a group they lead or one of its employees only.
+    if employee_id is not None:
+        reporting_service.require_team_employee(campaign_id, employee_id, actor, db)
+    elif group_id is not None:
+        reporting_service.require_team_group(campaign_id, group_id, actor, db)
+    else:
+        reporting_service.enter_report_scope(actor, db)
+        if reporting_service._team_groups.get() is not None:
+            raise HTTPException(status_code=403, detail="Campaign-wide question analytics require full report access")
     return question_analytics_service.build_question_report(
         campaign_id, actor, db, group_id=group_id, role_id=role_id, employee_id=employee_id,
         perspective=perspective, evaluation_type=evaluation_type,
@@ -2088,9 +2123,10 @@ def get_campaign_report_groups(
     campaign_id: int,
     requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
+    reporting_service.enter_report_scope(actor, db)
     return reporting_service.build_groups_overview(campaign_id, actor, db)
 
 
@@ -2100,9 +2136,10 @@ def get_campaign_report_group_detail(
     group_id: int,
     requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
+    reporting_service.require_team_group(campaign_id, group_id, actor, db)
     return reporting_service.build_group_detail(campaign_id, group_id, actor, db)
 
 
@@ -2136,9 +2173,10 @@ def get_campaign_report_employees(
     campaign_id: int,
     requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
+    reporting_service.enter_report_scope(actor, db)
     return reporting_service.build_employee_reports_overview(campaign_id, actor, db)
 
 
@@ -2148,17 +2186,19 @@ def get_campaign_report_employee_detail(
     employee_id: int,
     requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
+    reporting_service.require_team_employee(campaign_id, employee_id, actor, db)
     return reporting_service.build_employee_report_detail(campaign_id, employee_id, actor, db)
 
 
 @app.get("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis")
 def get_employee_ai_analyses(
     campaign_id: int, employee_id: int, db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
+    reporting_service.require_team_employee(campaign_id, employee_id, actor, db)
     return ai_workflow_service.list_analyses(db, campaign_id, employee_id, actor=actor)
 
 
@@ -2173,16 +2213,18 @@ def generate_employee_ai_report(
 @app.get("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis/generation-job")
 def employee_ai_generation_job(
     campaign_id: int, employee_id: int, db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
+    reporting_service.require_team_employee(campaign_id, employee_id, actor, db)
     return ai_generation_jobs.status(db, campaign_id, "employee", employee_id, actor=actor)
 
 
 @app.get("/reports/campaigns/{campaign_id}/employees/{employee_id}/ai-analysis/generation-job/{job_id}")
 def employee_ai_generation_job_status(
     campaign_id: int, employee_id: int, job_id: int, db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
+    reporting_service.require_team_employee(campaign_id, employee_id, actor, db)
     return ai_generation_jobs.status(db, campaign_id, "employee", employee_id, actor=actor, job_id=job_id)
 
 
@@ -2207,8 +2249,15 @@ def approve_employee_ai_report(
 
 def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
     """Keep all three aggregate scopes on the same authorized HR workflow."""
+    read_permissions = ("reports.read", "reports.read_team") if scope_type == "group" else ("reports.read",)
+
+    def authorize_read(campaign_id: int, scope_id: int | None, actor: models.User, db: Session) -> None:
+        if scope_type == "group":
+            reporting_service.require_team_group(campaign_id, scope_id or 0, actor, db)
+
     def history(campaign_id: int, scope_id: int | None = None, db: Session = Depends(get_db),
-                actor: models.User = Depends(require_permission("reports.read"))):
+                actor: models.User = Depends(require_permission(*read_permissions))):
+        authorize_read(campaign_id, scope_id, actor, db)
         return ai_aggregate_workflow_service.list_analyses(db, campaign_id, scope_type, scope_id, actor=actor)
 
     def generate(campaign_id: int, scope_id: int | None = None, db: Session = Depends(get_db),
@@ -2216,12 +2265,14 @@ def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
         return ai_generation_jobs.start(db, campaign_id, scope_type, scope_id, actor=actor)
 
     def latest_job(campaign_id: int, scope_id: int | None = None, db: Session = Depends(get_db),
-                   actor: models.User = Depends(require_permission("reports.read"))):
+                   actor: models.User = Depends(require_permission(*read_permissions))):
+        authorize_read(campaign_id, scope_id, actor, db)
         return ai_generation_jobs.status(db, campaign_id, scope_type, scope_id, actor=actor)
 
     def job_status(campaign_id: int, job_id: int, scope_id: int | None = None,
                    db: Session = Depends(get_db),
-                   actor: models.User = Depends(require_permission("reports.read"))):
+                   actor: models.User = Depends(require_permission(*read_permissions))):
+        authorize_read(campaign_id, scope_id, actor, db)
         return ai_generation_jobs.status(db, campaign_id, scope_type, scope_id, actor=actor, job_id=job_id)
 
     def edit(campaign_id: int, analysis_id: int, payload: EmployeeAIAnalysis,

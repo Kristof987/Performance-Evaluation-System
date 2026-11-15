@@ -14,7 +14,7 @@ export type WorkspaceSettingsUpdate = Partial<Pick<WorkspaceSettings,
   'min_individual_peer_reviewers' | 'min_aggregate_evaluatees' | 'ai_enabled' | 'ai_model'>>;
 
 export type PermissionMatrix = {
-  roles: { id: number; name: string; active_users: number; permissions: string[] }[];
+  roles: { id: number; name: string; description: string | null; built_in: boolean; active_users: number; permissions: string[] }[];
   permissions: { name: string; description: string }[];
 };
 
@@ -66,6 +66,15 @@ export function fetchPermissionMatrix(getAccessToken: AccessTokenGetter, signal?
 
 export function savePermissionMatrix(getAccessToken: AccessTokenGetter, roles: { role_id: number; permissions: string[] }[]) {
   return request<PermissionMatrix>(getAccessToken, '/workspace/permissions', json('PUT', { roles }));
+}
+
+export function createSystemRole(getAccessToken: AccessTokenGetter,
+  role: { name: string; description?: string | null; copy_from_role_id?: number | null }) {
+  return request<PermissionMatrix>(getAccessToken, '/workspace/permissions/roles', json('POST', role));
+}
+
+export function deleteSystemRole(getAccessToken: AccessTokenGetter, roleId: number) {
+  return request<PermissionMatrix>(getAccessToken, `/workspace/permissions/roles/${roleId}`, { method: 'DELETE' });
 }
 
 export function fetchAuditLog(getAccessToken: AccessTokenGetter, options: {

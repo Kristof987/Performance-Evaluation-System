@@ -10,6 +10,7 @@ import ReportsLayout from './ReportsLayout';
 import type { CampaignRatingDistribution, CampaignReportOverview, EmployeeReportsOverview, ReportCampaignOption, ReportSectionScore, RolesReport } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { useAppAuth } from '../../auth/AppAuth';
+import { hasTeamReportsOnly } from '../../app/access';
 
 function DashboardCard({ title, info, children, actions, className = '' }: { title: string; info: string; children: ReactNode; actions?: ReactNode; className?: string }) {
   return <section className={`reports-card reports-dashboard-card ${className}`}><div className="reports-dashboard-card-heading"><div className="reports-dashboard-card-title"><h2>{title}</h2><span className="reports-info-icon" title={info} aria-label={info} tabIndex={0}><Info size={15} /></span></div>{actions}</div>{children}</section>;
@@ -37,10 +38,12 @@ function RatingDistributionChart({ data, sections }: { data: CampaignRatingDistr
 }
 
 export function ReportsIndexPage() {
+  const { state } = useAppAuth();
+  const teamOnly = state.status === 'authenticated' && hasTeamReportsOnly(state.user.permissions);
   return <ReportsLayout selectedCampaignId={null}>{({ loadingCampaigns, campaignsError, campaigns, retryCampaigns }) => {
     if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
     if (campaignsError) return <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={retryCampaigns}>Retry</button></div>;
-    if (campaigns.length === 0) return <ReportsEmptyState title="No campaigns available." message="Create a campaign before reports can be shown." />;
+    if (campaigns.length === 0) return <ReportsEmptyState title="No campaigns available." message={teamOnly ? 'There are no campaigns yet for the groups you lead.' : 'Create a campaign before reports can be shown.'} />;
     return <div className="reports-state">Opening selected campaign...</div>;
   }}</ReportsLayout>;
 }

@@ -148,14 +148,6 @@ class SystemRoleResponse(BaseModel):
 # User
 # --------------------
 
-class UserCreate(BaseModel):
-    username: str
-    email: EmailStr
-    password: str
-    company_role_id: int
-    system_role_id: int
-
-
 class UserLogin(BaseModel):
     name: str
 
@@ -279,6 +271,7 @@ class PeopleGroupResponse(BaseModel):
     name: str
     description: str | None
     member_count: int = 0
+    leader_ids: list[int] = []
 
 
 class PeopleEmployeeResponse(BaseModel):
@@ -297,11 +290,26 @@ class PeopleEmployeeResponse(BaseModel):
     profile_image_url: str | None = None
     invitation_sent_at: datetime | None = None
     invitation_error: str | None = None
+    system_role_id: int | None = None
+    system_role_name: str | None = None
+
+
+class PeopleCompanyRole(BaseModel):
+    id: int
+    name: str
+
+
+class PeopleSystemRole(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
 
 
 class PeopleResponse(BaseModel):
     employees: list[PeopleEmployeeResponse]
     groups: list[PeopleGroupResponse]
+    company_roles: list[PeopleCompanyRole] = []
+    system_roles: list[PeopleSystemRole] = []
 
 
 class AccountSettingsProfile(BaseModel):
@@ -376,6 +384,8 @@ class AIWorkspaceStatus(WorkspaceSettingsResponse):
 class PermissionMatrixRole(BaseModel):
     id: int
     name: str
+    description: str | None = None
+    built_in: bool = False
     active_users: int
     permissions: list[str]
 
@@ -401,6 +411,26 @@ class PermissionMatrixUpdate(BaseModel):
     model_config = {"extra": "forbid"}
 
     roles: list[PermissionMatrixRoleUpdate]
+
+
+class SystemRoleCreate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(min_length=1, max_length=60)
+    description: str | None = Field(default=None, max_length=200)
+    copy_from_role_id: int | None = None
+
+
+class SystemRoleOption(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+
+
+class EmployeeSystemRoleUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    system_role_id: int
 
 
 class AuditLogEntry(BaseModel):
@@ -449,11 +479,14 @@ class PeopleGroupImportResponse(BaseModel):
 class PeopleGroupCreate(BaseModel):
     name: str
     description: str | None = None
+    leader_ids: list[int] | None = None
 
 
 class PeopleGroupUpdate(BaseModel):
     name: str
     description: str | None = None
+    # None keeps the current leaders; a list replaces them.
+    leader_ids: list[int] | None = None
 
 
 class PeopleGroupMemberCreate(BaseModel):

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import AppLayout from '../layout/AppLayout';
 import { useAppAuth } from '../../auth/AppAuth';
+import { hasTeamReportsOnly } from '../../app/access';
 import { ApiAccessError, type AccessTokenGetter } from '../../auth/authenticated-api';
 import { fetchReportCampaigns } from './api/reports.api';
 import ReportsCampaignSelector from './ReportsCampaignSelector';
@@ -30,6 +31,7 @@ export default function ReportsLayout({ selectedCampaignId, allowQualityPreview 
   const navigate = useNavigate();
   const location = useLocation();
   const { state, getAccessToken, retryAuth0 } = useAppAuth();
+  const teamOnly = state.status === 'authenticated' && hasTeamReportsOnly(state.user.permissions);
   const accessTokenRef = useRef(getAccessToken);
   accessTokenRef.current = getAccessToken;
   const [campaigns, setCampaigns] = useState<ReportCampaignOption[]>([]);
@@ -55,7 +57,7 @@ export default function ReportsLayout({ selectedCampaignId, allowQualityPreview 
         setCampaignsError('');
         if (selectedCampaignId === null && items.length > 0) {
           const initial = items.find((campaign) => reportAvailability(campaign) === null) ?? items[0];
-          navigate(`/reports/campaigns/${initial.id}`, { replace: true });
+          navigate(`/reports/campaigns/${initial.id}${teamOnly ? '/employees' : ''}`, { replace: true });
         }
       })
       .catch((cause) => {
@@ -66,14 +68,14 @@ export default function ReportsLayout({ selectedCampaignId, allowQualityPreview 
         if (!controller.signal.aborted) setLoadingCampaigns(false);
       });
     return () => controller.abort();
-  }, [navigate, !!getAccessToken, reloadKey]);
+  }, [navigate, !!getAccessToken, reloadKey, teamOnly]);
 
   function campaignPath(campaignId: number) {
     if (location.pathname.includes('/ai-analysis')) return `/reports/campaigns/${campaignId}/ai-analysis`;
     if (location.pathname.includes('/detailed') || location.pathname.includes('/questions')) return `/reports/campaigns/${campaignId}/detailed`;
     if (location.pathname.includes('/groups')) return `/reports/campaigns/${campaignId}/groups`;
     if (location.pathname.includes('/roles')) return `/reports/campaigns/${campaignId}/roles`;
-    if (location.pathname.includes('/employees')) return `/reports/campaigns/${campaignId}/employees`;
+    if (location.pathname.includes('/employees') || teamOnly) return `/reports/campaigns/${campaignId}/employees`;
     return `/reports/campaigns/${campaignId}`;
   }
 
@@ -83,6 +85,6 @@ export default function ReportsLayout({ selectedCampaignId, allowQualityPreview 
     && selectedCampaign && !selectedCampaign.is_archived && (selectedCampaign.campaign_status === 'active' || selectedCampaign.campaign_status === 'paused'));
   const unavailable = selectedCampaign && !previewAllowed && reportAvailability(selectedCampaign);
   const blocked = selectedCampaignId !== null && (loadingCampaigns || !!campaignsError || !selectedCampaign || !!unavailable);
-  const heading = location.pathname === `/reports/campaigns/${selectedCampaignId}` ? 'Campaign Overview' : location.pathname.includes('/employees/') ? 'Employee Results' : location.pathname.includes('/employees') ? 'Employees' : location.pathname.includes('/ai-analysis') ? 'AI Analysis' : 'Detailed Results';
+  const heading = location.pathname === `/reports/campaigns/${selectedCampaignId}` ? 'Campaign Overview' : location.pathname.includes('/employees/') ? 'Employee Results' : location.pathname.includes('/employees') ? 'Employees' : location.pathname.includes('/ai-analysis') ? 'AI Analysis' : teamOnly ? 'Groups' : 'Detailed Results';
   return <AppLayout activePage="reports" pageClassName="reports-page"><main className="main-content reports-main"><header className="reports-header"><div className="reports-title-block"><h1>{selectedCampaign ? heading : 'Reports'}</h1>{selectedCampaign && <p className="reports-header-context"><span title={selectedCampaign.name}>{selectedCampaign.name}</span><span className="reports-status">{selectedStatus}{selectedCampaign.is_archived ? ' · Archived' : ''}</span><small>{formatDate(selectedCampaign.start_date)} – {formatDate(selectedCampaign.end_date)}</small></p>}</div><div className="reports-header-actions"><ReportsCampaignSelector campaigns={campaigns} selectedCampaignId={selectedCampaignId} onSelect={(campaignId) => navigate(campaignPath(campaignId))} /></div></header>{blocked ? loadingCampaigns ? <div className="reports-state">Loading campaigns...</div> : campaignsError ? <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></div> : <ReportsEmptyState title={unavailable ? 'Results unavailable' : 'Campaign unavailable'} message={unavailable || 'The selected campaign was deleted or is not accessible.'} /> : children({ campaigns, getAccessToken, loadingCampaigns, campaignsError, retryCampaigns: () => setReloadKey((value) => value + 1) })}</main></AppLayout>;
 }

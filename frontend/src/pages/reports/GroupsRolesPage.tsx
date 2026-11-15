@@ -7,6 +7,13 @@ import SectionScoresChart from './components/SectionScoresChart';
 import ReportsLayout from './ReportsLayout';
 import type { GroupReportDetail, GroupsReport, RolePerspective, RoleReportDetail, RolesReport } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
+import { useAppAuth } from '../../auth/AppAuth';
+import { hasTeamReportsOnly } from '../../app/access';
+
+function useTeamReportsOnly() {
+  const { state } = useAppAuth();
+  return state.status === 'authenticated' && hasTeamReportsOnly(state.user.permissions);
+}
 
 function formatPercent(value: number | null) {
   return value === null ? '—' : `${value}%`;
@@ -33,6 +40,8 @@ function ReportKpis({ items }: { items: Array<{ label: string; value: string | n
 
 function GroupsRolesTabs({ campaignId, view }: { campaignId: number; view: 'groups' | 'roles' }) {
   const navigate = useNavigate();
+  // Group leaders only see the groups they lead; role comparisons span the whole campaign.
+  if (useTeamReportsOnly()) return null;
   return <div className="reports-segmented" role="tablist" aria-label="Groups and roles reports"><button className={view === 'groups' ? 'active' : ''} type="button" onClick={() => navigate(`/reports/campaigns/${campaignId}/groups`)}>Groups</button><button className={view === 'roles' ? 'active' : ''} type="button" onClick={() => navigate(`/reports/campaigns/${campaignId}/roles`)}>Roles</button></div>;
 }
 
@@ -139,6 +148,7 @@ function GroupDetailContent({ campaignId, groupId, getAccessToken }: { campaignI
   const [data, setData] = useState<GroupReportDetail | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
+  const teamOnly = useTeamReportsOnly();
 
   useEffect(() => {
     if (!getAccessToken) return undefined;
@@ -152,7 +162,7 @@ function GroupDetailContent({ campaignId, groupId, getAccessToken }: { campaignI
   }, [campaignId, groupId, getAccessToken, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.group.id !== groupId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-   return <div className="reports-overview"><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/groups`}>← Back to Groups & Roles</Link><header className="reports-detail-heading"><h2>{data.group.name}</h2><p>{data.campaign.name} · Group analysis</p>{data.group.description && <p>{data.group.description}</p>}</header><ReportKpis items={[{ label: 'Employees', value: data.kpis.employees }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Completion rate', value: formatPercent(data.kpis.completion_rate) }, { label: 'Reportable sections', value: data.kpis.reportable_sections, context: `Overall peer score: ${data.kpis.overall_peer_score === null ? 'Unavailable' : `${formatScore(data.kpis.overall_peer_score)} / 5`}` }]} />{getAccessToken && <EmployeeAIAnalysisPanel scope={{ type: 'group', campaignId, groupId }} getAccessToken={getAccessToken} />}<div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?group_id=${groupId}`}>Explore group questions →</Link><SimpleTable title="Roles in this group" emptyTitle="No role coverage yet." emptyMessage="No employees with company roles are available for this group." columns={['Company role', 'Employees', 'Completed received', 'Reportable average']} rows={data.roles.map((role) => [role.role_name, role.employee_count, role.completed_evaluations_received, reportableScore(role.average_score, role.score_availability)])} /><SimpleTable title="Group employee coverage" emptyTitle="No employee coverage available." emptyMessage="This group has no campaign participants to summarize." columns={['Employee', 'Role', 'Reviews received', 'Self-evaluation', 'Feedback availability']} rows={data.employees.map((employee) => [employee.employee_name, employee.role_name, employee.reviews_received, employee.completed_self_evaluation ? 'Completed' : 'Not completed', employee.feedback_availability])} /></div>;
+   return <div className="reports-overview"><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/groups`}>← Back to Groups & Roles</Link><header className="reports-detail-heading"><h2>{data.group.name}</h2><p>{data.campaign.name} · Group analysis</p>{data.group.description && <p>{data.group.description}</p>}</header><ReportKpis items={[{ label: 'Employees', value: data.kpis.employees }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Completion rate', value: formatPercent(data.kpis.completion_rate) }, { label: 'Reportable sections', value: data.kpis.reportable_sections, context: `Overall peer score: ${data.kpis.overall_peer_score === null ? 'Unavailable' : `${formatScore(data.kpis.overall_peer_score)} / 5`}` }]} />{getAccessToken && <EmployeeAIAnalysisPanel scope={{ type: 'group', campaignId, groupId }} getAccessToken={getAccessToken} />}<div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div>{!teamOnly && <Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?group_id=${groupId}`}>Explore group questions →</Link>}<SimpleTable title="Roles in this group" emptyTitle="No role coverage yet." emptyMessage="No employees with company roles are available for this group." columns={['Company role', 'Employees', 'Completed received', 'Reportable average']} rows={data.roles.map((role) => [role.role_name, role.employee_count, role.completed_evaluations_received, reportableScore(role.average_score, role.score_availability)])} /><SimpleTable title="Group employee coverage" emptyTitle="No employee coverage available." emptyMessage="This group has no campaign participants to summarize." columns={['Employee', 'Role', 'Reviews received', 'Self-evaluation', 'Feedback availability']} rows={data.employees.map((employee) => [employee.employee_name, employee.role_name, employee.reviews_received, employee.completed_self_evaluation ? 'Completed' : 'Not completed', employee.feedback_availability])} /></div>;
 }
 
 export function RoleDetailPage() {

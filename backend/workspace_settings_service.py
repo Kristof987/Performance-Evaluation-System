@@ -29,6 +29,7 @@ PERMISSION_DESCRIPTIONS = {
     "evaluations.read_assigned": "See evaluations assigned to me",
     "evaluations.submit": "Fill in and submit evaluations",
     "reports.read": "View campaign reports",
+    "reports.read_team": "View reports of groups I lead",
     "ai_analysis.generate": "Generate and edit AI analysis drafts",
     "ai_analysis.approve": "Approve AI analyses",
     "settings.read": "Open personal settings",
@@ -112,6 +113,96 @@ def update_settings(actor: models.User, update: schemas.WorkspaceSettingsUpdate,
     return get_settings(db)
 
 
+BUILT_IN_ROLES = frozenset({"Admin", "HR", "Manager", "Employee"})
+
+
+def role_permissions(db: Session, role_id: int | None) -> set[str]:
+    if role_id is None:
+        return set()
+    return {name for (name,) in db.query(models.SystemPermission.name)
+            .join(models.system_role_permissions,
+                  models.system_role_permissions.c.permission_id == models.SystemPermission.id)
+            .filter(models.system_role_permissions.c.system_role_id == role_id).all()}
+
+
+def create_system_role(actor: models.User, create: schemas.SystemRoleCreate,
+                       db: Session) -> schemas.PermissionMatrixResponse:
+    _locked_row(db)
+    name = " ".join(create.name.split())
+    if not name:
+        raise HTTPException(status_code=400, detail="Role name is required")
+    if db.query(models.SystemRole.id).filter(func.lower(models.SystemRole.name) == name.lower()).first():
+        raise HTTPException(status_code=400, detail="A role with this name already exists")
+    granted: set[str] = set()
+    if create.copy_from_role_id is not None:
+        if db.get(models.SystemRole, create.copy_from_role_id) is None:
+            raise HTTPException(status_code=400, detail="Unknown system role to copy")
+        granted = role_permissions(db, create.copy_from_role_id)
+    description = (create.description or "").strip() or None
+    role = models.SystemRole(name=name, description=description)
+    db.add(role)
+    db.flush()
+    permission_ids = dict(db.query(models.SystemPermission.name, models.SystemPermission.id).all())
+    for permission in granted:
+        db.execute(models.system_role_permissions.insert().values(system_role_id=role.id,
+                                                                  permission_id=permission_ids[permission]))
+    record_audit(db, "permissions", actor, f"Role created: {name}",
+                 {"role": name, "permissions": sorted(granted)})
+    db.commit()
+    return permission_matrix(db)
+
+
+def delete_system_role(actor: models.User, role_id: int, db: Session) -> schemas.PermissionMatrixResponse:
+    _locked_row(db)
+    role = db.get(models.SystemRole, role_id)
+    if role is None:
+        raise HTTPException(status_code=404, detail="System role not found")
+    if role.name in BUILT_IN_ROLES:
+        raise HTTPException(status_code=409, detail="Built-in roles cannot be deleted")
+    if db.query(models.User.id).filter(models.User.system_role_id == role_id).first():
+        raise HTTPException(status_code=409, detail="Move every user to another role before deleting this one")
+    db.execute(models.system_role_permissions.delete().where(
+        models.system_role_permissions.c.system_role_id == role_id))
+    db.delete(role)
+    record_audit(db, "permissions", actor, f"Role deleted: {role.name}", {"role": role.name})
+    db.commit()
+    return permission_matrix(db)
+
+
+def change_user_system_role(actor: models.User, user: models.User, role_id: int, db: Session) -> models.SystemRole:
+    """Admins hand out roles; nobody can grant more than they hold or lock out permission management."""
+    _locked_row(db)
+    role = db.get(models.SystemRole, role_id)
+    if role is None:
+        raise HTTPException(status_code=400, detail="Unknown system role")
+    if user.id == actor.id:
+        raise HTTPException(status_code=409, detail="You cannot change your own system role")
+    if user.system_role_id == role.id:
+        return role
+    actor_permissions = role_permissions(db, actor.system_role_id)
+    current = role_permissions(db, user.system_role_id)
+    target = role_permissions(db, role.id)
+    if not (current | target) <= actor_permissions:
+        raise HTTPException(status_code=403, detail="You can only assign roles whose permissions you also hold")
+    if "permissions.manage" in current and "permissions.manage" not in target:
+        managers = (db.query(models.User.id)
+                    .join(models.system_role_permissions,
+                          models.system_role_permissions.c.system_role_id == models.User.system_role_id)
+                    .join(models.SystemPermission,
+                          models.SystemPermission.id == models.system_role_permissions.c.permission_id)
+                    .filter(models.SystemPermission.name == "permissions.manage")
+                    .filter(models.User.is_active.is_(True), models.User.id != user.id).first())
+        if managers is None:
+            raise HTTPException(status_code=409, detail="At least one active user must keep permission management")
+    previous = db.get(models.SystemRole, user.system_role_id)
+    user.system_role_id = role.id
+    record_audit(db, "permissions", actor,
+                 f"System role of {user.email} changed: {previous.name if previous else '—'} → {role.name}",
+                 {"user_id": user.id, "from": previous.name if previous else None, "to": role.name})
+    db.commit()
+    return role
+
+
 def permission_matrix(db: Session) -> schemas.PermissionMatrixResponse:
     roles = db.query(models.SystemRole).order_by(models.SystemRole.id).all()
     permissions = db.query(models.SystemPermission).order_by(models.SystemPermission.name).all()
@@ -122,7 +213,8 @@ def permission_matrix(db: Session) -> schemas.PermissionMatrixResponse:
                        .filter(models.User.is_active.is_(True)).group_by(models.User.system_role_id).all())
     return schemas.PermissionMatrixResponse(
         roles=[schemas.PermissionMatrixRole(
-            id=role.id, name=role.name, active_users=user_counts.get(role.id, 0),
+            id=role.id, name=role.name, description=role.description, built_in=role.name in BUILT_IN_ROLES,
+            active_users=user_counts.get(role.id, 0),
             permissions=sorted(names[permission_id] for role_id, permission_id in grants if role_id == role.id),
         ) for role in roles],
         permissions=[schemas.PermissionMatrixPermission(
