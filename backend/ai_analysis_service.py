@@ -251,7 +251,7 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
         peer = _section_stat(results.peer_sections[section_id], peer_refs)
         self_result = _section_stat(results.self_sections[section_id], self_refs)
         released_ids.update(peer.evidence_ids + self_result.evidence_ids)
-        sections.append(SectionStatistics(section_id=section_id, section_name=section_names.get(section_id, "Archived section"),
+        sections.append(SectionStatistics(section_id=section_id, section_name=section_names.get(section_id, "Unnamed section"),
                                           peer=peer, self_evaluation=self_result))
         if peer.average_normalized is not None and self_result.average_normalized is not None:
             raw_peer = results.peer_sections[section_id].score

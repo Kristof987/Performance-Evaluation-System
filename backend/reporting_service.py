@@ -291,13 +291,17 @@ def company_role_names(db: Session) -> dict[int, str]:
     return dict(db.query(models.CompanyRole.id, models.CompanyRole.name).all())
 
 
+UNNAMED_SECTION = "Unnamed section"
+
+
 def _section_report_data(rows: list[Any], db: Session):
     import section_scoring_service
 
     scored = [result for filled_form, _form, status in rows
               if (result := section_scoring_service.score_evaluation(filled_form, status_name=status)) is not None]
     section_ids = {section_id for evaluation in scored for section_id in evaluation.section_ids}
-    names = {section.id: section.name for section in db.query(models.Section).filter(models.Section.id.in_(section_ids)).all()} if section_ids else {}
+    # Reports show the name a Section had when it was issued; a later rename must not relabel history.
+    names: dict[int, str] = {}
     for filled_form, _form, status in sorted(rows, key=lambda row: row[0].id):
         if status_key(status, filled_form.finish_date) != "completed":
             continue
@@ -313,6 +317,9 @@ def _section_report_data(rows: list[Any], db: Session):
             section_id, metadata = block.get("section_id"), block.get("section")
             if isinstance(section_id, int) and section_id in section_ids and section_id not in names and isinstance(metadata, dict) and isinstance(metadata.get("name"), str) and metadata["name"].strip():
                 names[section_id] = metadata["name"]
+    missing = section_ids - names.keys()
+    if missing:
+        names.update({section.id: section.name for section in db.query(models.Section).filter(models.Section.id.in_(missing)).all()})
     return scored, names
 
 
@@ -322,7 +329,7 @@ def _section_score_rows(aggregate, scored, names: dict[int, str]):
         peer_evaluators = len({item.evaluator_id for item in scored if item.evaluator_id != item.evaluatee_id and section_id in item.sections}) if result.availability == "available" else 0
         rows.append({
             "id": section_id,
-            "name": names.get(section_id) or "Archived section",
+            "name": names.get(section_id) or UNNAMED_SECTION,
             "average_score": result.score,
             "availability": result.availability,
             "evaluatee_count": result.contributor_count,
@@ -659,7 +666,7 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session, pers
                 "score_availability": result.overall.availability if result else "no_data",
                 "average_score_context": ("Peer ratings given by this company role" if perspective == "evaluator" else "Peer ratings received by this company role") if average is not None else "Insufficient peer feedback" if result and result.overall.availability == "suppressed" else "No scored peer Sections",
             })
-    comparison = next(({"section_id": section_id, "section_name": names.get(section_id, "Archived section"), "roles": items} for section_id, items in sorted(section_candidate.items(), key=lambda pair: (names.get(pair[0], "Archived section").lower(), pair[0])) if len(items) >= 2 and section_id not in suppressed_sections), None)
+    comparison = next(({"section_id": section_id, "section_name": names.get(section_id, UNNAMED_SECTION), "roles": items} for section_id, items in sorted(section_candidate.items(), key=lambda pair: (names.get(pair[0], UNNAMED_SECTION).lower(), pair[0])) if len(items) >= 2 and section_id not in suppressed_sections), None)
     return {
         "campaign": _report_campaign_option(campaign),
         "perspective": perspective,
@@ -832,7 +839,7 @@ def build_section_self_peer_comparison(employee_result, names: dict[int, str]) -
         difference = self_result.score - peer.score
         comparisons.append({
             "section_id": section_id,
-            "section_name": names.get(section_id, "Archived section"),
+            "section_name": names.get(section_id, UNNAMED_SECTION),
             "peer_average": peer.score,
             "self_average": self_result.score,
             "difference": difference,
@@ -867,7 +874,7 @@ def build_employee_history(employee_id: int, actor: models.User, db: Session) ->
         for section_id, result in [(None, employee_result.overall_peer), *employee_result.peer_sections.items()]:
             if result.availability != "available":
                 continue
-            name = "Overall peer score" if section_id is None else names.get(section_id, "Archived section")
+            name = "Overall peer score" if section_id is None else names.get(section_id, UNNAMED_SECTION)
             series = series_by_section.setdefault(section_id, {"section_id": section_id, "section_name": name, "points": []})
             series["points"].append({
                 "campaign_id": campaign.id,
@@ -904,7 +911,7 @@ def build_employee_report_detail(campaign_id: int, employee_id: int, actor: mode
         self_result = employee_result.self_sections[section_id]
         sections.append({
             "id": section_id,
-            "name": names.get(section_id, "Archived section"),
+            "name": names.get(section_id, UNNAMED_SECTION),
             "peer_score": peer.score,
             "peer_availability": peer.availability,
             "peer_evaluator_count": peer.contributor_count,

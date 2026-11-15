@@ -140,7 +140,7 @@ def _collect(rows: list[Any], db: Session, *, include_text: bool = False):
             key, metadata = definition
             if section_id is not None:
                 section_ids.add(section_id)
-                metadata["section_name"] = names.get(section_id, "Archived section")
+                metadata["section_name"] = names.get(section_id)
             else:
                 metadata["section_name"] = "Other questions"
             definitions.setdefault(key, metadata)
@@ -172,10 +172,13 @@ def _collect(rows: list[Any], db: Session, *, include_text: bool = False):
                 observations.append(Observation(assignment.id, assignment.evaluatee_id, assignment.evaluator_id,
                                                 assignment.company_group_id, reporting_service.assignment_role_id(assignment, roles),
                                                 reporting_service.assignment_role_id(assignment, roles, evaluator=True), key, value))
-    section_names = {section.id: section.name for section in db.query(models.Section).filter(models.Section.id.in_(section_ids)).all()} if section_ids else {}
+    # Issued names win so a rename does not relabel past campaigns; the catalog only fills gaps.
+    unnamed = {definition["section_id"] for definition in definitions.values()
+               if definition["section_id"] is not None and not definition["section_name"]}
+    section_names = {section.id: section.name for section in db.query(models.Section).filter(models.Section.id.in_(unnamed)).all()} if unnamed else {}
     for definition in definitions.values():
-        if definition["section_id"] in section_names:
-            definition["section_name"] = section_names[definition["section_id"]]
+        if definition["section_id"] is not None and not definition["section_name"]:
+            definition["section_name"] = section_names.get(definition["section_id"], reporting_service.UNNAMED_SECTION)
     return definitions, observations, issued_scopes
 
 

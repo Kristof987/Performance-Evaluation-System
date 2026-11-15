@@ -4095,6 +4095,22 @@ def _validate_structured_question(question: dict, seen_ids: set, db: Session | N
                 raise HTTPException(status_code=400, detail=f"Scale question {question_id} has an invalid endpoint label")
 
 
+def form_section_ids(questions: object) -> set[int]:
+    return {block["section_id"] for block in questions if isinstance(block, dict) and block.get("type") == "section"
+            and isinstance(block.get("section_id"), int)} if isinstance(questions, list) else set()
+
+
+def reject_newly_archived_sections(questions: list[dict], previous_questions: object, db: Session) -> None:
+    """Archived Sections cannot be added to questionnaires; ones already in a questionnaire may stay."""
+    added = form_section_ids(questions) - form_section_ids(previous_questions)
+    if not added:
+        return
+    archived = db.query(models.Section.name).filter(models.Section.id.in_(added), models.Section.is_archived.is_(True)).order_by(models.Section.name).all()
+    if archived:
+        names = ", ".join(f"“{name}”" for (name,) in archived)
+        raise HTTPException(status_code=400, detail=f"Archived sections cannot be added to a questionnaire: {names}. Restore them or choose another section.")
+
+
 def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, item_id: int | None = None):
     name = payload.name.strip()
     if name == "":
@@ -4108,6 +4124,8 @@ def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, 
 
     questions = deepcopy(payload.questions)
     validate_question_definitions(questions, db)
+    previous = db.query(model.questions).filter(model.id == item_id).scalar() if item_id is not None else None
+    reject_newly_archived_sections(questions, previous, db)
 
     return {
         "name": name,
@@ -4125,6 +4143,7 @@ def create_form(form: schemas.FormCreate, db: Session = Depends(get_db),
         if template is None:
             raise HTTPException(status_code=404, detail="Template not found")
         values["questions"] = clone_template_questions(template.questions)
+        reject_newly_archived_sections(values["questions"], None, db)
     new_form = models.Form(**values)
     db.add(new_form)
     db.commit()
