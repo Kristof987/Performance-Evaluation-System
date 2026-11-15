@@ -313,8 +313,6 @@ class SecuritySettingsResponse(BaseModel):
     sign_in_method: Literal["auth0", "development"]
     identity_provider: str
     password_reset_available: bool
-    mfa_available: bool
-    enrolled_factors: list[str]
     last_login: datetime | None
     timezone: str
 

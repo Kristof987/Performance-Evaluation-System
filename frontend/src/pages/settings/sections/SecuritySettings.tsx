@@ -3,7 +3,7 @@ import { useAppAuth } from '../../../auth/AppAuth';
 import { usePreferences } from '../preferences-context';
 import { formatSettingsDate } from '../settings-date';
 import {
-  fetchSecuritySettings, requestPasswordReset, resetMfa,
+  fetchSecuritySettings, requestPasswordReset,
   type SecuritySettings as SecurityData,
 } from '../settings.api';
 
@@ -13,7 +13,7 @@ export default function SecuritySettings() {
   const [security, setSecurity] = useState<SecurityData | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [pending, setPending] = useState<'password' | 'mfa' | null>(null);
+  const [pending, setPending] = useState(false);
   const [retry, setRetry] = useState(0);
   const canManage = state.status === 'authenticated' && state.user.permissions.includes('settings.manage_self');
   const development = state.mode === 'development' || security?.sign_in_method === 'development';
@@ -36,20 +36,18 @@ export default function SecuritySettings() {
     return () => window.clearTimeout(timer);
   }, [message]);
 
-  async function perform(action: 'password' | 'mfa') {
+  async function sendPasswordReset() {
     if (pending) return;
-    if (action === 'mfa' && !window.confirm('Reset your MFA enrollment? You may need to enroll again at sign-in.')) return;
-    setPending(action);
+    setPending(true);
     setError('');
     setMessage('');
     try {
-      const result = await (action === 'password' ? requestPasswordReset(getAccessToken) : resetMfa(getAccessToken));
+      const result = await requestPasswordReset(getAccessToken);
       setMessage(result.message);
-      if (action === 'mfa') setRetry((value) => value + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Security request failed. Try again.');
     } finally {
-      setPending(null);
+      setPending(false);
     }
   }
 
@@ -68,16 +66,9 @@ export default function SecuritySettings() {
         <p>Auth0 · {security.identity_provider}</p>
         {security.password_reset_available ? <>
           <p className="settings-note">Auth0 sends a secure reset email. Compass never handles your password.</p>
-          <button className="btn btn-secondary" type="button" disabled={!canManage || !!pending}
-            onClick={() => void perform('password')}>{pending === 'password' ? 'Sending...' : 'Send password reset email'}</button>
+          <button className="btn btn-secondary" type="button" disabled={!canManage || pending}
+            onClick={() => void sendPasswordReset()}>{pending ? 'Sending...' : 'Send password reset email'}</button>
         </> : <p className="settings-note">Password changes are managed by your sign-in provider or organization.</p>}
-      </div>
-      <div className="settings-security-section"><h3>Multi-factor authentication</h3>
-        {security.mfa_available ? <>
-          <p>{security.enrolled_factors.length ? security.enrolled_factors.join(', ') : 'No enrolled factors reported.'}</p>
-          <button className="btn btn-secondary" type="button" disabled={!canManage || !!pending}
-            onClick={() => void perform('mfa')}>{pending === 'mfa' ? 'Resetting...' : 'Reset MFA enrollment'}</button>
-        </> : <p>MFA is managed by your organization.</p>}
       </div>
     </>}
     <div className="settings-security-section"><h3>Sessions</h3>

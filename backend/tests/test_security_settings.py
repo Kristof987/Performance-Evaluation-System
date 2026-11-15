@@ -15,12 +15,9 @@ from database import SessionLocal
 
 @pytest.fixture(autouse=True)
 def auth0_config(monkeypatch):
-    for key in ("AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_DB_CONNECTION",
-                "AUTH0_MGMT_CLIENT_ID", "AUTH0_MGMT_CLIENT_SECRET"):
+    for key in ("AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_DB_CONNECTION"):
         monkeypatch.delenv(key, raising=False)
-    service._token_cache = None
     yield
-    service._token_cache = None
 
 
 @pytest.fixture
@@ -53,7 +50,6 @@ def test_not_configured_hides_controls():
     user = models.User(id=1, auth0_user_id="auth0|test", email="test@example.com")
     with patch.object(service.httpx.Client, "request") as request:
         result = get_my_security(user)
-    assert result["mfa_available"] is False
     assert result["password_reset_available"] is False
     request.assert_not_called()
 
@@ -118,24 +114,8 @@ def test_auth0_timeout_is_generic(monkeypatch, reset_account):
     assert "private" not in error.value.detail
 
 
-def test_management_token_cached_and_factors_sanitized(monkeypatch):
-    database_config(monkeypatch)
-    monkeypatch.setenv("AUTH0_MGMT_CLIENT_ID", "management-test")
-    monkeypatch.setenv("AUTH0_MGMT_CLIENT_SECRET", "management-secret-test")
-    responses = [
-        httpx.Response(200, json={"access_token": "mock-token", "expires_in": 3600}),
-        httpx.Response(200, json=[{"type": "totp", "phone_number": "private"}, {"type": "password"}]),
-        httpx.Response(204),
-    ]
-    with patch.object(service.httpx.Client, "request", side_effect=responses) as request:
-        assert service.enrolled_factors("auth0|test") == ["totp"]
-        service.reset_factors("auth0|test")
-    assert request.call_count == 3
-
-
 def test_security_routes_require_authentication():
     client = TestClient(app)
     assert client.get("/me/security").status_code == 401
     assert client.post("/me/security/password-reset").status_code == 401
-    assert client.delete("/me/security/mfa").status_code == 401
     client.close()

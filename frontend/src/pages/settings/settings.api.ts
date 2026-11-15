@@ -33,8 +33,6 @@ export type SecuritySettings = {
   sign_in_method: 'auth0' | 'development';
   identity_provider: string;
   password_reset_available: boolean;
-  mfa_available: boolean;
-  enrolled_factors: string[];
   last_login: string | null;
   timezone: string;
 };
@@ -54,10 +52,6 @@ export function fetchSecuritySettings(getAccessToken: AccessTokenGetter, signal:
 
 export function requestPasswordReset(getAccessToken: AccessTokenGetter) {
   return settingsRequest<{ message: string }>(getAccessToken, '/me/security/password-reset', { method: 'POST' });
-}
-
-export function resetMfa(getAccessToken: AccessTokenGetter) {
-  return settingsRequest<{ message: string }>(getAccessToken, '/me/security/mfa', { method: 'DELETE' });
 }
 
 export type Preferences = {

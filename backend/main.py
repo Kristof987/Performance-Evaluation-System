@@ -395,15 +395,12 @@ def account_profile(user_id: int, db: Session):
 @app.get("/me/security", response_model=schemas.SecuritySettingsResponse)
 def get_my_security(actor: models.User = Depends(require_permission("settings.read"))):
     subject = actor.auth0_user_id
-    mfa_available = bool(subject) and auth0_management.management_available()
     provider = subject.split("|", 1)[0] if subject else "development"
     return {
         "sign_in_method": "auth0" if subject else "development",
         "identity_provider": "Auth0 database" if provider == "auth0" else provider,
         "password_reset_available": bool(subject and subject.startswith("auth0|"))
         and auth0_management.password_reset_available(),
-        "mfa_available": mfa_available,
-        "enrolled_factors": auth0_management.enrolled_factors(subject) if mfa_available else [],
         "last_login": actor.last_login,
         "timezone": os.getenv("APP_TIMEZONE", "Europe/Budapest"),
     }
@@ -414,14 +411,6 @@ def reset_my_password(db: Session = Depends(get_db),
                       actor: models.User = Depends(require_permission("settings.manage_self"))):
     auth0_management.send_password_reset(actor.id, actor.auth0_user_id, actor.email, db)
     return {"message": "If your account uses a password, a reset link was sent."}
-
-
-@app.delete("/me/security/mfa", response_model=schemas.SettingsActionResponse)
-def reset_my_factors(actor: models.User = Depends(require_permission("settings.manage_self"))):
-    if not actor.auth0_user_id:
-        raise HTTPException(status_code=409, detail="Development account security settings are unavailable")
-    auth0_management.reset_factors(actor.auth0_user_id)
-    return {"message": "MFA enrollment was reset. Your organization's policy controls re-enrollment at next sign-in."}
 
 
 @app.get("/me/preferences", response_model=schemas.PreferencesResponse)
