@@ -83,6 +83,7 @@ def test_launch_email_goes_out_once(db):
 def test_only_latest_due_reminder_is_sent(db):
     campaign, evaluator = campaign_with_open_evaluations(db, end_in_days=2)
     campaign.launch_email_enabled = False
+    campaign.custom_reminders = True
     for days in (7, 3, 1):
         db.add(models.CampaignReminder(campaign_id=campaign.id, days_before_end=days))
     db.flush()
@@ -90,13 +91,14 @@ def test_only_latest_due_reminder_is_sent(db):
     reminders.send_due_emails(db)
     sent = db.query(models.EmailDelivery).filter_by(campaign_id=campaign.id, employee_id=evaluator.id).all()
     # 7 and 3 days before the end are both due, but only the closer one (3) is sent; 1 day is not due yet.
-    assert [(item.kind, db.get(models.CampaignReminder, item.reminder_id).days_before_end) for item in sent] == [("reminder", 3)]
+    assert [(item.kind, item.reminder_days) for item in sent] == [("reminder", 3)]
     assert "2 days left" in db.sent[-1][2]
 
 
 def test_reminder_before_campaign_start_is_skipped(db):
     campaign, _evaluator = campaign_with_open_evaluations(db, end_in_days=2, started_days_ago=1)
     campaign.launch_email_enabled = False
+    campaign.custom_reminders = True
     db.add(models.CampaignReminder(campaign_id=campaign.id, days_before_end=5))
     db.flush()
     reminders.send_due_emails(db)
@@ -120,3 +122,44 @@ def test_nothing_is_claimed_without_smtp(db, monkeypatch):
     with pytest.raises(HTTPException) as error:
         reminders.send_manual(campaign, db.query(models.User).first(), None, db)
     assert error.value.status_code == 503
+
+
+def set_defaults(db, days, launch=True):
+    import workspace_settings_service
+
+    row = workspace_settings_service._locked_row(db)
+    row.default_reminder_days, row.default_launch_email = days, launch
+    db.flush()
+
+
+def test_workspace_defaults_apply_until_a_campaign_customizes(db):
+    set_defaults(db, [5, 3])
+    campaign, evaluator = campaign_with_open_evaluations(db, end_in_days=4)
+    campaign.launch_email_enabled = False
+    assert reminders.effective_reminders(campaign, db) == [(5, None), (3, None)]
+    reminders.send_due_emails(db)
+    assert [item.reminder_days for item in db.query(models.EmailDelivery).filter_by(campaign_id=campaign.id)] == [5]
+
+    # The first own change copies the defaults; a reminder that already went out is not sent again.
+    reminders.customize_reminders(campaign, db.get(models.User, evaluator.user_id), db)
+    assert [days for days, _id in reminders.effective_reminders(campaign, db)] == [5, 3]
+    set_defaults(db, [1])
+    assert [days for days, _id in reminders.effective_reminders(campaign, db)] == [5, 3]
+    reminders.send_due_emails(db)
+    assert len(db.sent) == 1
+
+
+def test_recipient_list_and_selected_manual_send(db):
+    campaign, evaluator = campaign_with_open_evaluations(db)
+    other = person(db, "Zoe Other")
+    status = db.query(models.FormStatus).filter(models.FormStatus.name == "Not started").first()
+    db.add(models.FilledForm(campaign_id=campaign.id, evaluator_id=other.id, evaluatee_id=evaluator.id, status_id=status.id,
+                             answers=[], form_snapshot={"schema_version": 2, "questions": []}))
+    db.flush()
+    listed = reminders.recipient_list(campaign, db)
+    assert [(item["employee_id"], item["not_started"]) for item in listed] == [(evaluator.id, 2), (other.id, 1)]
+    actor = db.get(models.User, evaluator.user_id)
+    assert reminders.send_manual(campaign, actor, [other.id], db)["sent"] == 1
+    assert [message[0] for message in db.sent] == [db.get(models.User, other.user_id).email]
+    assert {item["employee_id"]: item["recently_reminded"] for item in reminders.recipient_list(campaign, db)} == {
+        evaluator.id: False, other.id: True}

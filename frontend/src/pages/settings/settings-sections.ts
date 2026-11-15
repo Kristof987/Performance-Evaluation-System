@@ -1,7 +1,7 @@
-import { Bell, Bot, EyeOff, KeyRound, Palette, ScrollText, ShieldCheck, UserRound, type LucideIcon } from 'lucide-react';
+import { Bell, Bot, EyeOff, KeyRound, Mail, Palette, ScrollText, ShieldCheck, UserRound, type LucideIcon } from 'lucide-react';
 
 export type SettingsSection = 'profile' | 'security' | 'notifications' | 'appearance'
-  | 'privacy' | 'ai' | 'permissions' | 'audit';
+  | 'privacy' | 'emails' | 'ai' | 'permissions' | 'audit';
 
 type Item = { id: SettingsSection; label: string; description: string; icon: LucideIcon; anyOf?: string[] };
 
@@ -14,6 +14,7 @@ export const SETTINGS_GROUPS: { label: string; items: Item[] }[] = [
   ] },
   { label: 'Workspace', items: [
     { id: 'privacy', label: 'Privacy', description: 'Anonymity thresholds', icon: EyeOff, anyOf: ['workspace.manage'] },
+    { id: 'emails', label: 'Email reminders', description: 'Default campaign emails', icon: Mail, anyOf: ['workspace.manage'] },
     { id: 'ai', label: 'AI analysis', description: 'On/off and model', icon: Bot, anyOf: ['workspace.manage'] },
     { id: 'permissions', label: 'Permissions', description: 'What each role can do', icon: KeyRound,
       anyOf: ['permissions.manage', 'workspace.manage'] },

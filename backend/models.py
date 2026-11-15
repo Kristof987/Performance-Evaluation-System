@@ -253,6 +253,9 @@ class WorkspaceSettings(Base):
     min_aggregate_evaluatees = Column(Integer, nullable=False, server_default="2")
     ai_enabled = Column(Boolean, nullable=False, server_default=text("true"))
     ai_model = Column(String(100), nullable=True)
+    # Reminder emails every campaign uses unless HR sets its own (days before the end date).
+    default_reminder_days = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    default_launch_email = Column(Boolean, nullable=False, server_default=text("true"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
@@ -564,6 +567,8 @@ class Campaign(Base):
     ever_issued = Column(Boolean, nullable=False, default=False, server_default="false")
     # Email everyone with evaluations when the campaign opens; off for campaigns that were already running.
     launch_email_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    # False: the workspace default reminders apply; True: this campaign's own campaign_reminders rows do.
+    custom_reminders = Column(Boolean, nullable=False, default=False, server_default="false")
     # Compatibility boundary: migration-era campaigns must not acquire new snapshots
     # through the old, date/flag-driven issuance path before lifecycle integration.
     legacy_issuance_blocked = Column(Boolean, nullable=False, default=False, server_default="false")
@@ -643,6 +648,7 @@ class EmailDelivery(Base):
     employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
     kind = Column(String(16), nullable=False)
     reminder_id = Column(Integer, ForeignKey("campaign_reminders.id", ondelete="SET NULL"), nullable=True)
+    reminder_days = Column(Integer, nullable=True)
     dedupe_key = Column(String(120), nullable=False, unique=True)
     recipient = Column(String, nullable=False)
     status = Column(String(16), nullable=False, default="pending")

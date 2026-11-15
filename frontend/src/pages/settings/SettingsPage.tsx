@@ -11,6 +11,7 @@ import SecuritySettings from './sections/SecuritySettings';
 import PreferenceSettings from './sections/PreferenceSettings';
 import PrivacySettings from './sections/PrivacySettings';
 import AISettings from './sections/AISettings';
+import EmailReminderSettings from './sections/EmailReminderSettings';
 import PermissionsSettings from './sections/PermissionsSettings';
 import AuditLogSettings from './sections/AuditLogSettings';
 import { fetchAccountSettingsProfile, type AccountSettingsProfile } from './settings.api';
@@ -54,7 +55,7 @@ export default function SettingsPage() {
   if (userId !== null && !canOpenSection(section, permissions)) return <Navigate to="/settings/profile" replace />;
 
   const loading = userId !== null && profile === null && error === '';
-  const workspace = section === 'privacy' || section === 'ai' || section === 'permissions' || section === 'audit';
+  const workspace = section === 'privacy' || section === 'emails' || section === 'ai' || section === 'permissions' || section === 'audit';
 
   return <AppLayout activePage="settings" pageClassName="settings-page">
     <main className="main-content settings-main">
@@ -68,6 +69,7 @@ export default function SettingsPage() {
           {userId === null && <div className="card card-padded settings-state" role="alert">Sign in again to view settings.</div>}
           {userId !== null && workspace && <>
             {section === 'privacy' && <PrivacySettings />}
+            {section === 'emails' && <EmailReminderSettings />}
             {section === 'ai' && <AISettings />}
             {section === 'permissions' && <PermissionsSettings />}
             {section === 'audit' && <AuditLogSettings />}

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import email_service
@@ -29,16 +30,22 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def open_evaluation_counts(campaign_id: int, db: Session) -> dict[int, int]:
-    """Issued, not yet completed evaluations per evaluator."""
+def open_evaluation_breakdown(campaign_id: int, db: Session) -> dict[int, dict[str, int]]:
+    """Issued, not yet completed evaluations per evaluator, split into not started and in progress."""
     rows = (db.query(models.FilledForm.evaluator_id, models.FormStatus.name, models.FilledForm.finish_date)
             .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
             .filter(models.FilledForm.campaign_id == campaign_id, models.FilledForm.form_snapshot.isnot(None)).all())
-    counts: dict[int, int] = {}
+    breakdown: dict[int, dict[str, int]] = {}
     for evaluator_id, status_name, finish_date in rows:
-        if reporting_service.status_key(status_name, finish_date) != "completed":
-            counts[evaluator_id] = counts.get(evaluator_id, 0) + 1
-    return counts
+        status = reporting_service.status_key(status_name, finish_date)
+        if status != "completed":
+            counts = breakdown.setdefault(evaluator_id, {"not_started": 0, "in_progress": 0})
+            counts[status] += 1
+    return breakdown
+
+
+def open_evaluation_counts(campaign_id: int, db: Session) -> dict[int, int]:
+    return {employee_id: sum(counts.values()) for employee_id, counts in open_evaluation_breakdown(campaign_id, db).items()}
 
 
 def _recipients(campaign_id: int, db: Session, employee_ids: set[int] | None = None):
@@ -83,10 +90,12 @@ def _values(campaign: models.Campaign, employee: models.Employee, count: int, no
 
 
 def _deliver(db: Session, campaign: models.Campaign, employee: models.Employee, user: models.User, count: int, *,
-             kind: str, dedupe_key: str, reminder_id: int | None = None, actor: models.User | None = None) -> str:
+             kind: str, dedupe_key: str, reminder_id: int | None = None, reminder_days: int | None = None,
+             actor: models.User | None = None) -> str:
     """Claim the dedupe key first, so a crash or a second worker never sends the same email twice."""
     claimed = db.execute(insert(models.EmailDelivery).values(
-        campaign_id=campaign.id, employee_id=employee.id, kind=kind, reminder_id=reminder_id, dedupe_key=dedupe_key,
+        campaign_id=campaign.id, employee_id=employee.id, kind=kind, reminder_id=reminder_id, reminder_days=reminder_days,
+        dedupe_key=dedupe_key,
         recipient=user.email, status="pending", created_by=actor.id if actor else None,
     ).on_conflict_do_nothing(index_elements=["dedupe_key"]).returning(models.EmailDelivery.id)).scalar()
     db.commit()
@@ -104,21 +113,45 @@ def _deliver(db: Session, campaign: models.Campaign, employee: models.Employee, 
     return delivery.status
 
 
-def due_reminder(campaign: models.Campaign, now: datetime, db: Session) -> models.CampaignReminder | None:
+def workspace_reminder_defaults(db: Session) -> tuple[list[int], bool]:
+    row = db.get(models.WorkspaceSettings, "default")
+    days = row.default_reminder_days if row and isinstance(row.default_reminder_days, list) else []
+    return sorted({day for day in days if isinstance(day, int) and not isinstance(day, bool)}, reverse=True), \
+        row.default_launch_email if row else True
+
+
+def effective_reminders(campaign: models.Campaign, db: Session) -> list[tuple[int, int | None]]:
+    """(days before the end, campaign reminder id); workspace defaults have no id."""
+    if campaign.custom_reminders:
+        return [(reminder.days_before_end, reminder.id) for reminder in campaign_reminders(campaign.id, db)]
+    return [(days, None) for days in workspace_reminder_defaults(db)[0]]
+
+
+def due_reminder(campaign: models.Campaign, now: datetime, db: Session) -> tuple[int, int | None] | None:
     """The latest reminder that is due; earlier ones it supersedes are never sent late in a burst."""
     if campaign.end_date is None or now >= _aware(campaign.end_date):
         return None
     end, start = _aware(campaign.end_date), _aware(campaign.start_date)
-    due = [reminder for reminder in campaign_reminders(campaign.id, db)
-           if end - timedelta(days=reminder.days_before_end) <= now
+    due = [item for item in effective_reminders(campaign, db)
+           if end - timedelta(days=item[0]) <= now
            # A reminder falling before the start would just repeat the launch email.
-           and end - timedelta(days=reminder.days_before_end) > start]
-    return min(due, key=lambda reminder: reminder.days_before_end, default=None)
+           and end - timedelta(days=item[0]) > start]
+    return min(due, key=lambda item: item[0], default=None)
 
 
 def campaign_reminders(campaign_id: int, db: Session) -> list[models.CampaignReminder]:
     return (db.query(models.CampaignReminder).filter(models.CampaignReminder.campaign_id == campaign_id)
             .order_by(models.CampaignReminder.days_before_end.desc()).all())
+
+
+def customize_reminders(campaign: models.Campaign, actor: models.User, db: Session) -> None:
+    """Copy the workspace defaults onto the campaign before its first own change."""
+    if campaign.custom_reminders:
+        return
+    for days in workspace_reminder_defaults(db)[0]:
+        db.add(models.CampaignReminder(campaign_id=campaign.id, days_before_end=days, created_by=actor.id))
+    campaign.custom_reminders = True
+    db.flush()
 
 
 def send_due_emails(db: Session, now: datetime | None = None) -> int:
@@ -133,8 +166,9 @@ def send_due_emails(db: Session, now: datetime | None = None) -> int:
                 sent += _deliver(db, campaign, employee, user, count, kind="launch",
                                  dedupe_key=f"launch:{campaign.id}:{employee.id}") == "sent"
             if reminder is not None:
-                sent += _deliver(db, campaign, employee, user, count, kind="reminder", reminder_id=reminder.id,
-                                 dedupe_key=f"reminder:{reminder.id}:{employee.id}") == "sent"
+                days, reminder_id = reminder
+                sent += _deliver(db, campaign, employee, user, count, kind="reminder", reminder_id=reminder_id,
+                                 reminder_days=days, dedupe_key=f"reminder:{campaign.id}:{days}:{employee.id}") == "sent"
     return sent
 
 
@@ -174,18 +208,18 @@ def send_manual(campaign: models.Campaign, actor: models.User, employee_ids: lis
 def email_overview(campaign: models.Campaign, db: Session) -> dict:
     now = _now()
     deliveries = db.query(models.EmailDelivery).filter(models.EmailDelivery.campaign_id == campaign.id).all()
-    by_reminder: dict[int, list[models.EmailDelivery]] = {}
+    by_days: dict[int, list[models.EmailDelivery]] = {}
     for delivery in deliveries:
-        if delivery.reminder_id is not None:
-            by_reminder.setdefault(delivery.reminder_id, []).append(delivery)
+        if delivery.kind == "reminder" and delivery.reminder_days is not None:
+            by_days.setdefault(delivery.reminder_days, []).append(delivery)
     end = _aware(campaign.end_date) if campaign.end_date else None
     reminders = []
-    for reminder in campaign_reminders(campaign.id, db):
-        sent = [item for item in by_reminder.get(reminder.id, []) if item.status == "sent"]
+    for days, reminder_id in effective_reminders(campaign, db):
+        sent = [item for item in by_days.get(days, []) if item.status == "sent"]
         reminders.append({
-            "id": reminder.id,
-            "days_before_end": reminder.days_before_end,
-            "scheduled_for": end - timedelta(days=reminder.days_before_end) if end else None,
+            "id": reminder_id,
+            "days_before_end": days,
+            "scheduled_for": end - timedelta(days=days) if end else None,
             "sent_count": len(sent),
             "last_sent_at": max((item.sent_at for item in sent), default=None),
         })
@@ -194,6 +228,7 @@ def email_overview(campaign: models.Campaign, db: Session) -> dict:
     return {
         "email_configured": email_service.configured(),
         "launch_email_enabled": campaign.launch_email_enabled,
+        "uses_workspace_defaults": not campaign.custom_reminders,
         "launch_sent_count": sum(item.status == "sent" for item in launch),
         "failed_count": sum(item.status == "failed" for item in deliveries),
         "manual_last_sent_at": max((item.sent_at for item in manual), default=None),
@@ -201,3 +236,18 @@ def email_overview(campaign: models.Campaign, db: Session) -> dict:
         "reminders": reminders,
         "now": now,
     }
+
+
+def recipient_list(campaign: models.Campaign, db: Session) -> list[dict]:
+    """People with open evaluations, for choosing who gets a manual reminder."""
+    breakdown = open_evaluation_breakdown(campaign.id, db)
+    last_manual = dict(db.query(models.EmailDelivery.employee_id, func.max(models.EmailDelivery.sent_at)).filter(
+        models.EmailDelivery.campaign_id == campaign.id, models.EmailDelivery.status == "sent",
+        models.EmailDelivery.kind == "manual").group_by(models.EmailDelivery.employee_id).all())
+    since = _now() - MANUAL_COOLDOWN
+    return [{
+        "employee_id": employee.id, "name": employee.full_name, "email": user.email,
+        "not_started": breakdown[employee.id]["not_started"], "in_progress": breakdown[employee.id]["in_progress"],
+        "last_reminded_at": last_manual.get(employee.id),
+        "recently_reminded": last_manual.get(employee.id) is not None and _aware(last_manual[employee.id]) >= since,
+    } for employee, user, _count in sorted(_recipients(campaign.id, db), key=lambda item: item[0].full_name.lower())]

@@ -18,7 +18,7 @@ export type PermissionMatrix = {
   permissions: { name: string; description: string }[];
 };
 
-export type AuditCategory = 'lifecycle' | 'archive' | 'operation' | 'privacy' | 'ai' | 'permissions' | 'accounts';
+export type AuditCategory = 'lifecycle' | 'archive' | 'operation' | 'privacy' | 'ai' | 'permissions' | 'accounts' | 'notifications';
 
 export type AuditEntry = {
   id: string;
@@ -84,4 +84,15 @@ export function fetchAuditLog(getAccessToken: AccessTokenGetter, options: {
   if (options.category) query.set('category', options.category);
   return request<{ entries: AuditEntry[]; has_more: boolean }>(getAccessToken, `/workspace/audit?${query}`,
     { signal: options.signal });
+}
+
+export type ReminderDefaults = { default_reminder_days: number[]; default_launch_email: boolean; email_configured: boolean };
+
+export function fetchReminderDefaults(getAccessToken: AccessTokenGetter, signal?: AbortSignal) {
+  return request<ReminderDefaults>(getAccessToken, '/workspace/email-reminders', { signal });
+}
+
+export function saveReminderDefaults(getAccessToken: AccessTokenGetter,
+  defaults: Pick<ReminderDefaults, 'default_reminder_days' | 'default_launch_email'>) {
+  return request<ReminderDefaults>(getAccessToken, '/workspace/email-reminders', json('PUT', defaults));
 }

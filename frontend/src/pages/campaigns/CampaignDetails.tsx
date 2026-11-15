@@ -16,6 +16,7 @@ import { usePageTitle } from '../../app/usePageTitle';
 import { fetchDashboard } from '../hr-home/services/dashboardService';
 import CampaignTimeline from './components/CampaignTimeline';
 import CampaignSetupSummary, { type SetupSummaryItem } from './components/CampaignSetupSummary';
+import CampaignEmails from '../completion-status/CampaignEmails';
 import CampaignGroupPreview from './components/CampaignGroupPreview';
 import { fetchPeople, type Employee } from '../people/people.api';
 
@@ -548,6 +549,8 @@ export function CampaignDetails() {
             <CampaignTimeline campaign={campaign} />
           </div>
           <CampaignSetupSummary items={setupSummaryItems} onOpen={(section) => openSetupSection(section === 'pairs' ? 'matrix' : section === 'questionnaires' ? 'rules' : section)} />
+          <CampaignEmails campaignId={Number(campaign.id)} isActive={campaign.status === 'active' && !campaign.isArchived} hasEndDate={Boolean(campaign.endDate)} />
+          {campaign.status !== 'draft' && campaign.status !== 'scheduled' && <Link className="campaign-details-link" to={`/campaigns/${campaign.id}/completion`} onClick={confirmLeaveCampaign}>View completion status →</Link>}
         </div>}
 
         {tab === 'setup' && <div className="campaign-setup-workspace">

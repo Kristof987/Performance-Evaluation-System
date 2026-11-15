@@ -23,6 +23,7 @@ from auth0 import bearer_scheme, get_verified_auth0_sub
 from business_calendar import business_today as campaign_today, business_date, campaign_instant
 import campaign_lifecycle
 import campaign_reminder_service
+import email_service
 import models
 import form_snapshot_service
 import reporting_service
@@ -551,6 +552,32 @@ def patch_workspace_settings(update: schemas.WorkspaceSettingsUpdate, db: Sessio
     return ai_workspace_status(db)
 
 
+@app.get("/workspace/email-reminders", response_model=schemas.WorkspaceReminderDefaults)
+def get_workspace_reminder_defaults(db: Session = Depends(get_db),
+                                    _actor: models.User = Depends(require_permission("workspace.manage"))):
+    days, launch = campaign_reminder_service.workspace_reminder_defaults(db)
+    return {"default_reminder_days": days, "default_launch_email": launch,
+            "email_configured": email_service.configured()}
+
+
+@app.put("/workspace/email-reminders", response_model=schemas.WorkspaceReminderDefaults)
+def put_workspace_reminder_defaults(update: schemas.WorkspaceReminderDefaultsUpdate, db: Session = Depends(get_db),
+                                    actor: models.User = Depends(require_permission("workspace.manage"))):
+    row = workspace_settings_service._locked_row(db)
+    days = sorted(set(update.default_reminder_days), reverse=True)
+    previous = (row.default_reminder_days, row.default_launch_email)
+    row.default_reminder_days, row.default_launch_email = days, update.default_launch_email
+    row.updated_by_user_id = actor.id
+    if previous != (days, update.default_launch_email):
+        workspace_settings_service.record_audit(
+            db, "notifications", actor,
+            "Default reminders changed: " + (", ".join(f"{day} days before the end" for day in days) or "none"),
+            {"default_reminder_days": days, "default_launch_email": update.default_launch_email})
+    db.commit()
+    return {"default_reminder_days": days, "default_launch_email": update.default_launch_email,
+            "email_configured": email_service.configured()}
+
+
 @app.get("/workspace/permissions", response_model=schemas.PermissionMatrixResponse)
 def get_permission_matrix(db: Session = Depends(get_db),
                           _actor: models.User = Depends(require_permission("permissions.manage", "workspace.manage"))):
@@ -577,7 +604,7 @@ def delete_system_role(role_id: int, db: Session = Depends(get_db),
 
 @app.get("/workspace/audit", response_model=schemas.AuditLogResponse)
 def get_audit_log(
-    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts"] | None = Query(default=None),
+    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts", "notifications"] | None = Query(default=None),
     campaign_id: int | None = Query(default=None, gt=0),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=10_000),
@@ -1963,6 +1990,7 @@ def add_campaign_reminder(campaign_id: int, payload: schemas.CampaignReminderCre
     require_email_schedule_editable(campaign)
     if campaign.end_date is None:
         raise HTTPException(status_code=409, detail="Set a campaign end date before scheduling reminders")
+    campaign_reminder_service.customize_reminders(campaign, actor, db)
     if db.query(models.CampaignReminder.id).filter_by(campaign_id=campaign.id, days_before_end=payload.days_before_end).first():
         raise HTTPException(status_code=409, detail="A reminder is already scheduled for that day")
     db.add(models.CampaignReminder(campaign_id=campaign.id, days_before_end=payload.days_before_end, created_by=actor.id))
@@ -1972,19 +2000,40 @@ def add_campaign_reminder(campaign_id: int, payload: schemas.CampaignReminderCre
     return campaign_reminder_service.email_overview(campaign, db)
 
 
-@app.delete("/campaigns/{campaign_id}/emails/reminders/{reminder_id}", response_model=schemas.CampaignEmailOverview)
-def delete_campaign_reminder(campaign_id: int, reminder_id: int, db: Session = Depends(get_db),
+@app.delete("/campaigns/{campaign_id}/emails/reminders/{days_before_end}", response_model=schemas.CampaignEmailOverview)
+def delete_campaign_reminder(campaign_id: int, days_before_end: int, db: Session = Depends(get_db),
                              actor: models.User = Depends(require_permission("campaigns.manage"))):
     campaign = campaign_for_emails(campaign_id, db, lock=True)
     require_email_schedule_editable(campaign)
-    reminder = db.query(models.CampaignReminder).filter_by(id=reminder_id, campaign_id=campaign.id).first()
+    campaign_reminder_service.customize_reminders(campaign, actor, db)
+    reminder = db.query(models.CampaignReminder).filter_by(campaign_id=campaign.id, days_before_end=days_before_end).first()
     if reminder is None:
         raise HTTPException(status_code=404, detail="Reminder not found")
     workspace_settings_service.record_audit(db, "notifications", actor, f"Reminder removed for {campaign.name}",
-                                            {"campaign_id": campaign.id, "days_before_end": reminder.days_before_end})
+                                            {"campaign_id": campaign.id, "days_before_end": days_before_end})
     db.delete(reminder)
     db.commit()
     return campaign_reminder_service.email_overview(campaign, db)
+
+
+@app.post("/campaigns/{campaign_id}/emails/reminders/reset", response_model=schemas.CampaignEmailOverview)
+def reset_campaign_reminders(campaign_id: int, db: Session = Depends(get_db),
+                             actor: models.User = Depends(require_permission("campaigns.manage"))):
+    """Drop the campaign's own reminders and follow the workspace defaults again."""
+    campaign = campaign_for_emails(campaign_id, db, lock=True)
+    require_email_schedule_editable(campaign)
+    db.query(models.CampaignReminder).filter_by(campaign_id=campaign.id).delete()
+    campaign.custom_reminders = False
+    workspace_settings_service.record_audit(db, "notifications", actor, f"Reminders reset to defaults for {campaign.name}",
+                                            {"campaign_id": campaign.id})
+    db.commit()
+    return campaign_reminder_service.email_overview(campaign, db)
+
+
+@app.get("/campaigns/{campaign_id}/emails/recipients", response_model=list[schemas.CampaignReminderRecipient])
+def get_campaign_reminder_recipients(campaign_id: int, db: Session = Depends(get_db),
+                                     _manager: models.User = Depends(require_permission("campaigns.manage"))):
+    return campaign_reminder_service.recipient_list(campaign_for_emails(campaign_id, db), db)
 
 
 @app.put("/campaigns/{campaign_id}/emails/launch", response_model=schemas.CampaignEmailOverview)
@@ -2859,6 +2908,7 @@ def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_
         status=models.CampaignStatus.DRAFT.value,
         comment=campaign.comment,
         created_by=actor.id,
+        launch_email_enabled=campaign_reminder_service.workspace_reminder_defaults(db)[1],
     )
 
     db.add(new_campaign)

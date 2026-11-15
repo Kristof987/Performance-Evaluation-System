@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -441,7 +441,7 @@ class EmployeeSystemRoleUpdate(BaseModel):
 
 class AuditLogEntry(BaseModel):
     id: str
-    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts"]
+    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts", "notifications"]
     occurred_at: datetime
     actor_user_id: int | None
     actor_name: str | None = None
@@ -1152,7 +1152,7 @@ class FormAIGenerateResponse(BaseModel):
 
 
 class CampaignReminderItem(BaseModel):
-    id: int
+    id: int | None
     days_before_end: int
     scheduled_for: datetime | None
     sent_count: int
@@ -1162,6 +1162,7 @@ class CampaignReminderItem(BaseModel):
 class CampaignEmailOverview(BaseModel):
     email_configured: bool
     launch_email_enabled: bool
+    uses_workspace_defaults: bool
     launch_sent_count: int
     failed_count: int
     manual_last_sent_at: datetime | None
@@ -1193,3 +1194,24 @@ class CampaignManualReminderResult(BaseModel):
     sent: int
     failed: int
     skipped_recently_reminded: int
+
+
+class CampaignReminderRecipient(BaseModel):
+    employee_id: int
+    name: str
+    email: str
+    not_started: int
+    in_progress: int
+    last_reminded_at: datetime | None
+    recently_reminded: bool
+
+
+class WorkspaceReminderDefaultsUpdate(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    default_reminder_days: list[Annotated[int, Field(ge=0, le=90)]] = Field(default_factory=list, max_length=10)
+    default_launch_email: bool = True
+
+
+class WorkspaceReminderDefaults(WorkspaceReminderDefaultsUpdate):
+    email_configured: bool

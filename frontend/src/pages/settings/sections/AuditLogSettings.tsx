@@ -11,6 +11,7 @@ const CATEGORIES: { value: AuditCategory; label: string }[] = [
   { value: 'operation', label: 'Campaign operations' },
   { value: 'archive', label: 'Archiving' },
   { value: 'accounts', label: 'Sign-in invitations' },
+  { value: 'notifications', label: 'Email reminders' },
   { value: 'permissions', label: 'Permissions' },
   { value: 'privacy', label: 'Privacy settings' },
   { value: 'ai', label: 'AI settings' },
