@@ -86,8 +86,11 @@ function ProtectedPage({ children, hrOnly = false }: {
     return state.user.permissions.includes('evaluations.read_assigned')
       ? children : <Auth0PermissionDenied feature="Evaluations" required="evaluations.read_assigned" activePage="my-evaluations" />
   }
+  if (location.pathname === '/settings' || location.pathname.startsWith('/settings/')) {
+    return state.user.permissions.includes('settings.read')
+      ? children : <Auth0PermissionDenied feature="Settings" required="settings.read" activePage="settings" />
+  }
   if (hrOnly && !canReadCampaigns) return <Navigate to={getAuthenticatedDashboardPath(state.user.permissions)} replace />
-  if (state.mode === 'development' && location.pathname.startsWith('/settings')) return children
   return <Auth0Unavailable />
 }
 
