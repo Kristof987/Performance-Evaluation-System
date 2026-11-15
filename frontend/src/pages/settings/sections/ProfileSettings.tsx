@@ -1,18 +1,24 @@
 import { formatUserName } from '../../layout/sidebar-user';
 import type { AccountSettingsProfile } from '../settings.api';
+import { useAppAuth } from '../../../auth/AppAuth';
+import ProfilePhoto from './ProfilePhoto';
 
 function Field({ label, value }: { label: string; value: string }) {
   return <div className="settings-field"><span>{label}</span><strong>{value}</strong></div>;
 }
 
 export default function ProfileSettings({ profile }: { profile: AccountSettingsProfile }) {
+  const { state } = useAppAuth();
+  const employeeId = state.status === 'authenticated' ? state.user.employee.id : null;
+  const displayName = profile.full_name || formatUserName(profile.username);
   return <section className="card settings-panel" aria-labelledby="profile-settings-title">
     <div className="settings-panel-header">
       <h2 id="profile-settings-title">My profile</h2>
       <p>Your account information is managed by your organization.</p>
     </div>
+    <ProfilePhoto key={profile.id} name={displayName} employeeId={employeeId} initialPhoto={profile.profile_image_url ?? null} />
     <div className="settings-field-grid">
-       <Field label="Full name" value={profile.full_name || formatUserName(profile.username)} />
+       <Field label="Full name" value={displayName} />
       <Field label="Email address" value={profile.email} />
       <Field label="Company role" value={profile.company_role || 'Not assigned'} />
       <Field label="System role" value={profile.system_role || 'Not assigned'} />

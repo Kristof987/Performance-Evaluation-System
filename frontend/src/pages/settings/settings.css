@@ -92,6 +92,12 @@
 .settings-audit-meta { align-items: center; display: flex; gap: 10px; }
 .settings-audit-meta time { color: var(--color-text-muted); font-size: 12px; }
 .settings-load-more { justify-self: center; }
+.settings-photo { align-items: center; display: flex; gap: 20px; }
+.settings-photo-avatar { align-items: center; background: var(--color-primary-soft); border-radius: 50%; color: var(--color-primary); display: flex; flex: 0 0 88px; font-size: 26px; font-weight: 750; height: 88px; justify-content: center; overflow: hidden; width: 88px; }
+.settings-photo-avatar img { height: 100%; object-fit: cover; width: 100%; }
+.settings-photo-body { display: grid; gap: 6px; }
+.settings-photo-body > span { color: var(--color-text-secondary); font-size: 13px; }
+.settings-photo-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 @media (max-width: 767px) {
   .settings-layout { gap: 16px; grid-template-columns: minmax(0, 1fr); }
   .settings-navigation { display: flex; overflow-x: auto; }
@@ -101,6 +107,7 @@
   .settings-nav-item { border-bottom: 0; border-right: 1px solid var(--color-border); flex: 0 0 86px; flex-direction: column; gap: 7px; padding: 12px 4px; text-align: center; }
   .settings-nav-group .settings-nav-item:last-child { border-right: 0; }
   .settings-threshold { align-items: stretch; flex-direction: column; gap: 10px; }
+  .settings-photo { align-items: flex-start; flex-direction: column; }
   .settings-nav-item strong { font-size: 11px; }
   .settings-nav-item span { display: none; }
   .settings-field-grid, .settings-field-grid.compact { grid-template-columns: minmax(0, 1fr); }

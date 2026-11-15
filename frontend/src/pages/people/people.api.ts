@@ -17,6 +17,7 @@ export type Employee = {
   signInLinked: boolean;
   invitationSentAt: string | null;
   invitationError: string | null;
+  photo: string | null;
 };
 
 export type Group = {
@@ -70,6 +71,7 @@ type PeopleEmployeeResponse = {
   sign_in_linked?: boolean;
   invitation_sent_at?: string | null;
   invitation_error?: string | null;
+  profile_image_url?: string | null;
 };
 
 type PeopleResponse = {
@@ -100,6 +102,7 @@ function mapEmployee(employee: PeopleEmployeeResponse): Employee {
     signInLinked: employee.sign_in_linked ?? false,
     invitationSentAt: employee.invitation_sent_at ?? null,
     invitationError: employee.invitation_error ?? null,
+    photo: employee.profile_image_url ?? null,
   };
 }
 

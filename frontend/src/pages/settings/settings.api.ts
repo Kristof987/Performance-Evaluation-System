@@ -17,6 +17,7 @@ export type AccountSettingsProfile = {
   groups: SettingsGroup[];
   is_active: boolean;
   last_login: string | null;
+  profile_image_url?: string | null;
 };
 
 export async function fetchAccountSettingsProfile(
@@ -82,4 +83,17 @@ export function patchPreferences(
   return settingsRequest<Preferences>(getAccessToken, '/me/preferences', {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes), signal,
   });
+}
+
+export const PROFILE_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+export function uploadProfilePhoto(getAccessToken: AccessTokenGetter, file: File) {
+  const body = new FormData();
+  body.append('file', file);
+  return settingsRequest<{ profile_image_url: string | null }>(getAccessToken, '/me/profile-photo', { method: 'PUT', body });
+}
+
+export function deleteProfilePhoto(getAccessToken: AccessTokenGetter) {
+  return settingsRequest<{ profile_image_url: string | null }>(getAccessToken, '/me/profile-photo', { method: 'DELETE' });
 }

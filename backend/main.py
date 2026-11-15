@@ -8,7 +8,7 @@ from typing import Callable, Literal
 
 import jwt
 from jwt.exceptions import InvalidTokenError
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Query, Response, UploadFile, File
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
@@ -37,6 +37,7 @@ import schemas
 import auth0_management
 import preferences_service
 import workspace_settings_service
+import profile_photo_service
 
 #Base.metadata.create_all(bind=engine)
 
@@ -239,7 +240,8 @@ def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Dep
             "employee": {"id": employee.id, "full_name": employee.full_name,
                          "company_role_id": employee.company_role_id,
                          "company_role_name": roles.company_role_name,
-                         "is_active": employee.is_active} if employee else None}
+                         "is_active": employee.is_active,
+                         "profile_image_url": employee.profile_image_url} if employee else None}
 
 
 @app.post("/users", response_model=schemas.UserResponse)
@@ -383,6 +385,7 @@ def get_people(db: Session = Depends(get_db),
                     if group_id in groups_by_id
                 ],
                 "is_active": employee.is_active,
+                "profile_image_url": employee.profile_image_url,
                 **invitation_fields(employee.user),
             }
             for employee in employees
@@ -450,7 +453,41 @@ def account_profile(user_id: int, db: Session):
         ],
         "is_active": user.is_active,
         "last_login": user.last_login,
+        "profile_image_url": employee.profile_image_url if employee else None,
     }
+
+
+def own_employee(actor: models.User) -> models.Employee:
+    if actor.employee is None or not actor.employee.is_active:
+        raise HTTPException(status_code=409, detail="An active employee profile is required for a profile photo")
+    return actor.employee
+
+
+@app.put("/me/profile-photo", response_model=schemas.ProfilePhotoResponse)
+def upload_my_profile_photo(file: UploadFile = File(...), db: Session = Depends(get_db),
+                            actor: models.User = Depends(require_permission("settings.manage_self"))):
+    # Only ever the caller's own employee: the route has no ID that could point at someone else.
+    data = file.file.read(profile_photo_service.MAX_UPLOAD_BYTES + 1)
+    url = profile_photo_service.save_photo(own_employee(actor), data, db)
+    return {"profile_image_url": url}
+
+
+@app.delete("/me/profile-photo", response_model=schemas.ProfilePhotoResponse)
+def delete_my_profile_photo(db: Session = Depends(get_db),
+                            actor: models.User = Depends(require_permission("settings.manage_self"))):
+    profile_photo_service.remove_photo(own_employee(actor), db)
+    return {"profile_image_url": None}
+
+
+@app.get("/photos/{photo_id}.jpg", include_in_schema=False)
+def get_profile_photo(photo_id: str, db: Session = Depends(get_db)):
+    photo = profile_photo_service.find_servable_photo(photo_id, db)
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return Response(content=photo.content, media_type=photo.content_type, headers={
+        "Cache-Control": "private, max-age=86400",
+        "X-Content-Type-Options": "nosniff",
+    })
 
 
 @app.get("/me/security", response_model=schemas.SecuritySettingsResponse)
@@ -742,6 +779,7 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
             for group in groups
         ],
         "is_active": person.is_active,
+        "profile_image_url": person.profile_image_url,
         **invitation_fields(user),
     }
 
@@ -770,6 +808,7 @@ def resend_employee_invitation(employee_id: int, db: Session = Depends(get_db),
         "groups": [{"id": group.id, "name": group.name, "description": group.description,
                     "member_count": counts.get(group.id, 0)} for group in groups],
         "is_active": person.is_active,
+        "profile_image_url": person.profile_image_url,
         **invitation_fields(user),
     }
 

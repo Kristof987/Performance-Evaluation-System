@@ -190,6 +190,7 @@ class AuthEmployeeResponse(BaseModel):
     company_role_id: int
     company_role_name: str
     is_active: bool
+    profile_image_url: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -293,6 +294,7 @@ class PeopleEmployeeResponse(BaseModel):
     # active: linked and has signed in; invited: email sent; failed / not_invited otherwise.
     sign_in_status: Literal["active", "invited", "failed", "not_invited"] = "not_invited"
     sign_in_linked: bool = False
+    profile_image_url: str | None = None
     invitation_sent_at: datetime | None = None
     invitation_error: str | None = None
 
@@ -312,6 +314,7 @@ class AccountSettingsProfile(BaseModel):
     groups: list[PeopleGroupResponse]
     is_active: bool
     last_login: datetime | None = None
+    profile_image_url: str | None = None
 
 
 class SecuritySettingsResponse(BaseModel):
@@ -342,6 +345,10 @@ class PreferencesUpdate(BaseModel):
 class PreferencesResponse(PreferencesUpdate):
     model_config = {"from_attributes": True}
     updated_at: datetime | None = None
+
+
+class ProfilePhotoResponse(BaseModel):
+    profile_image_url: str | None
 
 
 class WorkspaceSettingsUpdate(BaseModel):

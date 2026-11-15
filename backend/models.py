@@ -2,6 +2,7 @@ from enum import Enum
 
 from sqlalchemy import (
     Boolean,
+    LargeBinary,
     Column,
     DateTime,
     Date,
@@ -221,6 +222,17 @@ class UserPreferences(Base):
         CheckConstraint("date_format IN ('locale', 'iso')", name="ck_user_preferences_date_format"),
         CheckConstraint("reminder_days_before_deadline BETWEEN 1 AND 14", name="ck_user_preferences_reminder"),
     )
+
+
+class ProfilePhoto(Base):
+    """An employee's current photo; a new upload gets a new random ID so old URLs stop working."""
+    __tablename__ = "profile_photos"
+
+    id = Column(String(32), primary_key=True)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, unique=True)
+    content = Column(LargeBinary, nullable=False)
+    content_type = Column(String(32), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class WorkspaceSettings(Base):

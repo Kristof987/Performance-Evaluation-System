@@ -7,3 +7,9 @@ export const AUTH0_DOMAIN = VITE_AUTH0_DOMAIN?.trim();
 export const AUTH0_CLIENT_ID = VITE_AUTH0_CLIENT_ID?.trim();
 export const AUTH0_AUDIENCE = VITE_AUTH0_AUDIENCE?.trim();
 export const AUTH0_CONFIGURED = Boolean(AUTH0_DOMAIN && AUTH0_CLIENT_ID && AUTH0_AUDIENCE);
+
+/** Backend-relative media paths (e.g. /photos/<id>.jpg) are served by the API host. */
+export function mediaUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  return path.startsWith('/') ? `${API_BASE_URL}${path}` : path;
+}

@@ -1,4 +1,3 @@
-import { getUserInitials } from '../layout/sidebar-user';
 import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import AppLayout from '../layout/AppLayout';
@@ -15,6 +14,7 @@ import {
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+import Avatar from '../../components/Avatar';
 import {
   addGroupMember,
   createEmployee,
@@ -1552,9 +1552,7 @@ export default function People() {
                         >
                           <td>
                             <div className="person">
-                              <div className="mini">
-                                {getUserInitials(employee.name)}
-                              </div>
+                              <Avatar className="mini" name={employee.name} photo={employee.photo} />
                               <div>
                                 <div className="people-person-name"><strong>{employee.name}</strong>{currentUser !== null && ((employee.id === currentUser.employee.id) || (employee.userId !== null && employee.userId === currentUser.id)) && <span className="badge badge-neutral people-you-badge">You</span>}</div>
                                 <span>{employee.email}</span>
@@ -1752,7 +1750,7 @@ export default function People() {
         {selectedEmployee && (
           <div className="people-detail-stack">
             <div className="person people-detail-person">
-              <div className="mini">{getUserInitials(selectedEmployee.name)}</div>
+              <Avatar className="mini" name={selectedEmployee.name} photo={selectedEmployee.photo} />
               <div>
                 <strong>{selectedEmployee.name}</strong>
                 <span>{selectedEmployee.email}</span>
@@ -1851,7 +1849,7 @@ export default function People() {
                   {members.map((employee) => (
                     <div className="people-member-row" key={employee.id}>
                       <div className="person">
-                        <div className="mini">{getUserInitials(employee.name)}</div>
+                        <Avatar className="mini" name={employee.name} photo={employee.photo} />
                         <div>
                           <strong>{employee.name}</strong>
                           <span>{employee.role}</span>

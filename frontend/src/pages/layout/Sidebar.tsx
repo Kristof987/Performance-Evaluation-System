@@ -1,6 +1,8 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { Link, NavLink, useLocation } from 'react-router';
 import { useNavigate } from 'react-router';
+import { mediaUrl } from '../../config';
+import { useProfilePhoto } from '../settings/profile-photo-store';
 import {
   ChartNoAxesCombined,
   ChevronDown,
@@ -72,6 +74,8 @@ export default function Sidebar({
   const location = useLocation();
   const reportCampaignId = /^\/reports\/campaigns\/(\d+)/.exec(location.pathname)?.[1];
   const reportBase = reportCampaignId ? `/reports/campaigns/${reportCampaignId}` : '/reports';
+  const sidebarPhoto = mediaUrl(useProfilePhoto(auth0User?.employee.id,
+    auth0User ? auth0User.employee.profile_image_url : sidebarUser?.profile_image_url));
   const sidebarUserName = auth0User?.employee.full_name ?? (
     sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser));
   const dashboardPath = auth0User
@@ -282,8 +286,8 @@ export default function Sidebar({
 
         <div className="user-menu">
           <div className="user-avatar">
-            {sidebarUser?.profile_image_url ? (
-              <img src={sidebarUser.profile_image_url} alt={sidebarUserName} />
+            {sidebarPhoto ? (
+              <img src={sidebarPhoto} alt={sidebarUserName} />
             ) : (
               <div className="user-initials">
                 {getUserInitials(sidebarUserName)}

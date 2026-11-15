@@ -2,6 +2,7 @@ import './ParticipantsSection.css';
 import { useState } from 'react';
 
 import Pagination from '../../../components/Pagination';
+import { mediaUrl } from '../../../config';
 import { getUserInitials } from '../../layout/sidebar-user';
 import type { DashboardParticipant } from '../hrHome.types';
 
@@ -16,7 +17,7 @@ function ParticipantRow({ participant }: ParticipantRowProps) {
     <div className="participant-row">
       <div className="user-avatar participant-avatar">
         {participant.profile_image_url ? (
-          <img src={participant.profile_image_url} alt={participant.name} />
+          <img src={mediaUrl(participant.profile_image_url) ?? undefined} alt={participant.name} />
         ) : (
           <div className="user-initials">
             {getUserInitials(participant.name)}
