@@ -222,17 +222,14 @@ class UserPreferences(Base):
     language = Column(String(2), nullable=False, server_default="en")
     date_format = Column(String(8), nullable=False, server_default="locale")
     notify_new_assignment = Column(Boolean, nullable=False, server_default=text("true"))
-    notify_deadline_reminder = Column(Boolean, nullable=False, server_default=text("true"))
     notify_results_available = Column(Boolean, nullable=False, server_default=text("true"))
     notify_campaign_status = Column(Boolean, nullable=False, server_default=text("true"))
-    reminder_days_before_deadline = Column(Integer, nullable=False, server_default="3")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         CheckConstraint("theme IN ('system', 'light', 'dark')", name="ck_user_preferences_theme"),
         CheckConstraint("language IN ('en', 'hu')", name="ck_user_preferences_language"),
         CheckConstraint("date_format IN ('locale', 'iso')", name="ck_user_preferences_date_format"),
-        CheckConstraint("reminder_days_before_deadline BETWEEN 1 AND 14", name="ck_user_preferences_reminder"),
     )
 
 
@@ -276,7 +273,7 @@ class SettingsAuditEvent(Base):
     details = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
     __table_args__ = (
-        CheckConstraint("category IN ('privacy', 'ai', 'permissions', 'accounts')", name="ck_settings_audit_category"),
+        CheckConstraint("category IN ('privacy', 'ai', 'permissions', 'accounts', 'notifications')", name="ck_settings_audit_category"),
     )
 
 
@@ -565,6 +562,8 @@ class Campaign(Base):
     unarchived_at = Column(DateTime(timezone=True), nullable=True)
     unarchived_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     ever_issued = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Email everyone with evaluations when the campaign opens; off for campaigns that were already running.
+    launch_email_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     # Compatibility boundary: migration-era campaigns must not acquire new snapshots
     # through the old, date/flag-driven issuance path before lifecycle integration.
     legacy_issuance_blocked = Column(Boolean, nullable=False, default=False, server_default="false")
@@ -617,6 +616,45 @@ class CampaignArchiveEvent(Base):
     actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (CheckConstraint("action IN ('archive', 'unarchive')", name="ck_campaign_archive_action"),)
+
+
+class CampaignReminder(Base):
+    """An extra reminder email, sent a number of calendar days before the campaign ends."""
+    __tablename__ = "campaign_reminders"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
+    days_before_end = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "days_before_end", name="uq_campaign_reminder_days"),
+        CheckConstraint("days_before_end BETWEEN 0 AND 90", name="ck_campaign_reminder_days"),
+    )
+
+
+class EmailDelivery(Base):
+    """One email to one person; the dedupe key makes every scheduled email go out at most once."""
+    __tablename__ = "email_deliveries"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(16), nullable=False)
+    reminder_id = Column(Integer, ForeignKey("campaign_reminders.id", ondelete="SET NULL"), nullable=True)
+    dedupe_key = Column(String(120), nullable=False, unique=True)
+    recipient = Column(String, nullable=False)
+    status = Column(String(16), nullable=False, default="pending")
+    error = Column(String(200), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('launch', 'reminder', 'manual')", name="ck_email_delivery_kind"),
+        CheckConstraint("status IN ('pending', 'sent', 'failed')", name="ck_email_delivery_status"),
+    )
 
 
 class CampaignOperationAudit(Base):

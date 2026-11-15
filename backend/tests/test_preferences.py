@@ -2,7 +2,6 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.exc import IntegrityError
 
 import models
 import preferences_service
@@ -53,14 +52,13 @@ def test_defaults_and_partial_persistence(account):
     saved = client.patch("/me/preferences", json={"theme": "dark", "notify_new_assignment": False})
     assert saved.status_code == 200
     assert saved.json()["theme"] == "dark"
-    assert saved.json()["notify_deadline_reminder"] is True
+    assert "notify_deadline_reminder" not in saved.json()  # Reminder timing is set per campaign by HR.
     assert saved.json()["updated_at"] is not None
     assert client.get("/me/preferences").json()["notify_new_assignment"] is False
 
 
 @pytest.mark.parametrize("changes", [
-    {"theme": "invalid"}, {"reminder_days_before_deadline": 0},
-    {"reminder_days_before_deadline": 15}, {"reminder_days_before_deadline": 1.5},
+    {"theme": "invalid"}, {"reminder_days_before_deadline": 3}, {"notify_deadline_reminder": True},
     {"theme": None}, {"user_id": 7}, {"notify_new_assignment": "false"},
 ])
 def test_invalid_and_unknown_fields_rejected(account, changes):
@@ -104,11 +102,4 @@ def test_should_notify_defaults_opt_out_and_permissions(account):
     assert preferences_service.should_notify(user.id, "campaign_status", db) is False
     user.is_active = False
     db.flush()
-    assert preferences_service.should_notify(user.id, "deadline_reminder", db) is False
-
-
-def test_database_enforces_range(account):
-    user, db, _client = account
-    with pytest.raises(IntegrityError), db.begin_nested():
-        db.add(models.UserPreferences(user_id=user.id, reminder_days_before_deadline=30))
-        db.flush()
+    assert preferences_service.should_notify(user.id, "new_assignment", db) is False

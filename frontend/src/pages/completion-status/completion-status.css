@@ -39,4 +39,21 @@
 .completion-pagination { align-items: center; border-top: 1px solid var(--color-border); display: flex; justify-content: space-between; padding: 12px 16px; }
 .completion-pagination span { color: var(--color-text-secondary); font-size: 12px; font-weight: 600; }
 .completion-pagination div { display: flex; gap: 8px; }
+.completion-emails { display: grid; gap: 14px; }
+.completion-emails-head { align-items: start; display: flex; gap: 16px; justify-content: space-between; }
+.completion-emails-head h2 { font-size: 16px; margin: 0 0 4px; }
+.completion-emails-head p, .completion-emails-muted { color: var(--color-text-secondary); font-size: 13px; margin: 0; }
+.completion-emails-send { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; justify-content: end; }
+.completion-emails-send span { font-size: 13px; font-weight: 600; }
+.completion-emails-message { font-size: 13px; font-weight: 600; margin: 0; }
+.completion-emails-message.success { color: var(--color-success); }
+.completion-emails-message.error { color: var(--color-danger); }
+.completion-emails-list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.completion-emails-list li { align-items: center; border: 1px solid var(--color-border); border-radius: 8px; display: flex; gap: 12px; justify-content: space-between; padding: 10px 12px; }
+.completion-emails-list strong { display: block; font-size: 13px; }
+.completion-emails-list span { color: var(--color-text-secondary); display: block; font-size: 12px; margin-top: 2px; }
+.completion-emails-add { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.completion-emails-add label { font-weight: 700; }
+.completion-emails-add input { width: 80px; }
+.completion-emails-add span { color: var(--color-text-secondary); }
 @media (max-width: 1100px) { .completion-kpis { grid-template-columns: repeat(3, 1fr); } .completion-kpi:nth-child(4) { border-left: 0; border-top: 1px solid var(--color-border); } .completion-kpi:nth-child(n + 4) { border-top: 1px solid var(--color-border); } .completion-toolbar { grid-template-columns: repeat(3, 1fr); } .completion-match-count { justify-self: start; } }

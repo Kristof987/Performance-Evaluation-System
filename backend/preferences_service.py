@@ -9,7 +9,6 @@ import schemas
 
 EVENT_FIELDS = {
     "new_assignment": "notify_new_assignment",
-    "deadline_reminder": "notify_deadline_reminder",
     "results_available": "notify_results_available",
     "campaign_status": "notify_campaign_status",
 }

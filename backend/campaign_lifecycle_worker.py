@@ -7,6 +7,7 @@ from threading import Event
 from sqlalchemy import and_, or_
 
 import campaign_lifecycle
+import campaign_reminder_service
 from database import SessionLocal
 from models import Campaign, CampaignOperationAudit, CampaignStatus
 
@@ -78,6 +79,10 @@ def serve(stop: Event, validate_configuration, issue_snapshots):
             run_due_transitions(validate_configuration, issue_snapshots)
         except Exception as error:
             logger.error("Campaign lifecycle worker iteration failed (%s)", type(error).__name__)
+        try:
+            campaign_reminder_service.run_due()
+        except Exception as error:
+            logger.error("Campaign email iteration failed (%s)", type(error).__name__)
         stop.wait(POLL_SECONDS)
 
 

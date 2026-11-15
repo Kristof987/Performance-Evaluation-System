@@ -1,0 +1,51 @@
+import { authenticatedApiFetch, type AccessTokenGetter } from '../../auth/authenticated-api';
+
+export type CampaignReminder = {
+  id: number;
+  days_before_end: number;
+  scheduled_for: string | null;
+  sent_count: number;
+  last_sent_at: string | null;
+};
+
+export type CampaignEmailOverview = {
+  email_configured: boolean;
+  launch_email_enabled: boolean;
+  launch_sent_count: number;
+  failed_count: number;
+  manual_last_sent_at: string | null;
+  open_recipients: number;
+  reminders: CampaignReminder[];
+  now: string;
+};
+
+export type ManualReminderResult = { sent: number; failed: number; skipped_recently_reminded: number };
+
+async function request<T>(getAccessToken: AccessTokenGetter, path: string, init: RequestInit = {}): Promise<T> {
+  const response = await authenticatedApiFetch(getAccessToken, path, init);
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null;
+    throw new Error(typeof detail === 'string' ? detail : 'Campaign emails could not be updated.');
+  }
+  return (await response.json()) as T;
+}
+
+function json(method: string, body: unknown): RequestInit {
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+}
+
+export const fetchCampaignEmails = (getAccessToken: AccessTokenGetter, campaignId: number, signal?: AbortSignal) =>
+  request<CampaignEmailOverview>(getAccessToken, `/campaigns/${campaignId}/emails`, { signal });
+
+export const addCampaignReminder = (getAccessToken: AccessTokenGetter, campaignId: number, daysBeforeEnd: number) =>
+  request<CampaignEmailOverview>(getAccessToken, `/campaigns/${campaignId}/emails/reminders`, json('POST', { days_before_end: daysBeforeEnd }));
+
+export const deleteCampaignReminder = (getAccessToken: AccessTokenGetter, campaignId: number, reminderId: number) =>
+  request<CampaignEmailOverview>(getAccessToken, `/campaigns/${campaignId}/emails/reminders/${reminderId}`, { method: 'DELETE' });
+
+export const setLaunchEmail = (getAccessToken: AccessTokenGetter, campaignId: number, enabled: boolean) =>
+  request<CampaignEmailOverview>(getAccessToken, `/campaigns/${campaignId}/emails/launch`, json('PUT', { enabled }));
+
+export const sendReminderNow = (getAccessToken: AccessTokenGetter, campaignId: number) =>
+  request<ManualReminderResult>(getAccessToken, `/campaigns/${campaignId}/emails/send`, json('POST', {}));

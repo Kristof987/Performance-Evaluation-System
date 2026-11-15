@@ -6,6 +6,7 @@ import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import { formatShortDate } from '../hr-home/utils/hrHome.utils';
 import { fetchCompletionStatus, type CompletionStatusResponse } from './completionStatus.api';
+import CampaignEmails from './CampaignEmails';
 import './completion-status.css';
 
 const PAGE_SIZE = 25;
@@ -93,6 +94,8 @@ export default function CompletionStatus() {
           <div className="completion-kpi"><span>Completed</span><strong>{summary.completed}</strong></div>
           <div className="completion-kpi"><span>Overdue</span><strong className={summary.overdue > 0 ? 'danger' : ''}>{summary.overdue}</strong></div>
         </section>
+
+        <CampaignEmails campaignId={campaignId} isActive={data.campaign.is_active} hasEndDate={data.campaign.end_date !== null} />
 
         {data.duplicate_assignment_count > 0 && <div className="card card-padded completion-warning" role="status">{data.duplicate_assignment_count} duplicate assignment group detected. Rows are kept separate by FilledForm id.</div>}
 

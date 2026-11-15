@@ -60,17 +60,14 @@ export type Preferences = {
   language: 'en' | 'hu';
   date_format: 'locale' | 'iso';
   notify_new_assignment: boolean;
-  notify_deadline_reminder: boolean;
   notify_results_available: boolean;
   notify_campaign_status: boolean;
-  reminder_days_before_deadline: number;
 };
 
 export const defaultPreferences: Preferences = {
   theme: 'system', language: 'en', date_format: 'locale',
-  notify_new_assignment: true, notify_deadline_reminder: true,
+  notify_new_assignment: true,
   notify_results_available: true, notify_campaign_status: true,
-  reminder_days_before_deadline: 3,
 };
 
 export function fetchPreferences(getAccessToken: AccessTokenGetter, signal: AbortSignal) {

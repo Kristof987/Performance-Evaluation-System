@@ -1,0 +1,12 @@
+Subject: Reminder: ${open_count} ${evaluation_word} left in ${campaign_name}
+
+Hi ${first_name},
+
+This is a reminder that you still have ${open_count} ${evaluation_word} to complete in the ${campaign_name} campaign.
+
+Deadline: ${deadline} (${time_left})
+
+Open your evaluations: ${link}
+
+Thank you,
+${sender_name}

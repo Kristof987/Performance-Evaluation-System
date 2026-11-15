@@ -40,9 +40,16 @@ services:
       OPENAI_ANALYSIS_MODEL: ${OPENAI_ANALYSIS_MODEL}
       COMPASS_RUNTIME_ENV: local
       COMPASS_AI_DIAGNOSTICS: "1"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_STARTTLS: "false"
+      SMTP_FROM: compass@localhost
+      SMTP_FROM_NAME: Compass
+      FRONTEND_URL: http://localhost:5173
 
     depends_on:
       - db
+      - mailpit
 
   lifecycle-worker:
     build:
@@ -55,8 +62,22 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       APP_TIMEZONE: Europe/Budapest
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_STARTTLS: "false"
+      SMTP_FROM: compass@localhost
+      SMTP_FROM_NAME: Compass
+      FRONTEND_URL: http://localhost:5173
     depends_on:
       - db
+      - mailpit
+
+  # Catches every email locally; open http://localhost:8025 to read them. Nothing leaves your machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: performance-evaluation-mailpit
+    ports:
+      - "8025:8025"
 
   frontend:
     build:

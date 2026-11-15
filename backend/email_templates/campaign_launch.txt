@@ -1,0 +1,12 @@
+Subject: ${campaign_name}: your evaluations are open
+
+Hi ${first_name},
+
+The ${campaign_name} campaign has started. You have ${open_count} ${evaluation_word} to complete.
+
+Deadline: ${deadline}
+
+Open your evaluations: ${link}
+
+Thank you,
+${sender_name}

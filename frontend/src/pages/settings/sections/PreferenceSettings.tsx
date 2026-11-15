@@ -85,14 +85,7 @@ export default function PreferenceSettings({ section }: { section: 'notification
           <Toggle id="notify-new" label="New assignments" description="When an evaluation is assigned to you."
             checked={draft.notify_new_assignment} disabled={disabled}
             onChange={(value) => update('notify_new_assignment', value)} />
-          <Toggle id="notify-deadline" label="Deadline reminders" description="Reminders before the campaign deadline."
-            checked={draft.notify_deadline_reminder} disabled={disabled}
-            onChange={(value) => update('notify_deadline_reminder', value)} />
-          <label className="settings-reminder" htmlFor="reminder-days">Days before deadline
-            <input id="reminder-days" type="number" className="form-control" min={1} max={14} step={1}
-              required value={draft.reminder_days_before_deadline} disabled={disabled}
-              onChange={(event) => update('reminder_days_before_deadline', event.target.valueAsNumber)} />
-          </label>
+          <p className="settings-note">Deadline reminder emails are scheduled for each campaign by HR.</p>
           <Toggle id="notify-results" label="Results available" description="When results become available to you."
             checked={draft.notify_results_available} disabled={disabled}
             onChange={(value) => update('notify_results_available', value)} />

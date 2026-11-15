@@ -352,10 +352,8 @@ class PreferencesUpdate(BaseModel):
     language: Literal["en", "hu"] = "en"
     date_format: Literal["locale", "iso"] = "locale"
     notify_new_assignment: bool = True
-    notify_deadline_reminder: bool = True
     notify_results_available: bool = True
     notify_campaign_status: bool = True
-    reminder_days_before_deadline: int = Field(default=3, ge=1, le=14)
 
 
 class PreferencesResponse(PreferencesUpdate):
@@ -1151,3 +1149,47 @@ class FormAIGenerateResponse(BaseModel):
     description: str
     sections: list[FormAIDraftSection]
     standalone_questions: list[FormAIDraftQuestion]
+
+
+class CampaignReminderItem(BaseModel):
+    id: int
+    days_before_end: int
+    scheduled_for: datetime | None
+    sent_count: int
+    last_sent_at: datetime | None
+
+
+class CampaignEmailOverview(BaseModel):
+    email_configured: bool
+    launch_email_enabled: bool
+    launch_sent_count: int
+    failed_count: int
+    manual_last_sent_at: datetime | None
+    open_recipients: int
+    reminders: list[CampaignReminderItem]
+    now: datetime
+
+
+class CampaignReminderCreate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    days_before_end: int = Field(ge=0, le=90)
+
+
+class CampaignLaunchEmailUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    enabled: bool
+
+
+class CampaignManualReminder(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    # None reminds everyone who still has open evaluations.
+    employee_ids: list[int] | None = None
+
+
+class CampaignManualReminderResult(BaseModel):
+    sent: int
+    failed: int
+    skipped_recently_reminded: int
