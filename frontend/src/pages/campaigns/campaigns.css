@@ -818,3 +818,12 @@ body.modal-open {
   .campaign-setup-summary { padding: 14px; }
   .campaign-setup-mini-card { min-height: 0; }
 }
+
+.campaign-page .campaign-matrix-self-warning {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 13px;
+}

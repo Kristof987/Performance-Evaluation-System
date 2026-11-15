@@ -2357,15 +2357,19 @@ def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> l
             continue
         evaluator = members[row.company_group_id][row.evaluator_id]
         evaluatee = members[row.company_group_id][row.evaluatee_id]
-        expected = (self_forms.get(row.evaluator_id) if row.evaluator_id == row.evaluatee_id else
+        is_self = row.evaluator_id == row.evaluatee_id
+        expected = (self_forms.get(row.evaluator_id) if is_self else
                     rules.get((row.company_group_id, evaluator.company_role_id, evaluatee.company_role_id)))
-        if expected is None:
+        if expected is None and is_self:
+            # Self rows take their form from the Self-evaluations tab, not from role rules.
+            errors.append(f"Self-evaluation for {evaluator.full_name} needs a questionnaire selected on the Self-evaluations tab")
+        elif expected is None:
             errors.append(
-                f"Assignment {row.id} needs a saved questionnaire for "
+                f"Evaluation {evaluator.full_name} → {evaluatee.full_name} needs a saved questionnaire for "
                 f"{role_names.get(evaluator.company_role_id, evaluator.company_role_id)} → "
                 f"{role_names.get(evaluatee.company_role_id, evaluatee.company_role_id)}")
         elif expected != row.form_id and not assignment_is_immutable(row):
-            errors.append(f"Assignment {row.id} does not match its saved form selection")
+            errors.append(f"Evaluation {evaluator.full_name} → {evaluatee.full_name} does not match its saved form selection")
     return errors
 
 

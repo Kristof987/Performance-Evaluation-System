@@ -59,6 +59,13 @@ export default function EvaluationMatrix({ group, notice, groups, onGroupChange,
   const clearTrigger = useRef<HTMLButtonElement>(null);
   const clearable = matrixSelectedCount(selection, group.groupId) - matrixSelectedCount(clearMatrixPairs(group, rules, selection, selfForms), group.groupId);
   const selectedCount = matrixSelectedCount(selection, group.groupId);
+  // Self pairs use the Self-evaluations tab, so role-based questionnaire rules never cover them.
+  const selfPairsWithoutForm = group.employees.filter((person) => {
+    if (!selection[matrixKey(group.groupId, person.id, person.id)]) return false;
+    const assignment = group.assignments.find((item) => item.evaluatorId === person.id && item.evaluateeId === person.id);
+    if (assignment?.issued) return false;
+    return assignment ? assignment.formId == null : selfForms[person.id] == null;
+  }).length;
   const validForms = new Set(rules.forms.map((form) => form.id));
   const roleForms = new Map<string, number | null>(rules.groups.find((item) => item.groupId === group.groupId)?.rolePairs.map((pair): [string, number | null] => [
     `${pair.evaluatorRoleId}:${pair.evaluateeRoleId}`, pair.formId,
@@ -104,6 +111,10 @@ export default function EvaluationMatrix({ group, notice, groups, onGroupChange,
           {groups.length > 1 && <label className="campaign-matrix-group-picker">Group<select className="form-control" value={group.groupId} onChange={(event) => onGroupChange(Number(event.target.value))}>{groups.map((item) => <option key={item.groupId} value={item.groupId}>{item.groupName}</option>)}</select></label>}
         </div>
         {notice}
+        {selfPairsWithoutForm > 0 && <p className="campaign-matrix-self-warning" role="status">
+          {selfPairsWithoutForm} selected {selfPairsWithoutForm === 1 ? 'self-evaluation needs' : 'self-evaluations need'} a
+          questionnaire. Choose one on the Self-evaluations tab, or clear the diagonal pairs if no self-evaluation is needed.
+        </p>}
         <div className="campaign-matrix-inline-table-wrap">
           <table className="campaign-matrix-table">
             <thead><tr><th scope="col">Evaluator ↓ / Evaluatee →</th>{group.employees.map((employee) =>
