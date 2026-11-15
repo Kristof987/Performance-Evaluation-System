@@ -21,6 +21,7 @@ import QuestionAnalyticsPage from './pages/reports/QuestionAnalyticsPage'
 import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/reports/GroupsRolesPage'
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
 import SettingsPage from './pages/settings/SettingsPage'
+import NotFound from './pages/layout/NotFound'
 import './styles/shared.css'
 import { getAuthenticatedDashboardPath } from './pages/layout/sidebar-user'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
@@ -125,6 +126,7 @@ export default function AppRoutes() {
         <Route path="/reports/campaigns/:campaignId/employees/:employeeId" element={<ProtectedPage hrOnly><EmployeeReportDetailPage /></ProtectedPage>} />
         <Route path="/settings" element={<ProtectedPage><Navigate to="/settings/profile" replace /></ProtectedPage>} />
         <Route path="/settings/:section" element={<ProtectedPage><SettingsPage /></ProtectedPage>} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   )
