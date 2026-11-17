@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppAuth } from '../../../auth/AppAuth';
 import Avatar from '../../../components/Avatar';
+import InlineMessage from '../../../components/feedback/InlineMessage';
+import { useConfirm, useToast } from '../../../components/feedback/feedback-context';
 import { setProfilePhotoOverride } from '../profile-photo-store';
 import {
   deleteProfilePhoto, PROFILE_PHOTO_MAX_BYTES, PROFILE_PHOTO_TYPES, uploadProfilePhoto,
@@ -16,14 +18,15 @@ export default function ProfilePhoto({ name, employeeId, initialPhoto }: {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState<'upload' | 'remove' | null>(null);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
+  const confirm = useConfirm();
+  const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
 
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
   function choose(selected: File | null) {
-    setError(''); setMessage('');
+    setError('');
     if (input.current) input.current.value = '';
     if (!selected) return;
     if (!PROFILE_PHOTO_TYPES.includes(selected.type)) { setError('Choose a JPG, PNG or WebP image.'); return; }
@@ -33,15 +36,15 @@ export default function ProfilePhoto({ name, employeeId, initialPhoto }: {
 
   async function run(action: 'upload' | 'remove') {
     if (busy || employeeId === null) return;
-    if (action === 'remove' && !window.confirm('Remove your profile photo?')) return;
-    setBusy(action); setError(''); setMessage('');
+    if (action === 'remove' && !(await confirm({ title: 'Remove your profile photo?', message: 'Your initials will be shown instead. You can upload a new photo any time.', confirmLabel: 'Remove photo', tone: 'danger' }))) return;
+    setBusy(action); setError('');
     try {
       const result = action === 'upload' && file
         ? await uploadProfilePhoto(getAccessToken, file) : await deleteProfilePhoto(getAccessToken);
       setPhoto(result.profile_image_url);
       setProfilePhotoOverride(employeeId, result.profile_image_url);
       setFile(null);
-      setMessage(action === 'upload' ? 'Profile photo updated.' : 'Profile photo removed.');
+      toast.success(action === 'upload' ? 'Profile photo updated' : 'Profile photo removed');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The photo could not be saved.');
     } finally {
@@ -69,8 +72,7 @@ export default function ProfilePhoto({ name, employeeId, initialPhoto }: {
             {busy === 'remove' ? 'Removing...' : 'Remove'}</button>}
         </>}
       </div>}
-      {error && <p className="settings-error" role="alert">{error}</p>}
-      {message && <p className="settings-success" role="status">{message}</p>}
+      {error && <InlineMessage tone="error" onDismiss={() => setError('')}>{error}</InlineMessage>}
     </div>
   </div>;
 }

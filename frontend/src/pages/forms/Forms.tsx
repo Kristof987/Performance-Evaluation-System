@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, FilePlus2, FileText, GripVertical
 import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import AppLayout from '../layout/AppLayout';
+import { useConfirm } from '../../components/feedback/feedback-context';
 import '../hr-home/hr-home.css';
 import './forms.css';
 import './questionnaire-choices.css';
@@ -36,6 +37,7 @@ function isScale(question: FormQuestion) { return ['Scale', 'Scale 1-5', 'Scale 
 
 export default function Forms() {
   const { state, retryAuth0, getAccessToken: getAccessTokenSilently } = useAppAuth();
+  const confirm = useConfirm();
   const permissions = state.status === 'authenticated' ? state.user.permissions : [];
   const canManageForms = permissions.includes('forms.manage');
   const canManageSections = permissions.includes('sections.manage');
@@ -288,8 +290,8 @@ export default function Forms() {
     setSelected({ type: 'question', id: question.id });
   }
   function appendSection(id: number) { setDraft((state) => state && (state.questions.some((block) => block.type === 'section' && block.section_id === id) ? state : { ...state, questions: [...state.questions, { type: 'section', section_id: id, questions: [] }] })); setSelected({ type: 'section', id }); }
-  function removeSection(id: number) {
-    if (!window.confirm('Remove this section from the form? Its questions will become standalone.')) return;
+  async function removeSection(id: number) {
+    if (!(await confirm({ title: 'Remove this section from the form?', message: 'Its questions stay in the form as standalone questions. The section itself isn’t deleted.', confirmLabel: 'Remove section' }))) return;
     setDraft((state) => {
       if (!state) return null;
       const blocks: FormBlock[] = [];

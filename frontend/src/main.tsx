@@ -28,6 +28,7 @@ import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './
 import { Auth0PermissionDenied } from './pages/layout/Auth0Transition'
 import PreferencesProvider from './pages/settings/PreferencesProvider'
 import { applyTheme, cachedTheme } from './pages/settings/theme'
+import FeedbackProvider from './components/feedback/FeedbackProvider'
 
 function EvaluationQualityRedirect() {
   const { campaignId } = useParams()
@@ -135,8 +136,8 @@ createRoot(document.getElementById('root')!).render(
         authorizationParams={{ redirect_uri: window.location.origin, audience: AUTH0_AUDIENCE }}
         cacheLocation="memory"
       >
-        <Auth0AppAuthProvider><PreferencesProvider><AppRoutes /></PreferencesProvider></Auth0AppAuthProvider>
+        <Auth0AppAuthProvider><PreferencesProvider><FeedbackProvider><AppRoutes /></FeedbackProvider></PreferencesProvider></Auth0AppAuthProvider>
       </Auth0Provider>
-    ) : <DevelopmentAppAuthProvider><PreferencesProvider><AppRoutes /></PreferencesProvider></DevelopmentAppAuthProvider>}
+    ) : <DevelopmentAppAuthProvider><PreferencesProvider><FeedbackProvider><AppRoutes /></FeedbackProvider></PreferencesProvider></DevelopmentAppAuthProvider>}
   </StrictMode>,
 )

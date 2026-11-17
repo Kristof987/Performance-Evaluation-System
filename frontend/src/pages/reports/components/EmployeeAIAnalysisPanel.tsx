@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AccessTokenGetter } from '../../../auth/authenticated-api';
 import { approveAIAnalysis, fetchAIAnalyses, fetchGenerationJob, fetchLatestGenerationJob, generateAIAnalysis, generationErrorMessage, saveAIAnalysis } from '../api/ai-analysis.api';
 import type { AIAnalysis, AIAnalysisGenerationJob, AIAnalysisHistory, AIAnalysisScope, AnalysisEvidence, AnalysisFinding, AnalysisVersion } from '../types/ai-analysis.types';
+import { useConfirm } from '../../../components/feedback/feedback-context';
 
 type Props = { scope: AIAnalysisScope; getAccessToken: AccessTokenGetter };
 
@@ -124,6 +125,7 @@ export default function EmployeeAIAnalysisPanel({ scope, getAccessToken }: Props
 }
 
 function AIAnalysisPanel({ scope, getAccessToken }: Props) {
+  const confirm = useConfirm();
   const [history, setHistory] = useState<AIAnalysisHistory | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editing, setEditing] = useState<AIAnalysis | null>(null);
@@ -322,8 +324,8 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
         {history.versions.length > 0 && <label>Analysis version<select className="form-control" value={selected?.id ?? ''} onChange={(event) => { setEditing(null); setSelectedId(Number(event.target.value)); setNotice(''); }}>
           {history.versions.map((version) => <option key={version.id} value={version.id}>Version {version.version} · {version.status === 'draft' ? 'Draft' : 'Approved'}{version.is_current_approved ? ' · Current approved' : ''}{version.outdated ? ' · Outdated' : ''}</option>)}
         </select></label>}
-         {canGenerate && <button type="button" className="btn btn-primary" disabled={busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={() => {
-           if (history.versions.length > 0 && !window.confirm('Regenerate? This may incur API cost. A new Draft will be created; earlier versions remain available.')) return;
+         {canGenerate && <button type="button" className="btn btn-primary" disabled={busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={async () => {
+           if (history.versions.length > 0 && !(await confirm({ title: 'Regenerate the analysis?', message: 'This sends a new request to the AI provider and may incur API cost. A new draft is created; earlier versions stay available.', confirmLabel: 'Regenerate' }))) return;
            void startGeneration();
          }}>{busy === 'generate' ? 'Starting generation...' : jobActive ? 'Generation in progress...' : job?.status === 'failed' ? 'Retry generation' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
       </div>
@@ -344,7 +346,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
         </div>
         {(canEdit || canApprove) && <div className="reports-ai-actions">
            {editing ? <><button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (editing) void perform('save', () => saveAIAnalysis(getAccessToken, scope, selected.id, editing)); }}>{busy === 'save' ? 'Saving...' : 'Save as new Draft'}</button><button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={() => setEditing(null)}>Cancel editing</button></>
-             : selected.status === 'draft' && mayWrite && <>{canEdit && <button type="button" className="btn btn-secondary" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}>Edit Draft</button>}{canApprove && <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (window.confirm('Approve this specific analysis version? Approved content becomes read-only and replaces the current approved designation.')) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? 'Approving...' : 'Approve Analysis'}</button>}</>}
+             : selected.status === 'draft' && mayWrite && <>{canEdit && <button type="button" className="btn btn-secondary" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}>Edit Draft</button>}{canApprove && <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={async () => { if (await confirm({ title: `Approve version ${selected.version}?`, message: 'Approved content becomes read-only and replaces the currently approved version.', confirmLabel: 'Approve analysis' })) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? 'Approving...' : 'Approve Analysis'}</button>}</>}
         </div>}
       </>}
     </>}

@@ -48,6 +48,17 @@
   background: var(--color-surface-subtle);
 }
 
+.btn-danger {
+  background: var(--color-danger-solid);
+  border-color: var(--color-danger-solid);
+  color: var(--color-on-danger);
+}
+
+.btn-danger:hover {
+  background: var(--color-danger-solid-hover);
+  border-color: var(--color-danger-solid-hover);
+}
+
 .btn-ghost {
   background: transparent;
   color: var(--color-primary);
