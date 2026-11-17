@@ -27,6 +27,7 @@
 .settings-group-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .settings-group-chip { background: var(--color-surface-muted); border-radius: var(--radius-pill); color: var(--color-text-secondary); font-size: 12px; font-weight: 700; padding: 7px 10px; }
 .settings-note { color: var(--color-text-secondary); font-size: 13px; line-height: 1.5; margin: 0; }
+.settings-model-alias { color: var(--color-warning); margin-top: 6px; }
 .settings-security-section { display: grid; gap: 10px; }
 .settings-security-section h3 { font-size: 15px; margin: 0; }
 .settings-security-section p { color: var(--color-text-secondary); line-height: 1.55; margin: 0; max-width: 760px; }

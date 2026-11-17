@@ -31,3 +31,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Database dumps can contain personal data; never commit them
+*.dump
+*.sql.gz

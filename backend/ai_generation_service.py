@@ -358,6 +358,21 @@ def model_override(model: str | None):
         _model_override.reset(token)
 
 
+# Reasoning models (o-series, GPT-5 family) reject sampling parameters such as temperature.
+_REASONING_MODEL = re.compile(r"^(?:o\d|gpt-5)", re.I)
+_DATED_MODEL = re.compile(r"-\d{4}-\d{2}-\d{2}$")
+
+
+def sampling_options(model: str, temperature: float) -> dict[str, float]:
+    """A low temperature keeps repeated runs on the same facts close, where the model supports it."""
+    return {} if _REASONING_MODEL.match(model.strip()) else {"temperature": temperature}
+
+
+def is_pinned_model(model: str) -> bool:
+    """Dated snapshots never change; aliases such as 'gpt-4.1' may move to a newer model."""
+    return bool(_DATED_MODEL.search(model.strip()))
+
+
 def _configuration(model: str | None = None) -> tuple[str, str, float, int]:
     key = os.getenv("OPENAI_API_KEY", "").strip()
     model = (model or _model_override.get() or os.getenv("OPENAI_ANALYSIS_MODEL", "")).strip()
@@ -811,12 +826,14 @@ def _request_analysis(payload: dict[str, Any], *, correction_category: str | Non
             + consistency_guidance
         )})
     try:
-        client = OpenAI(api_key=key, timeout=timeout, max_retries=0)
+        # Runs in the background worker, so transient timeouts and rate limits can be retried with backoff.
+        client = OpenAI(api_key=key, timeout=timeout, max_retries=2)
         response = client.responses.parse(
             model=model,
             input=[*messages, {"role": "user", "content": serialized}],
             text_format=GeneratedAnalysis,
             max_output_tokens=max_tokens,
+            **sampling_options(model, 0.2),
             store=False,  # Evaluation data must not be kept as application state at the provider.
         )
         parsed = response.output_parsed

@@ -88,6 +88,9 @@ export default function AISettings() {
         ? 'Use only letters, numbers, dots, dashes, underscores and colons.'
         : effectiveModel ? `New analyses will use ${effectiveModel}. Leave empty to use the server default.`
           : 'No model is configured on the server; enter one here.'}</p>
+      {modelValid && effectiveModel && !/-\d{4}-\d{2}-\d{2}$/.test(effectiveModel) && <p className="settings-note settings-model-alias" role="status">
+        “{effectiveModel}” is an alias that OpenAI may point to a newer model later, which can change results without notice.
+        For stable results use a dated snapshot, for example <code>gpt-4.1-2025-04-14</code>.</p>}
 
       <div className="settings-preference-group"><h3>Who can use AI analysis</h3>
         <div className="settings-table-wrap"><table className="settings-table">

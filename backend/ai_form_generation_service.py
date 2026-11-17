@@ -112,7 +112,8 @@ def generate(request: schemas.FormAIGenerateRequest, db: Session,
               "question_count": {"minimum": minimum, "maximum": maximum},
               "available_sections": [item.name for item in sections][:100]}
     try:
-        client = OpenAI(api_key=key, timeout=timeout, max_retries=0)
+        # The user waits for the draft, so only one automatic retry of transient failures.
+        client = OpenAI(api_key=key, timeout=timeout, max_retries=1)
     except Exception:
         raise HTTPException(status_code=503, detail="AI generation is unavailable; please retry") from None
     feedback: str | None = None
@@ -124,6 +125,7 @@ def generate(request: schemas.FormAIGenerateRequest, db: Session,
         messages.append({"role": "user", "content": json.dumps(prompt, ensure_ascii=False)})
         try:
             result = client.responses.parse(model=model, input=messages, store=False,
+                                            **ai_generation_service.sampling_options(model, 0.4),
                                             text_format=_Generated, max_output_tokens=configured_tokens)
             generated = _Generated.model_validate(result.output_parsed)
         except APITimeoutError:
