@@ -65,6 +65,8 @@ export type AnalysisVersion = {
   analysis: AIAnalysis;
   evidence: Record<string, AnalysisEvidence>;
   model_identifier: string;
+  prompt_version?: string | null;
+  token_usage?: { input_tokens: number; output_tokens: number; attempts: number } | null;
   generated_at: string;
   generated_by_user_id: number;
   edited_at: string | null;

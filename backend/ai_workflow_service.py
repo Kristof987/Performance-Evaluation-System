@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+import ai_trace
 import models
 import reporting_service
 import workspace_settings_service
@@ -30,6 +31,16 @@ def has_permission(actor: models.User, db: Session, permission: str) -> bool:
         models.User.id == actor.id, models.User.is_active.is_(True),
         models.SystemPermission.name == permission,
     ).first() is not None
+
+
+def _audit_employee(db: Session, actor: models.User, record: models.EmployeeAIAnalysis, action: str) -> None:
+    employee = db.get(models.Employee, record.evaluatee_employee_id)
+    campaign = db.get(models.Campaign, record.campaign_id)
+    ai_trace.audit(db, actor, f"AI analysis v{record.version} {action}: {employee.full_name if employee else 'employee'}"
+                              f" ({campaign.name if campaign else 'campaign'})",
+                   {"scope": "employee", "campaign_id": record.campaign_id, "employee_id": record.evaluatee_employee_id,
+                    "version": record.version, "model": record.model_identifier, "prompt_version": record.prompt_version,
+                    "token_usage": record.token_usage if action == "generated" else None})
 
 
 def can_see_drafts(actor: models.User, db: Session) -> bool:
@@ -161,6 +172,7 @@ def _serialize(item: models.EmployeeAIAnalysis, fingerprint: str) -> dict:
             "version": item.version, "parent_analysis_id": item.parent_analysis_id, "status": item.status,
             "is_current_approved": item.is_current_approved, "outdated": item.source_fingerprint != fingerprint,
             "analysis": item.analysis, "evidence": item.evidence_summary, "model_identifier": item.model_identifier,
+            "prompt_version": item.prompt_version, "token_usage": item.token_usage,
             "generated_at": item.generated_at, "generated_by_user_id": item.generated_by_user_id,
             "edited_at": item.edited_at, "edited_by_user_id": item.edited_by_user_id,
             "approved_at": item.approved_at, "approved_by_user_id": item.approved_by_user_id,
@@ -232,7 +244,7 @@ def generate(db: Session, campaign_id: int, employee_id: int, *, actor: models.U
                 raise HTTPException(status_code=409, detail="Please wait before regenerating this analysis")
             fingerprint = _fingerprint(db, campaign_id, employee_id)
             db.rollback()
-            analysis, model = generate_employee_ai_analysis_from_context(context, job_id=job_id)
+            analysis, trace = generate_employee_ai_analysis_from_context(context, job_id=job_id)
             _lock_campaign(db, campaign_id)
             fresh = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
             _writable(fresh, db, actor)
@@ -242,9 +254,10 @@ def generate(db: Session, campaign_id: int, employee_id: int, *, actor: models.U
             record = models.EmployeeAIAnalysis(
                 campaign_id=campaign_id, evaluatee_employee_id=employee_id, version=_version(db, campaign_id, employee_id),
                 status="draft", is_current_approved=False, analysis=analysis.model_dump(mode="json"),
-                evidence_summary=_evidence_summary(context, analysis), model_identifier=model,
+                evidence_summary=_evidence_summary(context, analysis), **ai_trace.trace_fields(db, trace),
                 generated_at=now, generated_by_user_id=actor.id, source_fingerprint=fingerprint, schema_version=1,
             )
+            _audit_employee(db, actor, record, "generated")
             _commit_generation_result(db, record, job_id, worker_token)
             db.refresh(record)
             return _serialize(record, fingerprint)
@@ -282,10 +295,13 @@ def edit(db: Session, campaign_id: int, employee_id: int, analysis_id: int,
         parent_analysis_id=record.id, status="draft", is_current_approved=False,
         analysis=_analysis_json(validated, legacy=legacy), evidence_summary=_evidence_summary(context, validated),
         model_identifier=record.model_identifier, generated_at=record.generated_at,
+        prompt_version=record.prompt_version, generation_parameters=record.generation_parameters,
         generated_by_user_id=record.generated_by_user_id, edited_at=now, edited_by_user_id=actor.id,
         source_fingerprint=fingerprint, schema_version=1,
     )
     db.add(new_record)
+    db.flush()
+    _audit_employee(db, actor, new_record, "edited")
     db.commit()
     db.refresh(new_record)
     return _serialize(new_record, fingerprint)
@@ -326,6 +342,7 @@ def approve(db: Session, campaign_id: int, employee_id: int, analysis_id: int, *
     record.is_current_approved = True
     record.approved_at = datetime.now(timezone.utc)
     record.approved_by_user_id = actor.id
+    _audit_employee(db, actor, record, "approved")
     db.commit()
     db.refresh(record)
     return _serialize(record, fingerprint)

@@ -602,6 +602,16 @@ def delete_system_role(role_id: int, db: Session = Depends(get_db),
     return workspace_settings_service.delete_system_role(actor, role_id, db)
 
 
+@app.get("/workspace/ai-prompts/{version}")
+def get_ai_prompt_version(version: str, db: Session = Depends(get_db),
+                          _auditor: models.User = Depends(require_permission("audit.read"))):
+    """The exact prompt text behind a prompt version shown on AI analyses and in the audit log."""
+    prompt = db.get(models.AIPromptVersion, version)
+    if prompt is None:
+        raise HTTPException(status_code=404, detail="Prompt version not found")
+    return {"version": prompt.version, "name": prompt.name, "content": prompt.content, "created_at": prompt.created_at}
+
+
 @app.get("/workspace/audit", response_model=schemas.AuditLogResponse)
 def get_audit_log(
     category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts", "notifications"] | None = Query(default=None),
@@ -3985,7 +3995,7 @@ def get_forms(db: Session = Depends(get_db),
 
 @app.post("/forms/ai/generate", response_model=schemas.FormAIGenerateResponse)
 def generate_form_draft(request: schemas.FormAIGenerateRequest, db: Session = Depends(get_db),
-                        _manager: models.User = Depends(require_permission("forms.manage"))):
+                        manager: models.User = Depends(require_permission("forms.manage"))):
     workspace_settings_service.require_ai_enabled(db)
 
     def validation_errors(draft: dict) -> list[str]:
@@ -4009,7 +4019,7 @@ def generate_form_draft(request: schemas.FormAIGenerateRequest, db: Session = De
                 feedback.append("Every question must meet the form issuance rules")
         return list(dict.fromkeys(feedback))
 
-    return ai_form_generation_service.generate(request, db, validate_draft=validation_errors)
+    return ai_form_generation_service.generate(request, db, validate_draft=validation_errors, actor=manager)
 
 
 @app.get("/form-templates", response_model=list[schemas.FormTemplateResponse])

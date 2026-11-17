@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Table,
+    Text,
     UniqueConstraint,
     Index,
     text,
@@ -302,6 +303,9 @@ class EmployeeAIAnalysis(Base):
     approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     source_fingerprint = Column(String(64), nullable=False)
     schema_version = Column(Integer, nullable=False, default=1)
+    prompt_version = Column(String(120), nullable=True)
+    generation_parameters = Column(JSONB, nullable=True)
+    token_usage = Column(JSONB, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("generation_job_id", name="uq_employee_ai_generation_job"),
@@ -340,6 +344,9 @@ class AggregateAIAnalysis(Base):
     approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     source_fingerprint = Column(String(64), nullable=False)
     schema_version = Column(Integer, nullable=False, default=1)
+    prompt_version = Column(String(120), nullable=True)
+    generation_parameters = Column(JSONB, nullable=True)
+    token_usage = Column(JSONB, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("generation_job_id", name="uq_aggregate_ai_generation_job"),
@@ -361,6 +368,16 @@ class AggregateAIAnalysis(Base):
                         "(status = 'approved' AND approved_at IS NOT NULL AND approved_by_user_id IS NOT NULL)",
                         name="ck_aggregate_ai_approval_fields"),
     )
+
+
+class AIPromptVersion(Base):
+    """The exact prompt text behind a prompt version hash."""
+    __tablename__ = "ai_prompt_versions"
+
+    version = Column(String(120), primary_key=True)
+    name = Column(String(60), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class AIAnalysisGenerationJob(Base):

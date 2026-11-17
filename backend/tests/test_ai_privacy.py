@@ -60,3 +60,59 @@ def test_drafts_are_only_visible_to_people_who_generate_or_approve(monkeypatch):
     granted.clear()
     granted.add(ai_workflow_service.GENERATE)
     assert ai_workflow_service.visible_versions([draft, approved], object(), None) == [draft, approved]
+
+
+# --- Traceability ---------------------------------------------------------------------------
+
+import ai_trace
+import models
+from database import SessionLocal
+
+
+def test_prompt_version_changes_with_the_text_by_itself():
+    first = ai_trace.prompt_version("employee-analysis", "Analyse the facts.")
+    assert first == ai_trace.prompt_version("employee-analysis", "Analyse the facts.")
+    assert first.startswith("employee-analysis@") and len(first.split("@")[1]) == 12
+    assert first != ai_trace.prompt_version("employee-analysis", "Analyse the facts!")
+
+
+def test_request_records_model_prompt_parameters_and_tokens(monkeypatch):
+    class FakeResponses:
+        def parse(self, **_kwargs):
+            return SimpleNamespace(output_parsed=None, usage=SimpleNamespace(input_tokens=1200, output_tokens=300))
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_ANALYSIS_MODEL", "gpt-4.1-2025-04-14")
+    monkeypatch.setattr(ai_generation_service, "OpenAI", FakeClient)
+    trace = ai_trace.GenerationTrace(model="", prompt_name="employee-analysis", prompt_text="")
+    for _attempt in range(2):  # a first try and a correction both count
+        with pytest.raises(ai_generation_service.AnalysisGenerationError):
+            ai_generation_service._request_analysis({"scope": "employee", "facts": []}, instructions="Rules.", trace=trace)
+    assert trace.model == "gpt-4.1-2025-04-14"
+    assert trace.prompt_text == "Rules."
+    assert trace.parameters == {"max_output_tokens": 2048, "retries": 2, "temperature": 0.2}
+    assert trace.usage == {"input_tokens": 2400, "output_tokens": 600, "attempts": 2}
+
+
+def test_prompt_text_is_stored_once_and_audit_keeps_metadata_only():
+    db = SessionLocal()
+    try:
+        trace = ai_trace.GenerationTrace(model="gpt-4.1-2025-04-14", prompt_name="test-prompt",
+                                         prompt_text=f"Prompt {id(db)}", parameters={"temperature": 0.2})
+        first = ai_trace.trace_fields(db, trace)
+        again = ai_trace.trace_fields(db, trace)
+        assert first["prompt_version"] == again["prompt_version"] == trace.prompt_version
+        stored = db.query(models.AIPromptVersion).filter_by(version=trace.prompt_version).all()
+        assert len(stored) == 1 and stored[0].content == trace.prompt_text
+        actor = db.query(models.User).first()
+        ai_trace.audit(db, actor, "AI analysis v1 generated: test", {"prompt_version": trace.prompt_version})
+        db.flush()
+        event = db.query(models.SettingsAuditEvent).order_by(models.SettingsAuditEvent.id.desc()).first()
+        assert event.category == "ai" and event.details["prompt_version"] == trace.prompt_version
+    finally:
+        db.rollback()
+        db.close()

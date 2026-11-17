@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Valida
 from sqlalchemy.orm import Session
 
 import ai_generation_service
+import ai_trace
 import models
 import schemas
 
@@ -94,8 +95,13 @@ def _question(item: _Question) -> dict:
     return question
 
 
+FORM_TEMPERATURE = 0.4
+FORM_RETRIES = 1
+
+
 def generate(request: schemas.FormAIGenerateRequest, db: Session,
-             validate_draft: Callable[[dict], list[str]] | None = None) -> dict:
+             validate_draft: Callable[[dict], list[str]] | None = None,
+             actor: models.User | None = None) -> dict:
     description = request.description.strip()
     if not description:
         raise HTTPException(status_code=422, detail="Describe the questionnaire before generating")
@@ -113,10 +119,13 @@ def generate(request: schemas.FormAIGenerateRequest, db: Session,
               "available_sections": [item.name for item in sections][:100]}
     try:
         # The user waits for the draft, so only one automatic retry of transient failures.
-        client = OpenAI(api_key=key, timeout=timeout, max_retries=1)
+        client = OpenAI(api_key=key, timeout=timeout, max_retries=FORM_RETRIES)
     except Exception:
         raise HTTPException(status_code=503, detail="AI generation is unavailable; please retry") from None
     feedback: str | None = None
+    trace = ai_trace.GenerationTrace(model=model, prompt_name="form-generation", prompt_text="",
+                                     parameters={"max_output_tokens": configured_tokens, "retries": FORM_RETRIES,
+                                                 **ai_generation_service.sampling_options(model, FORM_TEMPERATURE)})
     for _attempt in range(3):
         messages = [{"role": "developer", "content": _INSTRUCTIONS}]
         if feedback:
@@ -125,8 +134,10 @@ def generate(request: schemas.FormAIGenerateRequest, db: Session,
         messages.append({"role": "user", "content": json.dumps(prompt, ensure_ascii=False)})
         try:
             result = client.responses.parse(model=model, input=messages, store=False,
-                                            **ai_generation_service.sampling_options(model, 0.4),
+                                            **ai_generation_service.sampling_options(model, FORM_TEMPERATURE),
                                             text_format=_Generated, max_output_tokens=configured_tokens)
+            trace.prompt_text = "\n\n".join(message["content"] for message in messages if message["role"] == "developer")
+            trace.add_usage(result)
             generated = _Generated.model_validate(result.output_parsed)
         except APITimeoutError:
             raise HTTPException(status_code=504, detail="AI generation timed out; please retry") from None
@@ -150,6 +161,15 @@ def generate(request: schemas.FormAIGenerateRequest, db: Session,
                 errors = validate_draft(draft)
                 if errors:
                     raise _DraftValidationError("Form validation: " + "; ".join(errors[:3]))
+            if actor is not None:
+                # Only metadata is logged: the HR description and the draft stay out of the audit log.
+                version = ai_trace.register_prompt(db, trace)
+                ai_trace.audit(db, actor, f"AI questionnaire draft generated: {draft.get('name') or 'Untitled'}",
+                               {"scope": "form", "model": trace.model, "prompt_version": version,
+                                "parameters": trace.parameters, "token_usage": trace.usage,
+                                "question_count": sum(len(section.get("questions", [])) for section in draft.get("sections", []))
+                                + len(draft.get("standalone_questions", []))})
+                db.commit()
             return draft
         except _DraftValidationError as error:
             feedback = str(error)

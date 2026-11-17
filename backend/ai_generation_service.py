@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 import models
 import ai_local_diagnostics
+import ai_trace
 from ai_analysis_models import AggregateAnalysisContext, AnalysisFinding, EmployeeAIAnalysis, EmployeeAnalysisContext, GeneratedAnalysis, QuantitativeStatistics
 from ai_analysis_service import build_employee_analysis_context
 
@@ -802,8 +803,13 @@ def _resolve_generated_analysis(analysis: GeneratedAnalysis, registry: dict[str,
     return verify(canonical)
 
 
+ANALYSIS_TEMPERATURE = 0.2
+ANALYSIS_RETRIES = 2
+
+
 def _request_analysis(payload: dict[str, Any], *, correction_category: str | None = None,
-                      instructions: str = _INSTRUCTIONS) -> tuple[GeneratedAnalysis, str]:
+                      instructions: str = _INSTRUCTIONS,
+                      trace: ai_trace.GenerationTrace | None = None) -> tuple[GeneratedAnalysis, str]:
     key, model, timeout, max_tokens = _configuration()
     serialized = json.dumps(payload, ensure_ascii=False)
     if len(serialized.encode("utf-8")) > 100_000:
@@ -827,15 +833,21 @@ def _request_analysis(payload: dict[str, Any], *, correction_category: str | Non
         )})
     try:
         # Runs in the background worker, so transient timeouts and rate limits can be retried with backoff.
-        client = OpenAI(api_key=key, timeout=timeout, max_retries=2)
+        client = OpenAI(api_key=key, timeout=timeout, max_retries=ANALYSIS_RETRIES)
         response = client.responses.parse(
             model=model,
             input=[*messages, {"role": "user", "content": serialized}],
             text_format=GeneratedAnalysis,
             max_output_tokens=max_tokens,
-            **sampling_options(model, 0.2),
+            **sampling_options(model, ANALYSIS_TEMPERATURE),
             store=False,  # Evaluation data must not be kept as application state at the provider.
         )
+        if trace is not None:
+            trace.model = model
+            trace.prompt_text = "\n\n".join(message["content"] for message in messages)
+            trace.parameters = {"max_output_tokens": max_tokens, "retries": ANALYSIS_RETRIES,
+                                **sampling_options(model, ANALYSIS_TEMPERATURE)}
+            trace.add_usage(response)
         parsed = response.output_parsed
     except APITimeoutError:
         raise AnalysisGenerationError("analysis_timeout") from None
@@ -956,13 +968,16 @@ def _generate_with_facts(registry: dict[str, _AuthorizedFact], scope: str,
                          verify: Callable[[EmployeeAIAnalysis], EmployeeAIAnalysis], *,
                          categories: dict[str, str], statistics: dict[str, _Statistic],
                          job_id: int | None = None, performance_ids: set[str] | None = None,
-                         instructions: str = _INSTRUCTIONS) -> tuple[EmployeeAIAnalysis, str]:
+                         instructions: str = _INSTRUCTIONS) -> tuple[EmployeeAIAnalysis, ai_trace.GenerationTrace]:
+    """Returns the verified analysis and what produced it (model, prompt version, parameters, tokens)."""
     if not registry:
         raise AnalysisGenerationError("insufficient_analysis_data")
     payload = _fact_prompt(registry, scope)
-    analysis, model = _request_analysis(payload, instructions=instructions)
+    trace = ai_trace.GenerationTrace(model="", prompt_name="employee-analysis" if scope == "employee" else "aggregate-analysis",
+                                     prompt_text="")
+    analysis, _model = _request_analysis(payload, instructions=instructions, trace=trace)
     try:
-        return _resolve_generated_analysis(analysis, registry, verify), model
+        return _resolve_generated_analysis(analysis, registry, verify), trace
     except AnalysisGenerationError as error:
         _log_validation_failure(error, analysis, registry, attempt=1, job_id=job_id)
         _capture_rejection(error, analysis, registry, categories, statistics, scope=scope, attempt=1,
@@ -970,8 +985,8 @@ def _generate_with_facts(registry: dict[str, _AuthorizedFact], scope: str,
         if error.code not in {"invalid_analysis_evidence", "invalid_analysis_claim"}:
             raise
         # One fresh response with the same released fact registry; never guess a failed ID.
-        corrected, corrected_model = _request_analysis(payload, correction_category=error.category,
-                                                        instructions=instructions)
+        corrected, _corrected_model = _request_analysis(payload, correction_category=error.category,
+                                                         instructions=instructions, trace=trace)
         try:
             verified = _resolve_generated_analysis(corrected, registry, verify)
         except AnalysisGenerationError as correction_error:
@@ -979,11 +994,11 @@ def _generate_with_facts(registry: dict[str, _AuthorizedFact], scope: str,
             _capture_rejection(correction_error, corrected, registry, categories, statistics, scope=scope, attempt=2,
                                job_id=job_id, performance_ids=performance_ids)
             raise AnalysisGenerationError(correction_error.code, category="correction_failed") from None
-        return verified, corrected_model
+        return verified, trace
 
 
 def generate_employee_ai_analysis_from_context(context: EmployeeAnalysisContext, *,
-                                               job_id: int | None = None) -> tuple[EmployeeAIAnalysis, str]:
+                                               job_id: int | None = None) -> tuple[EmployeeAIAnalysis, ai_trace.GenerationTrace]:
     """Use only a previously authorized Phase 1 context; caller releases its DB transaction first."""
     _payload, categories, statistics = _prompt_data(context)
     registry = _fact_registry(f"employee:{context.campaign_id}:{context.evaluatee_employee_id}", categories,
@@ -1027,7 +1042,7 @@ def _verify_aggregate_analysis(context: AggregateAnalysisContext, analysis: Empl
 
 
 def generate_aggregate_ai_analysis_from_context(context: AggregateAnalysisContext, *,
-                                                job_id: int | None = None) -> tuple[EmployeeAIAnalysis, str]:
+                                                job_id: int | None = None) -> tuple[EmployeeAIAnalysis, ai_trace.GenerationTrace]:
     """Same provider and handle validator as the employee workflow, with aggregate-only instructions."""
     categories, statistics = _aggregate_statistics(context)
     registry = _fact_registry(f"{context.campaign_id}:{context.scope_type}:{context.scope_id}", categories,

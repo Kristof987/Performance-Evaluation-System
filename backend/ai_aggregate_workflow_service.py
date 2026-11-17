@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+import ai_trace
 import models
 import workspace_settings_service
 import reporting_service
@@ -99,12 +100,20 @@ def _evidence_summary(context: AggregateAnalysisContext, analysis: EmployeeAIAna
     return result
 
 
+def _audit_aggregate(db: Session, actor: models.User, record: models.AggregateAIAnalysis, label: str, action: str) -> None:
+    ai_trace.audit(db, actor, f"AI analysis v{record.version} {action}: {label}",
+                   {"scope": record.scope_type, "campaign_id": record.campaign_id, "scope_id": record.scope_id,
+                    "version": record.version, "model": record.model_identifier, "prompt_version": record.prompt_version,
+                    "token_usage": record.token_usage if action == "generated" else None})
+
+
 def _serialize(record: models.AggregateAIAnalysis, fingerprint: str) -> dict:
     return {"id": record.id, "campaign_id": record.campaign_id, "scope_type": record.scope_type,
             "scope_id": record.scope_id, "version": record.version, "parent_analysis_id": record.parent_analysis_id,
             "status": record.status, "is_current_approved": record.is_current_approved,
             "outdated": record.source_fingerprint != fingerprint, "analysis": record.analysis,
             "evidence": record.evidence_summary, "model_identifier": record.model_identifier,
+            "prompt_version": record.prompt_version, "token_usage": record.token_usage,
             "generated_at": record.generated_at, "generated_by_user_id": record.generated_by_user_id,
             "edited_at": record.edited_at, "edited_by_user_id": record.edited_by_user_id,
             "approved_at": record.approved_at, "approved_by_user_id": record.approved_by_user_id,
@@ -159,7 +168,7 @@ def generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | Non
                 raise HTTPException(status_code=409, detail="Please wait before regenerating this analysis")
             fingerprint = context.source_fingerprint
             db.rollback()  # Never retain Reports' campaign lock during a paid provider call.
-            analysis, model = generate_aggregate_ai_analysis_from_context(context, job_id=job_id)
+            analysis, trace = generate_aggregate_ai_analysis_from_context(context, job_id=job_id)
             _lock_campaign(db, campaign_id)
             fresh = _context(db, campaign_id, scope_type, scope_id, actor)
             _writable(db, campaign_id, actor)
@@ -169,9 +178,10 @@ def generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | Non
                 campaign_id=campaign_id, scope_type=scope_type, scope_id=scope_id,
                 version=_version(db, context), status="draft", is_current_approved=False,
                 analysis=analysis.model_dump(mode="json"), evidence_summary=_evidence_summary(context, analysis),
-                model_identifier=model, generated_at=datetime.now(timezone.utc), generated_by_user_id=actor.id,
+                **ai_trace.trace_fields(db, trace), generated_at=datetime.now(timezone.utc), generated_by_user_id=actor.id,
                 source_fingerprint=fingerprint, schema_version=1,
             )
+            _audit_aggregate(db, actor, record, context.scope_label, "generated")
             _commit_generation_result(db, record, job_id, worker_token)
             db.refresh(record)
             return _serialize(record, fingerprint)
@@ -206,10 +216,13 @@ def edit(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, a
         version=_version(db, context), parent_analysis_id=record.id, status="draft", is_current_approved=False,
         analysis=_analysis_json(validated, legacy=legacy), evidence_summary=_evidence_summary(context, validated),
         model_identifier=record.model_identifier, generated_at=record.generated_at,
+        prompt_version=record.prompt_version, generation_parameters=record.generation_parameters,
         generated_by_user_id=record.generated_by_user_id, edited_at=datetime.now(timezone.utc),
         edited_by_user_id=actor.id, source_fingerprint=context.source_fingerprint, schema_version=1,
     )
     db.add(new_record)
+    db.flush()
+    _audit_aggregate(db, actor, new_record, context.scope_label, "edited")
     db.commit()
     db.refresh(new_record)
     return _serialize(new_record, context.source_fingerprint)
@@ -242,6 +255,7 @@ def approve(db: Session, campaign_id: int, scope_type: str, scope_id: int | None
     record.is_current_approved = True
     record.approved_at = datetime.now(timezone.utc)
     record.approved_by_user_id = actor.id
+    _audit_aggregate(db, actor, record, context.scope_label, "approved")
     db.commit()
     db.refresh(record)
     return _serialize(record, context.source_fingerprint)
