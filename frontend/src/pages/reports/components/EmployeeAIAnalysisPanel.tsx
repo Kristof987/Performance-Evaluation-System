@@ -96,6 +96,29 @@ function FindingCard({ finding, evidence, employeeScope, edit, onChange, onRemov
 
 const blankFinding = (evidenceId: string): AnalysisFinding => ({ assessment: '', reasoning: '', supporting_evidence_ids: [evidenceId], numeric_claims: [], comparison_claims: [], observation_claims: [] });
 
+/** Every AI text is marked as such, with its review state, so nobody mistakes it for a human assessment. */
+function AIContentLabel({ approved, approvedAt, approvedBy }: { approved: boolean; approvedAt: string | null; approvedBy: number | null }) {
+  return <p className={`reports-ai-label${approved ? ' approved' : ''}`} role="note">
+    <strong>AI-generated content.</strong>{' '}
+    {approved
+      ? `Reviewed and approved by user #${approvedBy ?? '?'}${approvedAt ? ` on ${dateLabel(approvedAt)}` : ''}. It summarizes the data below and is not a decision.`
+      : 'Draft awaiting human review. Do not rely on it or share it until an authorized reviewer approves it.'}
+  </p>;
+}
+
+function AIExplanation({ employeeScope }: { employeeScope: boolean }) {
+  return <details className="reports-ai-explainer">
+    <summary>How is this analysis made?</summary>
+    <ul>
+      <li><strong>What the AI receives:</strong> aggregated scores and statistics derived from submitted evaluations, plus question and Section wording{employeeScope ? '; for written self-feedback only the fact that it exists' : ''}.</li>
+      <li><strong>What it never receives:</strong> names or IDs of employees and evaluators, peers’ written comments, and any result hidden by the privacy thresholds.</li>
+      <li><strong>How it is checked:</strong> every statement must cite the facts it is based on; unsupported comparisons, rankings and trends are rejected automatically.</li>
+      <li><strong>Human review:</strong> a generated text stays a draft until a person with approval rights reviews and approves it.</li>
+      <li><strong>Not for employment decisions:</strong> it must not be used on its own for promotion, dismissal, pay or similar decisions. Use it as one input next to the reports and conversations.</li>
+    </ul>
+  </details>;
+}
+
 export default function EmployeeAIAnalysisPanel({ scope, getAccessToken }: Props) {
   return <AIAnalysisPanel key={scopeKey(scope)} scope={scope} getAccessToken={getAccessToken} />;
 }
@@ -287,6 +310,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   const copy = scopeCopy[scope.type];
   return <section className="reports-card reports-ai-panel" aria-label={copy.heading}>
     <div className="reports-section-heading"><h2>{copy.heading}</h2>{scope.type !== 'employee' && history?.scope_label && <strong>{history.scope_label}</strong>}<p>{copy.description}</p></div>
+    <AIExplanation employeeScope={scope.type === 'employee'} />
     {!history && !error && <p className="reports-state">Loading saved analyses...</p>}
     {error && <div className="reports-state reports-error" role="alert">{error}<button type="button" className="btn btn-secondary btn-small" onClick={() => setReload((value) => value + 1)}>Retry</button></div>}
     {notice && <p className="reports-ai-notice" role="status">{notice}</p>}
@@ -307,6 +331,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
       {!history.has_eligible_evidence && <p className="reports-ai-warning">No reportable submitted evidence is available. Insufficient data is not an indication of low performance.</p>}
        {!selected && <p className="reports-ai-intro">{copy.intro} AI conclusions are not shown until explicitly generated, reviewed and approved by an authorized manager.</p>}
       {selected && <>
+        <AIContentLabel approved={selected.status === 'approved'} approvedAt={selected.approved_at} approvedBy={selected.approved_by_user_id} />
         {selected.outdated && <p className="reports-ai-warning" role="alert">Outdated analysis: submitted evaluation data has changed. This version remains historical; regenerate before editing or approval.</p>}
         <div className="reports-ai-meta"><span>{selected.status === 'approved' ? 'Approved' : 'Draft'}{selected.is_current_approved ? ' · Current approved' : ''}</span><span>Generated {dateLabel(selected.generated_at)} by user #{selected.generated_by_user_id} · {selected.model_identifier}{selected.prompt_version ? ` · prompt ${selected.prompt_version}` : ''}{selected.token_usage ? ` · ${(selected.token_usage.input_tokens + selected.token_usage.output_tokens).toLocaleString()} tokens` : ''}</span>{selected.edited_at && <span>Edited {dateLabel(selected.edited_at)} by user #{selected.edited_by_user_id}</span>}{selected.approved_at && <span>Approved {dateLabel(selected.approved_at)} by user #{selected.approved_by_user_id}</span>}</div>
         <div className="reports-ai-sections">

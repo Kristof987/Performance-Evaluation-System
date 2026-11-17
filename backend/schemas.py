@@ -196,6 +196,8 @@ class AuthMeResponse(BaseModel):
     permissions: list[str]
     is_active: bool
     employee: AuthEmployeeResponse | None
+    # Lets every page tell people when AI-assisted summaries may be made from their results.
+    ai_enabled: bool = False
 
     model_config = {"from_attributes": True}
 

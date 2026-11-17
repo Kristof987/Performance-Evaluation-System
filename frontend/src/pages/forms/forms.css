@@ -2128,3 +2128,5 @@ button.forms-editor-nav-item {
     padding: 18px;
   }
 }
+
+.forms-ai-label { background: var(--color-warning-bg); border-left: 3px solid var(--color-warning); border-radius: 8px; font-size: 13px; line-height: 1.5; margin: 8px 0; padding: 10px 14px; }

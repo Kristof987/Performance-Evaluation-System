@@ -69,6 +69,7 @@ export default function Forms() {
   const [formLoadAttempt, setFormLoadAttempt] = useState(0);
   const [selected, setSelected] = useState<Selected>(null);
   const [message, setMessage] = useState('');
+  const [aiDraftActive, setAiDraftActive] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [navigationSaveFailed, setNavigationSaveFailed] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -189,7 +190,7 @@ export default function Forms() {
     return () => controller.abort();
   }, [getAccessTokenSilently]);
 
-  function choose(item: ReviewForm) { const next = { name: item.name, description: item.description, questions: copy(item.questions) }; setSelectedId(item.id); setDraft(next); setSaved(copy(next)); setSelected(null); setPreviewOpen(false); setMessage(''); }
+  function choose(item: ReviewForm) { const next = { name: item.name, description: item.description, questions: copy(item.questions) }; setAiDraftActive(false); setSelectedId(item.id); setDraft(next); setSaved(copy(next)); setSelected(null); setPreviewOpen(false); setMessage(''); }
   function requestNavigation(action: () => void) {
     if (saveRequestPending.current) return;
     if (!dirty) { action(); return; }
@@ -246,13 +247,14 @@ export default function Forms() {
     setDraft({ name: generated.name, description: generated.description, questions: blocks });
     setSaved(initial());
     setMessage('AI draft imported. Review the questions and save the form when ready.');
+    setAiDraftActive(true);
     requestAnimationFrame(() => editorNameInput.current?.focus());
   }
   function startTemplate() {
     if (!canManageForms) return;
     requestNavigation(() => {
       const next = initial('Untitled template');
-      setSelectedId(null); setDraft(next); setSaved(copy(next)); setSelected(null); setPreviewOpen(false); setMessage('');
+      setAiDraftActive(false); setSelectedId(null); setDraft(next); setSaved(copy(next)); setSelected(null); setPreviewOpen(false); setMessage('');
     });
   }
   function closeCreate() { if (createRequestPending.current) return; setCreateOpen(false); createTrigger.current?.focus(); }
@@ -272,10 +274,10 @@ export default function Forms() {
   }
   function changeMode(nextMode: Mode) {
     if (nextMode === mode) return;
-    requestNavigation(() => { setNewFormOpen(false); setBuilderSectionName(null); setMode(nextMode); setMessage(''); setSelectedId(null); setDraft(null); setSaved(null); setSelected(null); setPreviewOpen(false); setDragged(null); });
+    requestNavigation(() => { setAiDraftActive(false); setNewFormOpen(false); setBuilderSectionName(null); setMode(nextMode); setMessage(''); setSelectedId(null); setDraft(null); setSaved(null); setSelected(null); setPreviewOpen(false); setDragged(null); });
   }
   function backToOverview() {
-    requestNavigation(() => { setSelectedId(null); setDraft(null); setSaved(null); setSelected(null); setPreviewOpen(false); setBuilderSectionName(null); setMessage(''); });
+    requestNavigation(() => { setAiDraftActive(false); setSelectedId(null); setDraft(null); setSaved(null); setSelected(null); setPreviewOpen(false); setBuilderSectionName(null); setMessage(''); });
   }
   function updateQuestion(id: string, patch: Partial<FormQuestion>) {
     setDraft((state) => state && ({ ...state, questions: state.questions.map((block) => block.type === 'question' ? block.question.id === id ? { ...block, question: { ...block.question, ...patch } } : block : { ...block, questions: block.questions.map((question) => question.id === id ? { ...question, ...patch } : question) }) }));
@@ -381,7 +383,7 @@ export default function Forms() {
       {mode === 'templates' && !templatesLoading && !templatesError && templates.length === 0 && <div className="forms-editor-state">No templates yet. Create a template to reuse a questionnaire.</div>}
       <div className={`forms-editor-list${!draft ? ' forms-overview-list' : ''}`}>{currentItems.map((item) => <button key={item.id} className={`forms-editor-form-item${item.id === selectedId ? ' active' : ''}`} onClick={() => selectItem(item)}>{!draft ? <><FileText className="forms-overview-icon" size={18} aria-hidden="true" /><span className="forms-overview-details"><strong>{item.name}</strong></span><span className="forms-overview-count">{allQuestions(item.questions).length} questions</span><ChevronRight className="forms-overview-chevron" size={16} aria-hidden="true" /></> : <><strong>{item.name}</strong><span>{allQuestions(item.questions).length} questions</span></>}</button>)}</div></aside>
       {draft && <><section className="card forms-editor-card forms-editor-panel"><button className="forms-editor-back" type="button" onClick={backToOverview}><ArrowLeft size={16} aria-hidden="true" /> Back to {mode}</button>{draft && !canManageForms ? <div className="forms-editor-empty"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions · Read-only access</p><button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview questionnaire</button></div> : draft ? <><div className="forms-editor-header"><div className="forms-editor-header-title"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions</p></div><div className="forms-editor-header-actions"><button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview</button><button className="btn btn-secondary" disabled={!dirty || saving} onClick={() => { if (saved) setDraft(copy(saved)); setSelected(null); }}>Discard</button><button className="btn btn-primary" disabled={!dirty || saving} onClick={() => { void save(); }}>{saving ? 'Saving...' : 'Save changes'}</button></div></div>
-        <label className="form-field forms-editor-field"><span className="form-label">Name</span><input className="form-control" aria-label="Name" ref={editorNameInput} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label className="form-field forms-editor-field"><span className="form-label">Description</span><textarea className="form-control" aria-label="Description" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>{message && <p className={`forms-editor-message${successMessage ? ' success' : ''}`} role={successMessage ? 'status' : 'alert'}>{message}</p>}
+        <label className="form-field forms-editor-field"><span className="form-label">Name</span><input className="form-control" aria-label="Name" ref={editorNameInput} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label className="form-field forms-editor-field"><span className="form-label">Description</span><textarea className="form-control" aria-label="Description" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>{aiDraftActive && selectedId === null && <p className="forms-ai-label" role="note"><strong>AI-generated draft.</strong> Check every question for accuracy, fairness and tone before saving; you are responsible for the final questionnaire.</p>}{message && <p className={`forms-editor-message${successMessage ? ' success' : ''}`} role={successMessage ? 'status' : 'alert'}>{message}</p>}
           <div className="forms-editor-section"><div className="forms-editor-section-head"><h3>Questionnaire structure</h3><div><button className="btn btn-secondary" onClick={() => appendQuestion()}>Add question</button><select className="form-control" aria-label="Add section" value="" onChange={(event) => { if (event.target.value === 'create') { setBuilderSectionName(''); setBuilderSectionError(''); } else if (event.target.value) appendSection(Number(event.target.value)); }}><option value="">Add section</option>{sections.filter((section) => !section.is_archived && !draft.questions.some((block) => block.type === 'section' && block.section_id === section.id)).map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}{canManageSections && <option value="create">Create new section...</option>}</select></div></div>
             {builderSectionName !== null && <form className="forms-builder-section-create" onSubmit={(event) => { event.preventDefault(); void saveSection(true); }}><label className="form-field forms-editor-field"><span className="form-label">New reusable section name</span><input className="form-control" autoFocus value={builderSectionName} disabled={sectionPending} onChange={(event) => { setBuilderSectionName(event.target.value); setBuilderSectionError(''); }} /></label><button className="btn btn-primary" type="submit" disabled={sectionPending || !builderSectionName.trim()}>{sectionPending ? 'Creating...' : 'Create and add'}</button><button className="btn btn-secondary" type="button" disabled={sectionPending} onClick={() => { setBuilderSectionName(null); setBuilderSectionError(''); }}>Cancel</button>{builderSectionError && <p className="forms-option-error" role="alert">{builderSectionError}</p>}</form>}
            <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={(event: DragStartEvent) => setDragged(event.active.data.current?.item as MovingItem)} onDragEnd={endDrag} onDragCancel={() => setDragged(null)}>

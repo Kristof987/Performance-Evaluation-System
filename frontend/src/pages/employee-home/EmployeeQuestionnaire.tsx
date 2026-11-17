@@ -82,6 +82,7 @@ export default function EmployeeQuestionnaire() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { state, getAccessToken, retryAuth0 } = useAppAuth();
+  const aiEnabled = state.status === 'authenticated' && state.user.ai_enabled === true;
   const userId = state.status === 'authenticated' ? state.user.id : undefined;
   const canSubmit = state.status === 'authenticated'
     && state.user.permissions.includes('evaluations.submit');
@@ -203,6 +204,10 @@ export default function EmployeeQuestionnaire() {
              <p>Evaluating {formatUserName(visibleQuestionnaire.evaluation.evaluateeName)}</p>
              {visibleQuestionnaire.evaluation.formDescription && <p>{visibleQuestionnaire.evaluation.formDescription}</p>}
            </header>
+           {aiEnabled && <p className="employee-questionnaire-ai-notice" role="note">
+             Results of this campaign may be summarized with AI assistance. The AI receives only aggregated scores, never names or
+             written peer comments; every summary is reviewed by an authorized person and is not used on its own for employment decisions.
+           </p>}
            {visibleQuestionnaire.evaluation.finishDate !== null && <p className="card card-padded employee-questionnaire-state" role="status">This questionnaire has already been submitted.</p>}
            {visibleQuestionnaire.evaluation.campaignStatus === 'review' && visibleQuestionnaire.evaluation.finishDate === null && <p className="card card-padded employee-questionnaire-state" role="status">This campaign is in review. You can still save and submit your issued evaluation{evaluationOverdue(visibleQuestionnaire.evaluation) ? ' after the deadline (overdue).' : '.'}</p>}
            {visibleQuestionnaire.evaluation.campaignStatus === 'active' && evaluationOverdue(visibleQuestionnaire.evaluation) && <p className="card card-padded employee-questionnaire-state" role="status">Overdue: the deadline has passed, but you can still save and submit this evaluation.</p>}

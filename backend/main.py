@@ -267,7 +267,7 @@ def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Dep
     return {"id": user.id, "username": user.username, "email": user.email,
             "system_role_id": user.system_role_id, "system_role_name": roles.system_role_name,
             "permissions": [name for (name,) in permissions],
-            "is_active": user.is_active,
+            "is_active": user.is_active, "ai_enabled": workspace_settings_service.ai_enabled(db),
             "employee": {"id": employee.id, "full_name": employee.full_name,
                          "company_role_id": employee.company_role_id,
                          "company_role_name": roles.company_role_name,

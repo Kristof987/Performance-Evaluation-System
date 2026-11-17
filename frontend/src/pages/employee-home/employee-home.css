@@ -628,3 +628,14 @@
   .employee-compact-row { grid-template-columns: minmax(0, 1fr); gap: 9px; }
   .employee-compact-action { justify-self: start; }
 }
+
+.employee-questionnaire-ai-notice {
+  background: var(--color-surface-muted);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 10px 14px;
+}

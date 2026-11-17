@@ -116,3 +116,26 @@ def test_prompt_text_is_stored_once_and_audit_keeps_metadata_only():
     finally:
         db.rollback()
         db.close()
+
+
+def test_auth_me_tells_every_user_whether_ai_is_on(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import main
+    import workspace_settings_service
+
+    db = SessionLocal()
+    try:
+        user = db.query(models.User).filter(models.User.is_active.is_(True)).first()
+        if user is None:
+            pytest.skip("No active user in the test database")
+        main.app.dependency_overrides[main.get_current_user] = lambda: user
+        main.app.dependency_overrides[main.get_db] = lambda: db
+        monkeypatch.setattr(main, "record_sign_in", lambda *_args: None)
+        for enabled in (True, False):
+            monkeypatch.setattr(workspace_settings_service, "ai_enabled", lambda _db, value=enabled: value)
+            assert TestClient(main.app).get("/auth/me").json()["ai_enabled"] is enabled
+    finally:
+        main.app.dependency_overrides.clear()
+        db.rollback()
+        db.close()

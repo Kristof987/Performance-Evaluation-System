@@ -855,3 +855,9 @@
 
 @media (max-width: 600px) {
 }
+
+.reports-ai-label { background: var(--color-warning-bg); border-left: 3px solid var(--color-warning); border-radius: 8px; color: var(--color-text); font-size: 13px; line-height: 1.5; margin: 0 0 12px; padding: 10px 14px; }
+.reports-ai-label.approved { background: var(--color-surface-muted); border-left-color: var(--color-primary); }
+.reports-ai-explainer { border: 1px solid var(--color-border); border-radius: 8px; font-size: 13px; margin: 0 0 14px; padding: 8px 14px; }
+.reports-ai-explainer summary { cursor: pointer; font-weight: 700; }
+.reports-ai-explainer ul { color: var(--color-text-secondary); display: grid; gap: 6px; line-height: 1.5; margin: 10px 0 4px; padding-left: 18px; }
