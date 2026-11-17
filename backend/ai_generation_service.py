@@ -817,6 +817,7 @@ def _request_analysis(payload: dict[str, Any], *, correction_category: str | Non
             input=[*messages, {"role": "user", "content": serialized}],
             text_format=GeneratedAnalysis,
             max_output_tokens=max_tokens,
+            store=False,  # Evaluation data must not be kept as application state at the provider.
         )
         parsed = response.output_parsed
     except APITimeoutError:

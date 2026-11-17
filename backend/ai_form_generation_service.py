@@ -123,7 +123,7 @@ def generate(request: schemas.FormAIGenerateRequest, db: Session,
                              + ". Generate a complete corrected draft with the SAME original description, language, evaluation type and question count range."})
         messages.append({"role": "user", "content": json.dumps(prompt, ensure_ascii=False)})
         try:
-            result = client.responses.parse(model=model, input=messages,
+            result = client.responses.parse(model=model, input=messages, store=False,
                                             text_format=_Generated, max_output_tokens=configured_tokens)
             generated = _Generated.model_validate(result.output_parsed)
         except APITimeoutError:

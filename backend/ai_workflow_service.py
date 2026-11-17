@@ -32,6 +32,15 @@ def has_permission(actor: models.User, db: Session, permission: str) -> bool:
     ).first() is not None
 
 
+def can_see_drafts(actor: models.User, db: Session) -> bool:
+    """Unapproved AI text is unreviewed: only people who generate, edit or approve it may read it."""
+    return has_permission(actor, db, GENERATE) or has_permission(actor, db, APPROVE)
+
+
+def visible_versions(records: list, actor: models.User, db: Session) -> list:
+    return records if can_see_drafts(actor, db) else [record for record in records if record.status == "approved"]
+
+
 def can_manage(actor: models.User, db: Session) -> bool:
     return has_permission(actor, db, GENERATE)
 
@@ -166,7 +175,7 @@ def list_analyses(db: Session, campaign_id: int, employee_id: int, *, actor: mod
         models.EmployeeAIAnalysis.evaluatee_employee_id == employee_id,
     ).order_by(models.EmployeeAIAnalysis.version.desc()).all()
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
-    return {"versions": [_serialize(item, fingerprint) for item in records],
+    return {"versions": [_serialize(item, fingerprint) for item in visible_versions(records, actor, db)],
             **capabilities(actor, db, archived=campaign.is_archived),
             "has_eligible_evidence": bool(context.evidence_references)}
 

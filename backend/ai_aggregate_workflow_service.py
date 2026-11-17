@@ -17,7 +17,7 @@ from ai_analysis_models import AggregateAnalysisContext, EmployeeAIAnalysis
 from ai_generation_service import (
     AnalysisGenerationError, generate_aggregate_ai_analysis_from_context, validate_aggregate_ai_analysis,
 )
-from ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, _requires_fact_contract, _requires_unified_facts, APPROVE, GENERATE, capabilities, has_permission
+from ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, _requires_fact_contract, _requires_unified_facts, APPROVE, GENERATE, capabilities, has_permission, visible_versions
 
 
 def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
@@ -125,13 +125,13 @@ def list_analyses(db: Session, campaign_id: int, scope_type: str, scope_id: int 
         ).order_by(models.AggregateAIAnalysis.version.desc()).all()
         if not historical:
             raise error
-        return {"versions": [_serialize(record, "") for record in historical],
+        return {"versions": [_serialize(record, "") for record in visible_versions(historical, actor, db)],
                 "can_manage": False, "can_generate": False, "can_approve": False,
                 "ai_enabled": workspace_settings_service.ai_enabled(db), "has_eligible_evidence": False,
                 "scope_label": f"Historical {scope_type} report"}
     records = _query(db, context).order_by(models.AggregateAIAnalysis.version.desc()).all()
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
-    return {"versions": [_serialize(record, context.source_fingerprint) for record in records],
+    return {"versions": [_serialize(record, context.source_fingerprint) for record in visible_versions(records, actor, db)],
             **capabilities(actor, db, archived=campaign.is_archived),
             "has_eligible_evidence": bool(context.evidence), "scope_label": context.scope_label}
 
