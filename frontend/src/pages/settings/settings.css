@@ -32,8 +32,7 @@
 .settings-security-section h3 { font-size: 15px; margin: 0; }
 .settings-security-section p { color: var(--color-text-secondary); line-height: 1.55; margin: 0; max-width: 760px; }
 .settings-state { color: var(--color-text-secondary); font-size: 13px; font-weight: 600; text-align: center; }
-.settings-error { color: var(--color-danger); }
-.settings-success { background: var(--color-success-bg); border-radius: var(--radius-sm); color: var(--color-success); margin: 0; padding: 10px 14px; }
+.settings-field-error { color: var(--color-danger); font-size: 13px; margin: 0; }
 .settings-security-section .btn { justify-self: start; }
 .settings-preference-form { display: grid; gap: 12px; }
 .settings-preference-group { border: 0; display: grid; gap: 0; margin: 0; min-width: 0; padding: 0; }

@@ -3,6 +3,7 @@ import { useAppAuth } from '../../../auth/AppAuth';
 import { usePreferences } from '../preferences-context';
 import { formatSettingsDate } from '../settings-date';
 import { fetchAuditLog, type AuditCategory, type AuditEntry } from '../workspace.api';
+import LoadError from '../../../components/feedback/LoadError';
 
 const PAGE_SIZE = 50;
 
@@ -67,8 +68,7 @@ export default function AuditLogSettings() {
         {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
       </select>
     </label>
-    {error && <div className="settings-error" role="alert">{error}
-      <button className="btn btn-secondary" type="button" onClick={() => { setLoading(true); setAttempt((value) => value + 1); }}>Retry</button></div>}
+    {error && <LoadError message={error} onRetry={() => { setLoading(true); setAttempt((value) => value + 1); }} />}
     {!error && entries.length === 0 && !loading && <p className="settings-note">No events recorded yet.</p>}
     {entries.length > 0 && <ol className="settings-audit-list">
       {entries.map((entry) => <li key={entry.id}>

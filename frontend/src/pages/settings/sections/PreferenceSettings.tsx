@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAppAuth } from '../../../auth/AppAuth';
 import { usePreferences } from '../preferences-context';
 import { defaultPreferences, type Preferences } from '../settings.api';
+import InlineMessage from '../../../components/feedback/InlineMessage';
+import { useToast } from '../../../components/feedback/feedback-context';
+import { useUnsavedChangesGuard } from '../../../components/feedback/useUnsavedChangesGuard';
 
 function Toggle({ id, label, description, checked, disabled, onChange }: {
   id: string; label: string; description: string; checked: boolean;
@@ -21,7 +24,7 @@ export default function PreferenceSettings({ section }: { section: 'notification
   const [baseline, setBaseline] = useState(preferences);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
+  const toast = useToast();
   const pending = useRef(false);
   const canManage = state.status === 'authenticated' && state.user.permissions.includes('settings.manage_self');
   const manager = state.status === 'authenticated' && state.user.permissions.includes('campaigns.manage');
@@ -29,42 +32,21 @@ export default function PreferenceSettings({ section }: { section: 'notification
   const dirty = keys.some((key) => draft[key] !== baseline[key]);
   const disabled = !canManage || saving;
 
-  useEffect(() => {
-    if (!dirty && !saving) return;
-    function onBeforeUnload(event: BeforeUnloadEvent) { event.preventDefault(); event.returnValue = ''; }
-    function onClick(event: MouseEvent) {
-      if (!(event.target instanceof Element) || !event.target.closest('a[href]')) return;
-      if (pending.current || !window.confirm('Discard unsaved preference changes?')) {
-        event.preventDefault(); event.stopPropagation();
-      }
-    }
-    window.addEventListener('beforeunload', onBeforeUnload);
-    document.addEventListener('click', onClick, true);
-    return () => {
-      window.removeEventListener('beforeunload', onBeforeUnload);
-      document.removeEventListener('click', onClick, true);
-    };
-  }, [dirty, saving]);
-
-  useEffect(() => {
-    if (!message) return;
-    const timer = window.setTimeout(() => setMessage(''), 5000);
-    return () => window.clearTimeout(timer);
-  }, [message]);
+  useUnsavedChangesGuard(dirty || saving, 'preference changes');
 
   function update<K extends keyof Preferences>(key: K, value: Preferences[K]) {
-    setDraft((current) => ({ ...current, [key]: value })); setError(''); setMessage('');
+    setDraft((current) => ({ ...current, [key]: value })); setError('');
   }
 
   async function submit() {
     if (pending.current || !canManage || !dirty) return;
     pending.current = true;
-    setSaving(true); setError(''); setMessage('');
+    setSaving(true); setError('');
     const changes = Object.fromEntries(keys.filter((key) => draft[key] !== baseline[key])
       .map((key) => [key, draft[key]])) as Partial<Preferences>;
     try {
       const saved = await save(changes);
-      setDraft(saved); setBaseline(saved); setMessage('Preferences saved.');
+      setDraft(saved); setBaseline(saved); toast.success('Preferences saved');
     } catch (cause) {
       setDraft(baseline);
       setError(cause instanceof Error ? cause.message : 'Preferences could not be saved.');
@@ -117,8 +99,7 @@ export default function PreferenceSettings({ section }: { section: 'notification
           </select>
         </label>
       </>}
-      {error && <p className="settings-error" role="alert">{error} Changes were rolled back.</p>}
-      {message && <p className="settings-success" role="status">{message}</p>}
+      {error && <InlineMessage tone="error" onDismiss={() => setError('')}>{error} Changes were rolled back.</InlineMessage>}
     </section>
     {(dirty || saving) && <div className="settings-save-bar" aria-busy={saving}>
       <span role="status">{saving ? 'Saving...' : 'Unsaved changes'}</span>

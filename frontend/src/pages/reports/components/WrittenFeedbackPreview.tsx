@@ -4,7 +4,7 @@ import type { AccessTokenGetter } from '../../../auth/authenticated-api';
 import { fetchWrittenFeedbackIndex } from '../api/reports.api';
 import type { WrittenFeedbackIndex } from '../types/reports.types';
 import WrittenFeedbackList from './WrittenFeedbackList';
-import ReportsLoadError from './ReportsLoadError';
+import LoadError from '../../../components/feedback/LoadError';
 
 export default function WrittenFeedbackPreview({ campaignId, employeeId, sectionId, targetList = false, getAccessToken }: {
   campaignId: number;
@@ -32,7 +32,7 @@ export default function WrittenFeedbackPreview({ campaignId, employeeId, section
     return () => controller.abort();
   }, [campaignId, employeeId, sectionId, getAccessToken, reload]);
 
-  if (error) return <ReportsLoadError message={error} onRetry={() => setReload((value) => value + 1)} />;
+  if (error) return <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />;
   if (!data) return <div className="reports-state" role="status">Loading written feedback questions...</div>;
   if (targetList) return <section className="reports-card reports-question-list"><h2>Employees</h2><p className="reports-chart-note">Select an evaluated employee to read submitted feedback received by them. Performance statistics become available in Review.</p>
     {data.peer.evaluatees.length ? <div className="reports-written-preview-sections">{data.peer.evaluatees.map((person) => <Link key={person.evaluatee_id} to={`/reports/campaigns/${campaignId}/employees/${person.evaluatee_id}`}>{person.evaluatee_name}</Link>)}</div> : <p>No written responses yet.</p>}

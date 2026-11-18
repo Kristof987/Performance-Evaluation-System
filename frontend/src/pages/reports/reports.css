@@ -162,19 +162,6 @@
   justify-content: space-between;
 }
 
-.reports-load-error .inline-message-body {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  justify-content: space-between;
-}
-
-.reports-load-error .reports-text-button {
-  color: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-}
 
 .reports-empty {
   display: flex;

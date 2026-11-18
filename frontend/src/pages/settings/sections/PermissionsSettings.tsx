@@ -2,6 +2,9 @@ import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { useAppAuth } from '../../../auth/AppAuth';
 import { createSystemRole, deleteSystemRole, fetchPermissionMatrix, savePermissionMatrix, type PermissionMatrix } from '../workspace.api';
 import SaveBar from './SaveBar';
+import InlineMessage from '../../../components/feedback/InlineMessage';
+import LoadError from '../../../components/feedback/LoadError';
+import { useConfirm, useToast } from '../../../components/feedback/feedback-context';
 
 // Removing these from your own role would lock you out of this page.
 const SELF_PROTECTED = new Set(['permissions.manage', 'settings.read']);
@@ -18,6 +21,8 @@ const grantsOf = (matrix: PermissionMatrix): Grants =>
   Object.fromEntries(matrix.roles.map((role) => [role.id, [...role.permissions].sort()]));
 
 export default function PermissionsSettings() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const { state, getAccessToken } = useAppAuth();
   const ownRoleId = state.status === 'authenticated' ? state.user.system_role_id : null;
   const canEdit = state.status === 'authenticated' && state.user.permissions.includes('permissions.manage');
@@ -25,7 +30,6 @@ export default function PermissionsSettings() {
   const [draft, setDraft] = useState<Grants>({});
   const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [newRoleName, setNewRoleName] = useState('');
@@ -44,8 +48,7 @@ export default function PermissionsSettings() {
     return () => controller.abort();
   }, [getAccessToken, attempt]);
 
-  if (loadError) return <div className="card card-padded settings-error" role="alert">{loadError}
-    <button className="btn btn-secondary" type="button" onClick={() => setAttempt((value) => value + 1)}>Retry</button></div>;
+  if (loadError) return <LoadError message={loadError} onRetry={() => setAttempt((value) => value + 1)} />;
   if (!matrix) return <div className="card card-padded settings-state" role="status">Loading permissions...</div>;
 
   const saved = grantsOf(matrix);
@@ -59,15 +62,15 @@ export default function PermissionsSettings() {
       if (granted.has(permission)) granted.delete(permission); else granted.add(permission);
       return { ...current, [roleId]: [...granted].sort() };
     });
-    setMessage(''); setError('');
+    setError('');
   }
 
   async function changeRoles(action: () => Promise<PermissionMatrix>, success: string) {
-    setSaving(true); setError(''); setMessage('');
+    setSaving(true); setError('');
     try {
       const result = await action();
       setMatrix(result); setDraft(grantsOf(result));
-      setMessage(success);
+      toast.success(success);
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The role could not be changed.');
@@ -83,17 +86,24 @@ export default function PermissionsSettings() {
     if (!name) return;
     const created = await changeRoles(() => createSystemRole(getAccessToken, {
       name, copy_from_role_id: copyFromRoleId ? Number(copyFromRoleId) : null,
-    }), `Role “${name}” created. Assign it to people on the People page.`);
+    }), `Role “${name}” created. Assign it to people on the People page`);
     if (created) { setNewRoleName(''); setCopyFromRoleId(''); }
   }
 
   async function save() {
-    setSaving(true); setError(''); setMessage('');
+    const names = changedRoles.map((role) => role.name).join(', ');
+    const users = changedRoles.reduce((sum, role) => sum + role.active_users, 0);
+    if (!(await confirm({
+      title: `Change permissions for ${names}?`,
+      message: `This changes what ${users} ${users === 1 ? 'user' : 'users'} can see and do. They get the new permissions the next time they load the app.`,
+      confirmLabel: 'Save permissions',
+    }))) return;
+    setSaving(true); setError('');
     try {
       const result = await savePermissionMatrix(getAccessToken,
         changedRoles.map((role) => ({ role_id: role.id, permissions: draft[role.id] ?? [] })));
       setMatrix(result); setDraft(grantsOf(result));
-      setMessage('Permissions saved. Affected users see the change after they reload the app.');
+      toast.success('Permissions saved. Affected users see the change after they reload the app');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Permissions could not be saved.');
     } finally {
@@ -123,7 +133,10 @@ export default function PermissionsSettings() {
           {role.name}<small>{role.active_users} {role.active_users === 1 ? 'user' : 'users'}{role.id === ownRoleId ? ' · your role' : ''}</small>
           {canEdit && !role.built_in && <button className="settings-role-delete" type="button"
             disabled={saving || dirty} title={dirty ? 'Save or discard your changes first.' : undefined}
-            onClick={() => void changeRoles(() => deleteSystemRole(getAccessToken, role.id), `Role “${role.name}” deleted.`)}>Delete</button>}
+            onClick={async () => {
+              if (!(await confirm({ title: `Delete the “${role.name}” role?`, message: 'The role and its permission settings are removed permanently. Only roles nobody is assigned to can be deleted.', confirmLabel: 'Delete role', tone: 'danger' }))) return;
+              void changeRoles(() => deleteSystemRole(getAccessToken, role.id), `Role “${role.name}” deleted`);
+            }}>Delete</button>}
         </th>)}</tr></thead>
         <tbody>{areas.map((area) => <Fragment key={area}>
           <tr className="settings-table-group"><th scope="rowgroup" colSpan={matrix.roles.length + 1}>{area}</th></tr>
@@ -141,9 +154,8 @@ export default function PermissionsSettings() {
             </tr>)}
         </Fragment>)}</tbody>
       </table></div>
-      {error && <p className="settings-error" role="alert">{error}</p>}
-      {message && <p className="settings-success" role="status">{message}</p>}
-    </section>
+      {error && <InlineMessage tone="error">{error}</InlineMessage>}
+          </section>
     <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(saved); setError(''); }} onSave={() => void save()} />
   </div>;
 }

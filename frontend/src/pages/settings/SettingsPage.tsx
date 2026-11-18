@@ -17,6 +17,8 @@ import AuditLogSettings from './sections/AuditLogSettings';
 import { fetchAccountSettingsProfile, type AccountSettingsProfile } from './settings.api';
 import { usePreferences } from './preferences-context';
 import './settings.css';
+import InlineMessage from '../../components/feedback/InlineMessage';
+import LoadError from '../../components/feedback/LoadError';
 
 export default function SettingsPage() {
   const { section } = useParams();
@@ -66,7 +68,7 @@ export default function SettingsPage() {
       <div className="settings-layout">
         <SettingsNavigation permissions={permissions} />
         <div className="settings-content">
-          {userId === null && <div className="card card-padded settings-state" role="alert">Sign in again to view settings.</div>}
+          {userId === null && <InlineMessage tone="error">Sign in again to view settings.</InlineMessage>}
           {userId !== null && workspace && <>
             {section === 'privacy' && <PrivacySettings />}
             {section === 'emails' && <EmailReminderSettings />}
@@ -75,14 +77,12 @@ export default function SettingsPage() {
             {section === 'audit' && <AuditLogSettings />}
           </>}
           {!workspace && loading && <div className="card card-padded settings-state">Loading settings...</div>}
-          {!workspace && error && <div className="card card-padded settings-state settings-error" role="alert">{error}</div>}
+          {!workspace && error && <InlineMessage tone="error">{error}</InlineMessage>}
           {!workspace && profile && section === 'profile' && <ProfileSettings profile={profile} />}
           {!workspace && profile && section === 'security' && <SecuritySettings />}
           {!workspace && profile && (section === 'notifications' || section === 'appearance') && (
             preferenceState.loading ? <div className="card card-padded" role="status">Loading preferences...</div>
-              : preferenceState.error ? <div className="card card-padded settings-error" role="alert">
-                {preferenceState.error}<button className="btn btn-secondary" type="button"
-                  onClick={preferenceState.retry}>Retry</button></div>
+              : preferenceState.error ? <LoadError message={preferenceState.error} onRetry={preferenceState.retry} />
                 : <PreferenceSettings key={`${userId}:${section}`} section={section} />
           )}
         </div>

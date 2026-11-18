@@ -123,3 +123,22 @@
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }
 }
+
+.load-error .inline-message-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.load-error-retry {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}

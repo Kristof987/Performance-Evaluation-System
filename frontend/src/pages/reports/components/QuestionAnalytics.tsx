@@ -5,7 +5,7 @@ import type { QuestionResult, ReportQuestion, ReportQuestions, RolePerspective }
 import type { AccessTokenGetter } from '../../../auth/authenticated-api';
 import { useAppAuth } from '../../../auth/AppAuth';
 import WrittenFeedbackList from './WrittenFeedbackList';
-import ReportsLoadError from './ReportsLoadError';
+import LoadError from '../../../components/feedback/LoadError';
 
 function Distribution({ question, result, label }: { question: ReportQuestion; result: QuestionResult; label: string }) {
   if (result.availability === 'suppressed') return <p className="reports-question-status">{label} results are hidden for confidentiality. Counts and values are withheld.</p>;
@@ -105,7 +105,7 @@ function EmployeeQuestions({ campaignId, getAccessToken, employeeId, feedbackSta
     <div className="reports-segmented reports-question-modes" role="group" aria-label="Evaluation type">
       {(['all', 'peer', 'self'] as const).map((value) => <button key={value} type="button" className={mode === value ? 'active' : ''} aria-pressed={mode === value} onClick={() => { setMode(value); setOpenSections(null); setOpenQuestions([]); }}>{value === 'all' ? 'All' : value === 'peer' ? 'Peer' : 'Self'}</button>)}
     </div>
-    {error ? <ReportsLoadError message={error} onRetry={() => setReload((value) => value + 1)} />
+    {error ? <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />
       : !reports || reports.peer.evaluation_type !== 'peer' || reports.self.evaluation_type !== 'self' ? <p className="reports-question-status">Loading question analytics...</p>
         : issued.size === 0 ? <p className="reports-question-status">No {mode === 'all' ? '' : `${mode} `}questions were issued for this employee.</p>
           : <><div className="reports-question-filters"><label>Search questions<input className="form-control" type="search" value={search} placeholder="Search text, type, section or category" onChange={(event) => { setSearch(event.target.value); setOpenQuestions([]); setOpenSections((current) => current?.filter((id) => !id.startsWith('closed:')) ?? null); }} /></label></div>
@@ -181,7 +181,7 @@ function StandardQuestions({ campaignId, getAccessToken, scope = {} }: Analytics
       <button type="button" className={evaluationType === 'peer' ? 'active' : ''} aria-pressed={evaluationType === 'peer'} onClick={() => setEvaluationType('peer')}>Peer</button>
       <button type="button" className={evaluationType === 'self' ? 'active' : ''} aria-pressed={evaluationType === 'self'} onClick={() => setEvaluationType('self')}>Self</button>
     </div>
-    {error ? <ReportsLoadError message={error} onRetry={() => setReload((value) => value + 1)} />
+    {error ? <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />
       : questions === null ? <p className="reports-question-status">Loading {evaluationType} question analytics...</p>
         : questions.length === 0 ? <p className="reports-question-status">No {evaluationType} questions were issued for this scope.</p>
           : <>

@@ -4,7 +4,7 @@ import { approveAIAnalysis, fetchAIAnalyses, fetchGenerationJob, fetchLatestGene
 import type { AIAnalysis, AIAnalysisGenerationJob, AIAnalysisHistory, AIAnalysisScope, AnalysisEvidence, AnalysisFinding, AnalysisVersion } from '../types/ai-analysis.types';
 import { useConfirm, useToast } from '../../../components/feedback/feedback-context';
 import InlineMessage from '../../../components/feedback/InlineMessage';
-import ReportsLoadError from './ReportsLoadError';
+import LoadError from '../../../components/feedback/LoadError';
 
 type Props = { scope: AIAnalysisScope; getAccessToken: AccessTokenGetter };
 
@@ -315,9 +315,9 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     <div className="reports-section-heading"><h2>{copy.heading}</h2>{scope.type !== 'employee' && history?.scope_label && <strong>{history.scope_label}</strong>}<p>{copy.description}</p></div>
     <AIExplanation employeeScope={scope.type === 'employee'} />
     {!history && !error && <p className="reports-state">Loading saved analyses...</p>}
-    {error && <ReportsLoadError message={error} onRetry={() => setReload((value) => value + 1)} />}
+    {error && <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />}
     {actionError && <InlineMessage tone="error" onDismiss={() => setActionError('')}>{actionError}</InlineMessage>}
-    {jobError && <ReportsLoadError message={`Couldn’t confirm the generation status: ${jobError}`} retryLabel="Check status again" onRetry={() => setJobReload((value) => value + 1)} />}
+    {jobError && <LoadError message={`Couldn’t confirm the generation status: ${jobError}`} retryLabel="Check status again" onRetry={() => setJobReload((value) => value + 1)} />}
     {jobReady && !jobError && jobActive && <InlineMessage tone="info">AI analysis {job?.status === 'queued' ? 'queued' : 'running'}. You can leave this page; generation will continue.</InlineMessage>}
     {jobReady && !jobError && job?.status === 'failed' && <InlineMessage tone="error">{generationErrorMessage(job.error_code)} Use Retry generation to start a new attempt.</InlineMessage>}
     {history && <>

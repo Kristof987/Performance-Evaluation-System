@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiAccessError, type AccessTokenGetter } from '../../../auth/authenticated-api';
 import { fetchWrittenFeedback } from '../api/reports.api';
 import type { WrittenFeedbackResponse } from '../types/reports.types';
-import ReportsLoadError from './ReportsLoadError';
+import LoadError from '../../../components/feedback/LoadError';
 
 export default function WrittenFeedbackList({ campaignId, questionKey, sectionId, employeeId, evaluationType, getAccessToken }: {
   campaignId: number;
@@ -42,7 +42,7 @@ export default function WrittenFeedbackList({ campaignId, questionKey, sectionId
   return <div className="reports-written-feedback" aria-label={`${label} written feedback`}>
     <strong>{label} written feedback</strong>
     {denied ? <p>Written feedback is unavailable for this account.</p>
-      : error ? <ReportsLoadError message={error} onRetry={() => setReload((value) => value + 1)} />
+      : error ? <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />
         : !current ? <p role="status">Loading responses...</p>
           : current.availability === 'suppressed' ? <p>Written feedback is unavailable for this question.</p>
             : current.availability === 'not_applicable' ? <p>No {label.toLowerCase()} question was issued for this scope.</p>

@@ -11,7 +11,7 @@ import type { CampaignRatingDistribution, CampaignReportOverview, EmployeeReport
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { useAppAuth } from '../../auth/AppAuth';
 import { hasTeamReportsOnly } from '../../app/access';
-import ReportsLoadError from './components/ReportsLoadError';
+import LoadError from '../../components/feedback/LoadError';
 
 function DashboardCard({ title, info, children, actions, className = '' }: { title: string; info: string; children: ReactNode; actions?: ReactNode; className?: string }) {
   return <section className={`reports-card reports-dashboard-card ${className}`}><div className="reports-dashboard-card-heading"><div className="reports-dashboard-card-title"><h2>{title}</h2><span className="reports-info-icon" title={info} aria-label={info} tabIndex={0}><Info size={15} /></span></div>{actions}</div>{children}</section>;
@@ -43,7 +43,7 @@ export function ReportsIndexPage() {
   const teamOnly = state.status === 'authenticated' && hasTeamReportsOnly(state.user.permissions);
   return <ReportsLayout selectedCampaignId={null}>{({ loadingCampaigns, campaignsError, campaigns, retryCampaigns }) => {
     if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
-    if (campaignsError) return <ReportsLoadError message={campaignsError} onRetry={retryCampaigns} />;
+    if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
     if (campaigns.length === 0) return <ReportsEmptyState title="No campaigns available." message={teamOnly ? 'There are no campaigns yet for the groups you lead.' : 'Create a campaign before reports can be shown.'} />;
     return <div className="reports-state">Opening selected campaign...</div>;
   }}</ReportsLayout>;
@@ -116,10 +116,10 @@ function OverviewContent({
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
-  if (campaignsError) return <ReportsLoadError message={campaignsError} onRetry={retryCampaigns} />;
+  if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
   if (qualityPreview) return <div className="reports-overview reports-overview-dashboard"><p className="reports-dashboard-note">Campaign performance charts become available in Review. Completed peer evaluations can already be checked for campaign-level quality patterns.</p><EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
-  if (error) return <ReportsLoadError message={error} onRetry={() => setReloadKey((value) => value + 1)} />;
+  if (error) return <LoadError message={error} onRetry={() => setReloadKey((value) => value + 1)} />;
   if (data === null || data.campaign.id !== selectedCampaignId) return <div className="reports-state">Loading campaign analytics...</div>;
 
   const noAssignments = data.kpis.total_evaluations === 0;
@@ -138,5 +138,5 @@ function OverviewContent({
     {groups.length > 0 && <DashboardCard key={`${selectedCampaignId}-groups`} title="Completion Rate by Group" info="Completed / assigned evaluations attributed to each assignment group. Click a bar for group details." className="reports-group-chart" actions={groups.length > 5 ? <Link className="reports-card-action" to={`${base}/groups`}>All groups</Link> : undefined}><HorizontalChart legend relaxed={groups.length <= 2} maximum={100} unit="%" series={groups.map((group, index) => ({ id: String(group.group_id), label: group.group_name, color: palette[index % palette.length], value: group.completion_rate, detail: `${group.completed_evaluations} / ${group.total_evaluations}`, href: `${base}/groups/${group.group_id}` }))} /></DashboardCard>}
     {people.length > 0 && <DashboardCard key={`${selectedCampaignId}-people`} title="Employee Comparison" info="Only employees with reportable peer scores in every issued campaign section are compared, so each overall score uses the same section basis."><ComparisonChart employeesPath={`${base}/employees`} series={people.map((employee, index) => ({ id: String(employee.employee_id), label: employee.employee_name, color: palette[index % palette.length], value: employee.performance_summary.overall_peer_score, href: `${base}/employees/${employee.employee_id}` }))} /></DashboardCard>}
     {reportableRoles.length > 0 && <DashboardCard key={`${selectedCampaignId}-roles`} title="Rating by Role" info="Privacy-cleared peer ratings received by evaluated role." className="reports-role-chart"><HorizontalChart legend series={reportableRoles.map((role, index) => ({ id: String(role.role_id), label: role.role_name, color: palette[index % palette.length], value: role.average_score, href: `${base}/roles/${role.role_id}` }))} /></DashboardCard>}
-  </div>{missingCharts.length > 0 && <ReportsLoadError message={`Some charts couldn’t load: ${missingCharts.join(', ')}.`} onRetry={() => setReloadKey((value) => value + 1)} />}{distribution && !ratingAvailable && <p className="reports-dashboard-note">No privacy-released campaign rating distribution is available.</p>}{!sections.length && !ratingAvailable && !groups.length && !people.length && missingCharts.length === 0 && <p className="reports-dashboard-note">No privacy-cleared chart data is available for this campaign yet.</p>}{!people.length && (employees?.employees.length ?? 0) > 0 && <p className="reports-dashboard-note">Employee comparison is unavailable unless employees have reportable peer ratings for the same issued sections. <Link to={`${base}/employees`}>View all employees</Link></p>}<EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
+  </div>{missingCharts.length > 0 && <LoadError message={`Some charts couldn’t load: ${missingCharts.join(', ')}.`} onRetry={() => setReloadKey((value) => value + 1)} />}{distribution && !ratingAvailable && <p className="reports-dashboard-note">No privacy-released campaign rating distribution is available.</p>}{!sections.length && !ratingAvailable && !groups.length && !people.length && missingCharts.length === 0 && <p className="reports-dashboard-note">No privacy-cleared chart data is available for this campaign yet.</p>}{!people.length && (employees?.employees.length ?? 0) > 0 && <p className="reports-dashboard-note">Employee comparison is unavailable unless employees have reportable peer ratings for the same issued sections. <Link to={`${base}/employees`}>View all employees</Link></p>}<EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
 }

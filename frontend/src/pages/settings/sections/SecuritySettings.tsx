@@ -2,17 +2,20 @@ import { useEffect, useState } from 'react';
 import { useAppAuth } from '../../../auth/AppAuth';
 import { usePreferences } from '../preferences-context';
 import { formatSettingsDate } from '../settings-date';
+import InlineMessage from '../../../components/feedback/InlineMessage';
+import LoadError from '../../../components/feedback/LoadError';
+import { useToast } from '../../../components/feedback/feedback-context';
 import {
   fetchSecuritySettings, requestPasswordReset,
   type SecuritySettings as SecurityData,
 } from '../settings.api';
 
 export default function SecuritySettings() {
+  const toast = useToast();
   const { state, getAccessToken, signOut } = useAppAuth();
   const { preferences } = usePreferences();
   const [security, setSecurity] = useState<SecurityData | null>(null);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
   const [pending, setPending] = useState(false);
   const [retry, setRetry] = useState(0);
   const canManage = state.status === 'authenticated' && state.user.permissions.includes('settings.manage_self');
@@ -30,20 +33,13 @@ export default function SecuritySettings() {
     return () => controller.abort();
   }, [getAccessToken, retry]);
 
-  useEffect(() => {
-    if (!message) return;
-    const timer = window.setTimeout(() => setMessage(''), 6000);
-    return () => window.clearTimeout(timer);
-  }, [message]);
-
   async function sendPasswordReset() {
     if (pending) return;
     setPending(true);
     setError('');
-    setMessage('');
     try {
       const result = await requestPasswordReset(getAccessToken);
-      setMessage(result.message);
+      toast.success(result.message.replace(/\.$/, ''));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Security request failed. Try again.');
     } finally {
@@ -56,10 +52,9 @@ export default function SecuritySettings() {
   return <section className="card settings-panel" aria-labelledby="security-settings-title">
     <div className="settings-panel-header"><h2 id="security-settings-title">Security</h2>
       <p>Manage your sign-in and account protection.</p></div>
-    {error && <div className="settings-error" role="alert">{error}{!security && <button
-      type="button" className="btn btn-secondary" onClick={() => setRetry((value) => value + 1)}>Retry</button>}</div>}
-    {message && <p className="settings-success" role="status">{message}</p>}
-    {!security && !error && <p role="status">Loading security settings...</p>}
+    {error && (security ? <InlineMessage tone="error" onDismiss={() => setError('')}>{error}</InlineMessage>
+      : <LoadError message={error} onRetry={() => setRetry((value) => value + 1)} />)}
+        {!security && !error && <p role="status">Loading security settings...</p>}
     {development ? <div className="settings-security-section"><h3>Development account</h3>
       <p>Development account — security settings unavailable.</p></div> : security && <>
       <div className="settings-security-section"><h3>Sign-in method</h3>
