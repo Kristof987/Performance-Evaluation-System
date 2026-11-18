@@ -142,3 +142,37 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+.page-crash {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--color-bg);
+}
+
+.page-crash-card {
+  width: min(480px, 100%);
+  padding: var(--space-8);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text);
+}
+
+.page-crash-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.page-crash-card h1 { margin: var(--space-4) 0 var(--space-2); font-size: 20px; }
+.page-crash-card p { margin: 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.55; }
+.page-crash-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-6); }

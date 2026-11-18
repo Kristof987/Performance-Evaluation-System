@@ -7,6 +7,7 @@ import Auth0SignIn from './Auth0SignIn';
 import { safeReturnPath } from '../../auth/return-path';
 import { useAppAuth } from '../../auth/AppAuth';
 import './Login.css';
+import InlineMessage from '../../components/feedback/InlineMessage';
 
 function LoginWithAuth0() {
   const { state } = useAppAuth();
@@ -34,7 +35,7 @@ function Login() {
     : <LoginContent showDevelopmentLogin={import.meta.env.DEV} auth0Content={
         import.meta.env.DEV
           ? <p className="login-support">Auth0 is not configured. Use development identity selection below.</p>
-          : <p className="login-error" role="alert">Auth0 sign-in is unavailable. Set the VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID and VITE_AUTH0_AUDIENCE environment variables.</p>
+          : <InlineMessage tone="error">Auth0 sign-in is unavailable. Set the VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID and VITE_AUTH0_AUDIENCE environment variables.</InlineMessage>
       } />;
 }
 
@@ -109,7 +110,7 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
                 onChange={(event) => { setName(event.target.value); setErrorMessage(''); }}
               />
             </div>
-            {errorMessage && <p className="login-error" id="login-error" role="alert">{errorMessage}</p>}
+            {errorMessage && <InlineMessage tone="error" id="login-error">{errorMessage}</InlineMessage>}
 
             <button className="btn btn-primary login-submit" type="submit" disabled={isSubmitting}>
               {isSubmitting ? 'Selecting identity...' : 'Select development identity'}

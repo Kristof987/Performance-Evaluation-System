@@ -456,14 +456,6 @@ button.forms-editor-nav-item {
 .forms-page-header .forms-editor-header-actions { flex-wrap: wrap; }
 @media (max-width: 600px) { .forms-ai-options { grid-template-columns: 1fr; } .forms-ai-modal .forms-editor-modal-actions { flex-wrap: wrap; } }
 
-.forms-editor-modal-message {
-  background: var(--color-warning-bg);
-  border: 1px solid var(--color-warning);
-  border-radius: 10px;
-  color: var(--color-warning);
-  font-size: 13px;
-  padding: 10px 12px;
-}
 
 .forms-danger-action {
   color: var(--color-danger) !important;
@@ -1824,9 +1816,6 @@ button.forms-editor-nav-item {
   padding: 14px 18px 16px;
 }
 
-.forms-confirm-modal {
-  width: min(420px, 100%);
-}
 
 .forms-preview-backdrop {
   align-items: center;

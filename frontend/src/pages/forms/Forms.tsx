@@ -404,7 +404,7 @@ export default function Forms() {
            </DndContext>
             </div></> : <div className="forms-editor-empty">
               {(mode === 'forms' ? formsLoading : templatesLoading) ? <p role="status">Loading {mode}...</p>
-                : (mode === 'forms' ? formsError : templatesError) ? <p role="alert">{mode === 'forms' ? formsError : templatesError}</p>
+                : (mode === 'forms' ? formsError : templatesError) ? <InlineMessage tone="error">{mode === 'forms' ? formsError : templatesError}</InlineMessage>
                   : <>
                     <h2>{currentItems.length === 0 ? `No ${mode} yet` : mode === 'forms' ? 'No form selected' : 'No template selected'}</h2>
                     <p>{currentItems.length === 0 ? mode === 'forms' ? 'No questionnaires are available.' : 'No templates are available.' : `Select an existing ${mode === 'forms' ? 'form' : 'template'} from the list${canManageForms ? ', or create a new one.' : '.'}`}</p>

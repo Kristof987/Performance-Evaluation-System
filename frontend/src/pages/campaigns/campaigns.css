@@ -169,20 +169,6 @@ body.modal-open {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.campaign-page .campaign-activation-error {
-  background: var(--color-danger-bg);
-  border: 1px solid var(--color-danger);
-  border-radius: 10px;
-  margin-top: 16px;
-  padding: 12px 14px;
-  overflow-wrap: anywhere;
-}
-.campaign-page .campaign-activation-error strong {
-  color: var(--color-danger);
-}
-.campaign-page .campaign-activation-error p {
-  margin: 6px 0 0;
-}
 
 .campaign-groups-card {
   background: var(--color-surface);
@@ -388,15 +374,6 @@ body.modal-open {
 .campaign-matrix-group-picker { color: var(--color-text-secondary); display: flex; flex-direction: column; font-size: 12px; font-weight: 700; gap: 4px; min-width: 180px; }
 .campaign-matrix-group-picker select { max-width: 260px; }
 
-.campaign-matrix-warning {
-  background: var(--color-warning-bg);
-  border: 1px solid var(--color-warning);
-  border-radius: 12px;
-  color: var(--color-warning);
-  font: 700 13px var(--font-sans);
-  margin-bottom: 12px;
-  padding: 10px 12px;
-}
 .campaign-matrix-prerequisite { border-top: 1px solid var(--color-border); padding-top: 12px; font-size: 13px; }
 .campaign-matrix-prerequisite strong { color: var(--color-text); }
 .campaign-matrix-prerequisite p { margin: 4px 0 0; color: var(--color-text-secondary); }

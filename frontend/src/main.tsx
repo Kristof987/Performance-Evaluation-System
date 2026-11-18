@@ -29,6 +29,7 @@ import { Auth0PermissionDenied } from './pages/layout/Auth0Transition'
 import PreferencesProvider from './pages/settings/PreferencesProvider'
 import { applyTheme, cachedTheme } from './pages/settings/theme'
 import FeedbackProvider from './components/feedback/FeedbackProvider'
+import ErrorBoundary from './components/feedback/ErrorBoundary'
 
 function EvaluationQualityRedirect() {
   const { campaignId } = useParams()
@@ -90,9 +91,18 @@ function page(title: string[], element: ReactNode, rule?: AccessRule) {
   return <><PageTitle parts={title} /><ProtectedPage rule={rule}><ValidIds>{element}</ValidIds></ProtectedPage></>
 }
 
+/** A crash on one page shows a message there; navigating elsewhere starts with a fresh boundary. */
+function PageErrorBoundary({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
+  const { state } = useAppAuth()
+  const home = state.status === 'authenticated' && hasAccess(state.user.permissions, ACCESS.campaigns) ? '/hr-home' : '/employee-home'
+  return <ErrorBoundary key={pathname} homePath={home}>{children}</ErrorBoundary>
+}
+
 export default function AppRoutes() {
   return (
     <BrowserRouter>
+      <PageErrorBoundary>
       <Routes>
         <Route path="/" element={<><PageTitle parts={['Sign in']} /><Login /></>} />
         <Route path="/hr-home" element={page(['Dashboard'], <HrHomeRoute />)} />
@@ -121,6 +131,7 @@ export default function AppRoutes() {
         <Route path="/settings/:section" element={page(['Settings'], <SettingsPage />, ACCESS.settings)} />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      </PageErrorBoundary>
     </BrowserRouter>
   )
 }

@@ -4,6 +4,7 @@ import type { AssignedEvaluation } from '../../employee-home/employee-home.api';
 import { dashboardWork, evaluationAvailable, evaluationOverdue, evaluationStatus, evaluationTitle } from '../../employee-home/employee-home.utils';
 import { useMyEvaluations } from '../hooks/useMyEvaluations';
 import './MyEvaluationsPanel.css';
+import InlineMessage from '../../../components/feedback/InlineMessage';
 
 function formatDate(value: string | null) {
   if (!value) return 'No due date';
@@ -37,7 +38,7 @@ export default function MyEvaluationsPanel() {
 
   return <section className="card my-evaluations-panel" aria-labelledby="my-evaluations-heading">
     <div className="my-evaluations-heading"><div><h2 id="my-evaluations-heading">My evaluations</h2><p>Your issued assignments across all campaigns.</p></div><div className="my-evaluations-count"><strong>{loading ? '…' : `${actionable.length} to complete`}</strong><span>Current tasks</span></div></div>
-    {loading ? <p className="my-evaluations-empty" role="status">Loading your evaluations...</p> : error ? <p className="my-evaluations-empty" role="alert">{error}</p> : evaluations.length === 0 ? <p className="my-evaluations-empty">No evaluations are assigned to you yet.</p> : <>
+    {loading ? <p className="my-evaluations-empty" role="status">Loading your evaluations...</p> : error ? <InlineMessage tone="error">{error}</InlineMessage> : evaluations.length === 0 ? <p className="my-evaluations-empty">No evaluations are assigned to you yet.</p> : <>
       <div className="my-evaluations-filters"><label>Campaign<select className="form-control" value={campaignId} onChange={(event) => setCampaignId(event.target.value)}><option value="all">All campaigns</option>{campaigns.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><label>Status<select className="form-control" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option><option value="Not started">Not started</option><option value="In progress">In progress</option><option value="Submitted">Submitted</option></select></label></div>
       {filtered.length === 0 ? <p className="my-evaluations-empty">No evaluations match these filters.</p> : <div className="my-evaluations-table" role="table" aria-label="My assigned evaluations"><div className="my-evaluation-row my-evaluation-head" role="row"><span role="columnheader">Evaluation</span><span role="columnheader">Questionnaire and campaign</span><span role="columnheader">Due date</span><span role="columnheader">Status</span><span role="columnheader">Action</span></div>{filtered.map((evaluation) => <TaskRow key={evaluation.id} evaluation={evaluation} />)}</div>}
     </>}

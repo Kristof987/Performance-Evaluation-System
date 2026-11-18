@@ -479,7 +479,7 @@ export function CampaignDetails() {
   }
 
   const matrixNotice = <>
-    {!!evaluationMatrix.issuanceErrors?.length && <div className="campaign-matrix-warning" role="alert"><strong>Some planned evaluations could not be issued:</strong><ul>{evaluationMatrix.issuanceErrors.map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
+    {!!evaluationMatrix.issuanceErrors?.length && <InlineMessage tone="warning" className="campaign-inline-message"><strong>Some planned evaluations couldn’t be issued:</strong><ul>{evaluationMatrix.issuanceErrors.map((error, index) => <li key={index}>{error}</li>)}</ul></InlineMessage>}
     {matrixPlanningReadiness !== 'ready' && <div className="campaign-matrix-prerequisite" role="status">
       <strong>{matrixPlanningReadiness === 'empty' ? 'No employees available for evaluation planning' : campaign.status === 'scheduled' ? 'Select campaign groups first' : 'Save campaign groups first'}</strong>
       <p>{matrixPlanningReadiness === 'empty' ? 'Selected groups need active employees before evaluation pairs can be planned.' : campaign.status === 'scheduled' ? 'Select a campaign group to plan evaluation pairs.' : 'Select and save a campaign group to plan evaluation pairs.'}</p>
@@ -516,8 +516,8 @@ export function CampaignDetails() {
                   {campaign.lifecycleRetryAt && campaign.lifecycleError && campaign.status === 'active' && <div><dt>Next review transition retry</dt><dd>{formatDate(campaign.lifecycleRetryAt)} (Budapest)</dd></div>}
                   {campaign.lastTransitionAt && <div><dt>Last status change</dt><dd>{formatDate(campaign.lastTransitionAt)} (Budapest)</dd></div>}
                 </dl>
-                {campaign.activationError && campaign.status === 'scheduled' && <div className="campaign-activation-error" role="alert"><strong>Activation could not complete</strong><p>{campaign.activationError}</p><p>Review the error and correct the campaign setup or schedule. Activation retries automatically.</p></div>}
-                {campaign.lifecycleError && campaign.status === 'active' && <div className="campaign-activation-error" role="alert"><strong>Review transition could not complete</strong><p>{campaign.lifecycleError}</p><p>Review the error and correct the issue. The transition retries automatically.</p></div>}
+                {campaign.activationError && campaign.status === 'scheduled' && <InlineMessage tone="error" className="campaign-inline-message"><strong>Activation couldn’t complete</strong><p>{campaign.activationError}</p><p>Review the error and correct the campaign setup or schedule. Activation retries automatically.</p></InlineMessage>}
+                {campaign.lifecycleError && campaign.status === 'active' && <InlineMessage tone="error" className="campaign-inline-message"><strong>Review transition couldn’t complete</strong><p>{campaign.lifecycleError}</p><p>Review the error and correct the issue. The transition retries automatically.</p></InlineMessage>}
               </div>
             </details>
             </div>

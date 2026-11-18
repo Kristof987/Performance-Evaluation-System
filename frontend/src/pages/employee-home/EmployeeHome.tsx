@@ -7,6 +7,7 @@ import { fetchEmployeeDashboard, type AssignedEvaluation } from './employee-home
 import { dashboardWork, evaluationOverdue, evaluationStatus, evaluationTitle } from './employee-home.utils';
 import '../hr-home/components/MetricsGrid.css';
 import './employee-home.css';
+import InlineMessage from '../../components/feedback/InlineMessage';
 
 function formatDate(value: string | null) {
   if (!value) return 'No deadline';
@@ -96,7 +97,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
           <section className="card employee-dashboard-panel employee-tasks-panel" aria-labelledby="employee-tasks-heading">
             <div className="employee-panel-heading"><h2 id="employee-tasks-heading">Your tasks</h2></div>
             {loading ? <p className="employee-plain-empty">Loading evaluations...</p>
-              : error ? <p role="alert" className="employee-plain-empty">{error}</p>
+              : error ? <InlineMessage tone="error">{error}</InlineMessage>
               : actionable.length ? <div className="employee-compact-list">{actionable.map((item) => <EvaluationRow key={item.id} evaluation={item} />)}</div>
               : <p className="employee-plain-empty">You're all caught up. No evaluations need your attention right now.</p>}
             {!loading && !error && upcoming.length > 0 && <div className="employee-upcoming"><h3>Upcoming</h3><div className="employee-compact-list">{upcoming.map((item) => <EvaluationRow key={item.id} evaluation={item} upcoming />)}</div></div>}

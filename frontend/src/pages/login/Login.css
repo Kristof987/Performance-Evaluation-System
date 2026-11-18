@@ -69,7 +69,6 @@
   line-height: 1.5;
 }
 
-.login-auth0 .login-error { color: var(--color-danger); }
 
 .login-auth0-action { min-height: 46px; }
 
@@ -102,17 +101,6 @@
   font-weight: 400;
 }
 
-.login-error {
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--color-danger);
-  border-radius: var(--radius-md);
-  background: var(--color-danger-bg);
-  color: var(--color-danger);
-  font-size: 13px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
 
 .login-submit {
   width: 100%;
