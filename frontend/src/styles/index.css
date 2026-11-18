@@ -33,6 +33,21 @@
   --color-danger-solid-hover: #963726;
   --color-on-danger: #ffffff;
 
+  /* Charts: score scale (low → high) and group identity, in fixed order */
+  --chart-score-low: #c4553f;
+  --chart-score-mid: #d99a2b;
+  --chart-score-high: #2e9e6b;
+  --chart-series-1: #2a78d6;
+  --chart-series-2: #eb6834;
+  --chart-series-3: #1baf7a;
+  --chart-series-4: #eda100;
+  --chart-series-5: #e87ba4;
+  --chart-series-6: #008300;
+  --chart-series-7: #6250d6;
+  --chart-series-8: #e34948;
+  --chart-grid: #eceef5;
+  --chart-axis: #c9cddc;
+
   /* Typography */
   --font-sans: Inter, system-ui, sans-serif;
   --font-display: "Instrument Serif", serif;
@@ -90,6 +105,19 @@
   --color-danger-bg: #462e32;
   --color-danger-solid: #c95a47;
   --color-danger-solid-hover: #b54735;
+  --chart-score-low: #e07a68;
+  --chart-score-mid: #e2b45c;
+  --chart-score-high: #5fc894;
+  --chart-series-1: #3987e5;
+  --chart-series-2: #d95926;
+  --chart-series-3: #199e70;
+  --chart-series-4: #c98500;
+  --chart-series-5: #d55181;
+  --chart-series-6: #0ca30c;
+  --chart-series-7: #9085e9;
+  --chart-series-8: #e66767;
+  --chart-grid: #263047;
+  --chart-axis: #3d4a63;
   --shadow-sm: 0 8px 24px rgba(0, 0, 0, .15);
   --shadow-md: 0 18px 42px rgba(0, 0, 0, .25);
   --shadow-lg: 0 28px 80px rgba(0, 0, 0, .35);

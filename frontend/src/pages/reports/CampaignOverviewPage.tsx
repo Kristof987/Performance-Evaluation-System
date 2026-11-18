@@ -1,43 +1,19 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router';
-import { Info } from 'lucide-react';
-import { fetchCampaignRatingDistribution, fetchCampaignReportOverview, fetchEmployeeReportsOverview, fetchRolesReport } from './api/reports.api';
-import { ComparisonChart, Histogram, HorizontalChart } from './components/OverviewCharts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { fetchCampaignDashboard, fetchCampaignRatingDistribution } from './api/reports.api';
 import ReportsEmptyState from './components/ReportsEmptyState';
-import ReportsKpiPanel from './components/ReportsKpiPanel';
 import EvaluationQualitySummary from './components/EvaluationQualitySummary';
+import { GroupToggles, MAX_COMPARED_GROUPS, SectionTabs } from './components/ReportFilterBar';
+import { reportScopeTitle } from './reports.utils';
+import { ChartCard, CompletionDonut, Delta, DistributionBars, GroupedBars, Heatmap, MeterRows, ScoreBars, TrendLines, type HeatmapRow, type TrendSeries } from './charts/DashboardCharts';
+import { scoreColor, SERIES_COUNT, seriesColor, useChartTheme, type ChartTheme } from './charts/chartTheme';
 import ReportsLayout from './ReportsLayout';
-import type { CampaignRatingDistribution, CampaignReportOverview, EmployeeReportsOverview, ReportCampaignOption, ReportSectionScore, RolesReport } from './types/reports.types';
+import type { CampaignDashboard, CampaignRatingDistribution, DashboardGroup, ReportCampaignOption } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { useAppAuth } from '../../auth/AppAuth';
 import { hasTeamReportsOnly } from '../../app/access';
 import LoadError from '../../components/feedback/LoadError';
 import LoadingState from '../../components/feedback/LoadingState';
-
-function DashboardCard({ title, info, children, actions, className = '' }: { title: string; info: string; children: ReactNode; actions?: ReactNode; className?: string }) {
-  return <section className={`reports-card reports-dashboard-card ${className}`}><div className="reports-dashboard-card-heading"><div className="reports-dashboard-card-title"><h2>{title}</h2><span className="reports-info-icon" title={info} aria-label={info} tabIndex={0}><Info size={15} /></span></div>{actions}</div>{children}</section>;
-}
-
-function SectionChart({ sections, base, palette }: { sections: ReportSectionScore[]; base: string; palette: string[] }) {
-  const [sort, setSort] = useState<'highest' | 'lowest' | 'name'>('highest');
-  const reportable = sections.filter((section) => section.availability === 'available' && section.average_score !== null);
-  const sorted = [...reportable].sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'lowest' ? a.average_score! - b.average_score! || a.name.localeCompare(b.name) : b.average_score! - a.average_score! || a.name.localeCompare(b.name));
-  const visible = sections.length > 8 ? sorted.slice(0, 6) : sorted;
-  return <DashboardCard title="Average Rating by Section" info="Normalized peer section scores; evaluated employees contribute equally. Suppressed scores are excluded." actions={<div className="reports-chart-toolbar"><select aria-label="Sort sections" value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="highest">Highest first</option><option value="lowest">Lowest first</option><option value="name">Name A–Z</option></select>{sections.length > 8 && <Link to={`${base}/detailed`}>View all</Link>}</div>}>
-    <HorizontalChart relaxed={visible.length <= 3} axisLabel="Average peer rating (1–5)" series={visible.map((section) => ({ id: String(section.id), label: section.name, color: palette[sections.findIndex((item) => item.id === section.id) % palette.length], value: section.average_score, href: `${base}/detailed?section=${section.id}` }))} />
-    {sections.length > reportable.length && <p className="reports-chart-notice">{sections.length - reportable.length} section {sections.length - reportable.length === 1 ? 'rating is' : 'ratings are'} unavailable or withheld.</p>}
-  </DashboardCard>;
-}
-
-function RatingDistributionChart({ data, sections }: { data: CampaignRatingDistribution; sections: ReportSectionScore[] }) {
-  const [mode, setMode] = useState<'campaign' | 'section'>('campaign');
-  const [sectionId, setSectionId] = useState<number | null>(null);
-  const selectedId = sectionId !== null && data.sections.some((item) => item.section_id === sectionId) ? sectionId : data.sections[0]?.section_id;
-  const result = mode === 'campaign' ? data.campaign : data.sections.find((item) => item.section_id === selectedId);
-  return <DashboardCard title="Rating Distribution" info={`Each peer rating is converted from its original scale to 1–5. Labels 1–2, 2–3 and 3–4 include the lower value but not the upper; 4–5 includes 5. This counts only privacy-released responses, not employee averages. ${data.notes}`}><div className="reports-distribution-controls"><div className="reports-segmented" role="group" aria-label="Rating distribution scope"><button type="button" aria-pressed={mode === 'campaign'} className={mode === 'campaign' ? 'active' : ''} onClick={() => setMode('campaign')}>Campaign</button><button type="button" aria-pressed={mode === 'section'} disabled={!data.sections.length} className={mode === 'section' ? 'active' : ''} onClick={() => setMode('section')}>By Section</button></div>{mode === 'section' && data.sections.length > 1 && <select className="form-control" aria-label="Select distribution section" value={selectedId ?? ''} onChange={(event) => setSectionId(Number(event.target.value))}>{data.sections.map((item) => <option value={item.section_id ?? ''} key={item.section_id}>{sections.find((section) => section.id === item.section_id)?.name ?? `Section ${item.section_id}`}</option>)}</select>}</div>
-    {result?.availability === 'available' && result.bins ? <><p className="reports-chart-question">Based on {result.response_count} peer ratings</p><Histogram buckets={result.bins} /></> : <p className="reports-chart-notice">{result?.availability === 'suppressed' ? 'No privacy-released rating responses for this scope.' : 'No rating responses for this scope.'}</p>}
-  </DashboardCard>;
-}
 
 export function ReportsIndexPage() {
   const { state } = useAppAuth();
@@ -58,15 +34,7 @@ export default function CampaignOverviewPage() {
   return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null} allowQualityPreview>{(layoutState) => <OverviewContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layoutState} />}</ReportsLayout>;
 }
 
-function OverviewContent({
-  selectedCampaignId,
-  validCampaignId,
-  getAccessToken,
-  loadingCampaigns,
-  campaignsError,
-  campaigns,
-  retryCampaigns,
-}: {
+function OverviewContent({ selectedCampaignId, validCampaignId, getAccessToken, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: {
   selectedCampaignId: number;
   validCampaignId: boolean;
   campaigns: ReportCampaignOption[];
@@ -75,12 +43,9 @@ function OverviewContent({
   campaignsError: string;
   retryCampaigns: () => void;
 }) {
-  const [data, setData] = useState<CampaignReportOverview | null>(null);
-  const [roles, setRoles] = useState<RolesReport | null>(null);
-  const [employees, setEmployees] = useState<EmployeeReportsOverview | null>(null);
+  const [data, setData] = useState<CampaignDashboard | null>(null);
   const [distribution, setDistribution] = useState<CampaignRatingDistribution | null>(null);
-  // Optional charts that failed to load; the rest of the overview still shows.
-  const [missingCharts, setMissingCharts] = useState<string[]>([]);
+  const [distributionFailed, setDistributionFailed] = useState(false);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const { state } = useAppAuth();
@@ -96,48 +61,204 @@ function OverviewContent({
     if (!validCampaignId || !token || qualityPreview) return undefined;
     const controller = new AbortController();
     setData(null);
-    setRoles(null);
-    setEmployees(null);
     setDistribution(null);
-    setMissingCharts([]);
+    setDistributionFailed(false);
     setError('');
-    fetchCampaignReportOverview(token, selectedCampaignId, controller.signal)
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        setData(result);
-      })
-      .catch((cause) => {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Campaign report could not be loaded.');
-      });
-    fetchRolesReport(token, selectedCampaignId, 'evaluatee', controller.signal).then((result) => { if (!controller.signal.aborted) setRoles(result); }).catch(() => { if (!controller.signal.aborted) { setRoles(null); setMissingCharts((current) => [...current, 'rating by role']); } });
-    fetchEmployeeReportsOverview(token, selectedCampaignId, controller.signal).then((result) => { if (!controller.signal.aborted) setEmployees(result); }).catch(() => { if (!controller.signal.aborted) { setEmployees(null); setMissingCharts((current) => [...current, 'employee comparison']); } });
-    fetchCampaignRatingDistribution(token, selectedCampaignId, controller.signal).then((result) => { if (!controller.signal.aborted) setDistribution(result); }).catch(() => { if (!controller.signal.aborted) setMissingCharts((current) => [...current, 'rating distribution']); });
+    fetchCampaignDashboard(token, selectedCampaignId, controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setData(result); })
+      .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Campaign report could not be loaded.'); });
+    fetchCampaignRatingDistribution(token, selectedCampaignId, controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setDistribution(result); })
+      .catch(() => { if (!controller.signal.aborted) setDistributionFailed(true); });
     return () => controller.abort();
   }, [!!getAccessToken, reloadKey, selectedCampaignId, validCampaignId, qualityPreview]);
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <LoadingState variant="page" label="Loading campaigns" />;
   if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
-  if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
+  if (!selectedCampaign) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
   if (qualityPreview) return <div className="reports-overview reports-overview-dashboard"><p className="reports-dashboard-note">Campaign performance charts become available in Review. Completed peer evaluations can already be checked for campaign-level quality patterns.</p><EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
   if (error) return <LoadError message={error} onRetry={() => setReloadKey((value) => value + 1)} />;
   if (data === null || data.campaign.id !== selectedCampaignId) return <LoadingState variant="page" label="Loading campaign report" />;
 
-  const noAssignments = data.kpis.total_evaluations === 0;
-  const noCompleted = data.kpis.total_evaluations > 0 && data.kpis.completed_evaluations === 0;
+  return <div className="reports-overview reports-overview-dashboard">
+    <Dashboard data={data} distribution={distribution?.campaign ? distribution : null} distributionFailed={distributionFailed} onRetry={() => setReloadKey((value) => value + 1)} />
+    <EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} />
+  </div>;
+}
 
-  const base = `/reports/campaigns/${selectedCampaignId}`;
-  const palette = ['#3468cc', '#8061cb', '#1a9d7b', '#4384b8', '#549d89', '#926fb1'];
-  const ratingAvailable = distribution?.campaign.availability === 'available' && distribution.campaign.bins !== null;
-  const sections = data.sections.filter((section) => section.availability === 'available' && section.average_score !== null);
-  const groups = data.groups.filter((group) => group.completion_rate !== null);
-  const people = (employees?.campaign.id === selectedCampaignId ? employees.employees : []).filter((employee) => data.sections.length > 0 && employee.performance_summary.availability === 'available' && employee.performance_summary.overall_peer_score !== null && employee.performance_summary.reportable_sections === data.sections.length);
-  const reportableRoles = (roles?.campaign.id === selectedCampaignId ? roles.roles : []).filter((role) => role.score_availability === 'available' && role.average_score !== null);
-  return <div className="reports-overview reports-overview-dashboard"><ReportsKpiPanel kpis={data.kpis} />{noAssignments && <p className="reports-dashboard-note">No evaluations have been assigned yet.</p>}{noCompleted && <p className="reports-dashboard-note">No evaluations have been completed yet. Charts use submitted responses only.</p>}<div className="reports-chart-grid reports-dashboard-grid">
-    {sections.length > 0 && <SectionChart key={`${selectedCampaignId}-sections`} sections={data.sections} base={base} palette={palette} />}
-    {distribution && ratingAvailable && <RatingDistributionChart key={`${selectedCampaignId}-distribution`} data={distribution} sections={data.sections} />}
-    {groups.length > 0 && <DashboardCard key={`${selectedCampaignId}-groups`} title="Completion Rate by Group" info="Completed / assigned evaluations attributed to each assignment group. Click a bar for group details." className="reports-group-chart" actions={groups.length > 5 ? <Link className="reports-card-action" to={`${base}/groups`}>All groups</Link> : undefined}><HorizontalChart legend relaxed={groups.length <= 2} maximum={100} unit="%" series={groups.map((group, index) => ({ id: String(group.group_id), label: group.group_name, color: palette[index % palette.length], value: group.completion_rate, detail: `${group.completed_evaluations} / ${group.total_evaluations}`, href: `${base}/groups/${group.group_id}` }))} /></DashboardCard>}
-    {people.length > 0 && <DashboardCard key={`${selectedCampaignId}-people`} title="Employee Comparison" info="Only employees with reportable peer scores in every issued campaign section are compared, so each overall score uses the same section basis."><ComparisonChart employeesPath={`${base}/employees`} series={people.map((employee, index) => ({ id: String(employee.employee_id), label: employee.employee_name, color: palette[index % palette.length], value: employee.performance_summary.overall_peer_score, href: `${base}/employees/${employee.employee_id}` }))} /></DashboardCard>}
-    {reportableRoles.length > 0 && <DashboardCard key={`${selectedCampaignId}-roles`} title="Rating by Role" info="Privacy-cleared peer ratings received by evaluated role." className="reports-role-chart"><HorizontalChart legend series={reportableRoles.map((role, index) => ({ id: String(role.role_id), label: role.role_name, color: palette[index % palette.length], value: role.average_score, href: `${base}/roles/${role.role_id}` }))} /></DashboardCard>}
-  </div>{missingCharts.length > 0 && <LoadError message={`Some charts couldn’t load: ${missingCharts.join(', ')}.`} onRetry={() => setReloadKey((value) => value + 1)} />}{distribution && !ratingAvailable && <p className="reports-dashboard-note">No privacy-released campaign rating distribution is available.</p>}{!sections.length && !ratingAvailable && !groups.length && !people.length && missingCharts.length === 0 && <p className="reports-dashboard-note">No privacy-cleared chart data is available for this campaign yet.</p>}{!people.length && (employees?.employees.length ?? 0) > 0 && <p className="reports-dashboard-note">Employee comparison is unavailable unless employees have reportable peer ratings for the same issued sections. <Link to={`${base}/employees`}>View all employees</Link></p>}<EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
+function useReportScope(data: CampaignDashboard) {
+  const [params, setParams] = useSearchParams();
+  const sectionParam = Number(params.get('section'));
+  const section = data.sections.find((item) => item.id === sectionParam);
+  const groupIds = (params.get('groups') ?? '').split(',').map(Number).filter((id) => data.groups.some((group) => group.id === id)).slice(0, MAX_COMPARED_GROUPS);
+  const update = (changes: { section?: number | null; groups?: number[] }) => setParams((current) => {
+    const next = new URLSearchParams(current);
+    if (changes.section !== undefined) { if (changes.section === null) next.delete('section'); else next.set('section', String(changes.section)); }
+    if (changes.groups !== undefined) { if (changes.groups.length === 0) next.delete('groups'); else next.set('groups', changes.groups.join(',')); }
+    return next;
+  }, { replace: true });
+  return { section, groupIds, update };
+}
+
+const shortCampaign = (campaign: ReportCampaignOption) => campaign.name.length > 14 ? `${campaign.name.slice(0, 13)}…` : campaign.name;
+
+function Dashboard({ data, distribution, distributionFailed, onRetry }: { data: CampaignDashboard; distribution: CampaignRatingDistribution | null; distributionFailed: boolean; onRetry: () => void }) {
+  const theme = useChartTheme();
+  const navigate = useNavigate();
+  const { section, groupIds, update } = useReportScope(data);
+  const base = `/reports/campaigns/${data.campaign.id}`;
+  // Groups keep the colour of their place in the campaign; past eight they take a free slot in the comparison.
+  const colorOf = useMemo(() => {
+    const index = new Map(data.groups.map((group, position) => [group.id, position]));
+    return (id: number) => data.groups.length <= SERIES_COUNT ? seriesColor(theme, index.get(id) ?? 0) : seriesColor(theme, Math.max(groupIds.indexOf(id), 0));
+  }, [data.groups, groupIds, theme]);
+  const selectedGroups = groupIds.map((id) => data.groups.find((group) => group.id === id)!);
+  const openDetails = (sectionId: number, groupId?: number) => navigate(`${base}/detailed?section=${sectionId}${groupId ? `&group_id=${groupId}` : ''}`);
+
+  return <>
+    <div className="reports-scope-bar">
+      <SectionTabs sections={data.sections} selected={section?.id ?? null} onSelect={(id) => update({ section: id })} />
+      <div className="reports-scope-row">
+        <GroupToggles groups={data.groups} selected={groupIds} colorOf={colorOf} onChange={(groups) => update({ groups })} />
+        <p className="reports-scope-title" aria-live="polite">{reportScopeTitle(section, selectedGroups)}</p>
+      </div>
+    </div>
+    {data.completion.completed_evaluations === 0 && <p className="reports-dashboard-note">{data.completion.total_evaluations === 0 ? 'No evaluations have been assigned yet.' : 'No evaluations have been completed yet. Charts use submitted responses only.'}</p>}
+    {section
+      ? <SectionView theme={theme} data={data} sectionId={section.id} groups={selectedGroups} colorOf={colorOf} distribution={distribution} onOpen={openDetails} />
+      : selectedGroups.length
+        ? <GroupsView theme={theme} data={data} groups={selectedGroups} colorOf={colorOf} onSection={(id) => update({ section: id })} />
+        : <CampaignView theme={theme} data={data} colorOf={colorOf} distribution={distribution} onSection={(id) => update({ section: id })} />}
+    {distributionFailed && <LoadError message="The rating distribution couldn’t load." onRetry={onRetry} />}
+    {data.previous_campaign && <p className="reports-chart-footnote">Changes compare with {data.previous_campaign.name}, the previous reportable campaign.</p>}
+  </>;
+}
+
+const available = (score: { score: number | null; availability: string } | undefined) => score?.availability === 'available' ? score.score : null;
+
+function Kpi({ label, value, valueStyle, children }: { label: string; value: string; valueStyle?: React.CSSProperties; children?: React.ReactNode }) {
+  return <div className="reports-kpi-card"><span>{label}</span><strong style={valueStyle} title={value}>{value}</strong><small>{children}</small></div>;
+}
+
+function CampaignView({ theme, data, colorOf, distribution, onSection }: { theme: ChartTheme; data: CampaignDashboard; colorOf: (id: number) => string; distribution: CampaignRatingDistribution | null; onSection: (id: number) => void }) {
+  const reportable = data.sections.filter((item) => item.availability === 'available' && item.score !== null).sort((a, b) => b.score! - a.score!);
+  const hiddenSections = data.sections.length - reportable.length;
+  const overall = available(data.overall);
+  const strongest = reportable[0];
+  const weakest = reportable.length > 1 ? reportable[reportable.length - 1] : undefined;
+  const vsPrevious = data.previous_campaign ? `vs. ${data.previous_campaign.name}` : '';
+  const change = (current: number | null, previous: number | null, fallback: string, digits = 2, unit = '') => current !== null && previous !== null
+    ? <><Delta current={current} previous={previous} digits={digits} unit={unit} label={vsPrevious} /> {vsPrevious}</> : fallback;
+  const trend = data.trend.filter((point) => point.overall !== null).length > 1;
+  const groupRows: HeatmapRow[] = data.groups.map((group) => ({ id: group.id, name: group.name, color: colorOf(group.id), cells: group.sections }));
+  const campaignRow: HeatmapRow = { id: 0, name: 'All groups', emphasis: true, cells: Object.fromEntries(data.sections.map((item) => [String(item.id), item])) };
+  const ratingBins = distribution?.campaign.availability === 'available' ? distribution.campaign.bins : null;
+
+  return <>
+    <section className="reports-kpi-row" aria-label="Campaign metrics">
+      <Kpi label="Average peer rating" value={overall === null ? (data.overall.availability === 'suppressed' ? 'Hidden' : '–') : overall.toFixed(2)}>{change(overall, data.overall.previous_score, 'Peer ratings on a 1–5 scale')}</Kpi>
+      <Kpi label="Completion" value={data.completion.rate === null ? '–' : `${data.completion.rate}%`}>{change(data.completion.rate, data.completion.previous_rate, `${data.completion.completed_evaluations} / ${data.completion.total_evaluations} evaluations`, 0, ' pt')}</Kpi>
+      <Kpi label="Strongest section" value={strongest?.name ?? '–'} valueStyle={strongest ? { color: scoreColor(theme, strongest.score!) } : undefined}>{strongest ? <>{strongest.score!.toFixed(2)} {change(strongest.score, strongest.previous_score, '')}</> : 'Not enough released ratings'}</Kpi>
+      <Kpi label="Development area" value={weakest?.name ?? '–'} valueStyle={weakest ? { color: scoreColor(theme, weakest.score!) } : undefined}>{weakest ? <>{weakest.score!.toFixed(2)} {change(weakest.score, weakest.previous_score, '')}</> : 'Needs at least two released sections'}</Kpi>
+    </section>
+
+    <div className="reports-viz-grid">
+      {reportable.length > 0 && <ChartCard title="Average rating by section" subtitle={`Peer ratings, 1–5 · colour follows the score · line = campaign average${hiddenSections ? ` · ${hiddenSections} hidden or without ratings` : ''}`}>
+        <ScoreBars theme={theme} rows={reportable.map((item) => ({ id: item.id, name: item.name, score: item.score, previous: item.previous_score }))} reference={overall} referenceLabel="Campaign average" onSelect={onSection} />
+      </ChartCard>}
+      {reportable.length > 0 && <ChartCard title="Strengths and development areas" subtitle={data.previous_campaign ? `Change since ${data.previous_campaign.name}` : 'Sections from highest to lowest'}>
+        <ol className="reports-rank-list">{reportable.map((item, index) => <li key={item.id}>
+          <button type="button" onClick={() => onSection(item.id)}><i style={{ background: scoreColor(theme, item.score!) }} aria-hidden="true" /><span className="reports-rank-name">{item.name}</span>
+            {reportable.length > 3 && index < 2 && <em className="is-strength">Strength</em>}{reportable.length > 3 && index >= reportable.length - 2 && <em className="is-develop">Develop</em>}</button>
+          <strong>{item.score!.toFixed(2)}</strong><Delta current={item.score} previous={item.previous_score} label={data.previous_campaign ? `vs. ${data.previous_campaign.name}` : undefined} />
+        </li>)}</ol>
+      </ChartCard>}
+    </div>
+
+    {data.groups.length > 0 && data.sections.length > 0 && <ChartCard title="Groups × sections" subtitle="Each cell is the group’s peer rating · hatched = hidden by the privacy threshold · click a group name above to compare">
+      <Heatmap theme={theme} sections={data.sections} rows={[...groupRows, campaignRow]} onCell={onSection} />
+    </ChartCard>}
+
+    <div className="reports-viz-grid">
+      {data.completion.total_evaluations > 0 && <ChartCard title="Completion" subtitle="Submitted evaluations per assignment group">
+        <div className="reports-completion"><CompletionDonut theme={theme} completed={data.completion.completed_evaluations} total={data.completion.total_evaluations} />
+          <MeterRows rows={data.groups.filter((group) => group.total_evaluations > 0).map((group) => ({ id: group.id, name: group.name, value: group.completion_rate, color: colorOf(group.id), detail: `${group.completed_evaluations} / ${group.total_evaluations} completed` }))} />
+        </div>
+      </ChartCard>}
+      {ratingBins && <ChartCard title="How ratings are spread" subtitle={`${distribution!.campaign.response_count} peer ratings, converted to 1–5`}>
+        <DistributionBars theme={theme} bins={ratingBins} />
+      </ChartCard>}
+    </div>
+
+    {trend && <ChartCard title="Over time" subtitle={`Peer rating in recent reportable campaigns`}>
+      <TrendLines theme={theme} points={data.trend.map((point) => ({ label: shortCampaign(point.campaign), fullName: point.campaign.name, overall: point.overall }))} series={[{ key: 'overall', name: 'Average peer rating', color: theme.primary }]} />
+    </ChartCard>}
+    {reportable.length === 0 && !ratingBins && <p className="reports-dashboard-note">No privacy-cleared chart data is available for this campaign yet.</p>}
+  </>;
+}
+
+function GroupsView({ theme, data, groups, colorOf, onSection }: { theme: ChartTheme; data: CampaignDashboard; groups: DashboardGroup[]; colorOf: (id: number) => string; onSection: (id: number) => void }) {
+  const overall = available(data.overall);
+  const series = groups.map((group) => ({ id: group.id, name: group.name, color: colorOf(group.id), values: Object.fromEntries(Object.entries(group.sections).map(([id, cell]) => [id, available(cell)])) }));
+  const trendSeries: TrendSeries[] = [...groups.map((group) => ({ key: `g${group.id}`, name: group.name, color: colorOf(group.id) })), { key: 'overall', name: 'All groups', color: theme.textMuted, dashed: true }];
+  const hasScores = groups.some((group) => Object.values(group.sections).some((cell) => available(cell) !== null));
+  return <>
+    <section className="reports-kpi-row" aria-label="Group metrics">{groups.map((group) => {
+      const score = available(group.overall);
+      return <div key={group.id} className="reports-kpi-card reports-kpi-group" style={{ borderTopColor: colorOf(group.id) }}>
+        <span>{group.name}</span>
+        <strong style={score !== null ? { color: scoreColor(theme, score) } : undefined}>{score === null ? (group.overall.availability === 'suppressed' ? 'Hidden' : '–') : score.toFixed(2)}</strong>
+        <small><Delta current={score} previous={overall} label="vs. all groups" /> vs. all groups {data.previous_campaign && <><Delta current={score} previous={group.overall.previous_score} label={`vs. ${data.previous_campaign.name}`} /> vs. previous</>}</small>
+        <small>{group.completion_rate === null ? 'No assignments' : `${group.completion_rate}% complete · ${group.employee_count} members`}</small>
+      </div>;
+    })}</section>
+    {hasScores ? <ChartCard title="Sections by group" subtitle={`Peer ratings, 1–5 · line = campaign average${overall !== null ? ` (${overall.toFixed(2)})` : ''}`}>
+      <GroupedBars theme={theme} categories={data.sections} series={series} reference={overall} />
+    </ChartCard> : <p className="reports-dashboard-note">The selected groups have no released section ratings. Small groups are hidden by the privacy threshold.</p>}
+    <ChartCard title="Groups × sections" subtitle="Selected groups and the campaign · hatched = hidden by the privacy threshold">
+      <Heatmap theme={theme} sections={data.sections} rows={[...groups.map((group) => ({ id: group.id, name: group.name, color: colorOf(group.id), cells: group.sections })), { id: 0, name: 'All groups', emphasis: true, cells: Object.fromEntries(data.sections.map((item) => [String(item.id), item])) }]} onCell={onSection} />
+    </ChartCard>
+    {data.trend.length > 1 && <ChartCard title="Over time" subtitle={`Group peer rating in recent reportable campaigns`}>
+      <TrendLines theme={theme} points={data.trend.map((point) => ({ label: shortCampaign(point.campaign), fullName: point.campaign.name, overall: point.overall, ...Object.fromEntries(groups.map((group) => [`g${group.id}`, point.groups[String(group.id)] ?? null])) }))} series={trendSeries} />
+    </ChartCard>}
+  </>;
+}
+
+function SectionView({ theme, data, sectionId, groups, colorOf, distribution, onOpen }: { theme: ChartTheme; data: CampaignDashboard; sectionId: number; groups: DashboardGroup[]; colorOf: (id: number) => string; distribution: CampaignRatingDistribution | null; onOpen: (sectionId: number, groupId?: number) => void }) {
+  const section = data.sections.find((item) => item.id === sectionId)!;
+  const score = available(section);
+  const selected = new Set(groups.map((group) => group.id));
+  const ranked = data.groups.map((group) => ({ id: group.id, name: group.name, score: available(group.sections[String(sectionId)]), muted: selected.size > 0 && !selected.has(group.id) })).filter((row) => row.score !== null).sort((a, b) => b.score! - a.score!);
+  const hiddenGroups = data.groups.filter((group) => group.sections[String(sectionId)]?.availability === 'suppressed').length;
+  const sectionBins = distribution?.sections.find((item) => item.section_id === sectionId);
+  const trendPoints = data.trend.map((point) => ({ label: shortCampaign(point.campaign), fullName: point.campaign.name, section: point.sections[String(sectionId)] ?? null, overall: point.overall,
+    ...Object.fromEntries(groups.map((group) => [`g${group.id}`, point.group_sections[String(group.id)]?.[String(sectionId)] ?? null])) }));
+  const trendSeries: TrendSeries[] = groups.length
+    ? [...groups.map((group) => ({ key: `g${group.id}`, name: group.name, color: colorOf(group.id) })), { key: 'section', name: 'All groups', color: theme.textMuted, dashed: true }]
+    : [{ key: 'section', name: section.name, color: theme.primary }, { key: 'overall', name: 'All sections', color: theme.textMuted, dashed: true }];
+  return <>
+    <section className="reports-kpi-row" aria-label={`${section.name} metrics`}>
+      <Kpi label={`${section.name} · all groups`} value={score === null ? (section.availability === 'suppressed' ? 'Hidden' : '–') : score.toFixed(2)} valueStyle={score !== null ? { color: scoreColor(theme, score) } : undefined}>
+        <Delta current={score} previous={available(data.overall)} label="vs. average of all sections" /> vs. all sections {data.previous_campaign && <><Delta current={score} previous={section.previous_score} label={`vs. ${data.previous_campaign.name}`} /> vs. previous</>}
+      </Kpi>
+      {groups.map((group) => {
+        const value = available(group.sections[String(sectionId)]);
+        return <div key={group.id} className="reports-kpi-card reports-kpi-group" style={{ borderTopColor: colorOf(group.id) }}><span>{group.name} · {section.name}</span><strong style={value !== null ? { color: scoreColor(theme, value) } : undefined}>{value === null ? (group.sections[String(sectionId)]?.availability === 'suppressed' ? 'Hidden' : '–') : value.toFixed(2)}</strong><small><Delta current={value} previous={score} label="vs. all groups" /> vs. all groups</small></div>;
+      })}
+    </section>
+    <div className="reports-viz-grid">
+      <ChartCard title={`All groups on ${section.name}`} subtitle={`${selected.size ? 'Selected groups highlighted · ' : ''}colour follows the score · line = all groups${hiddenGroups ? ` · ${hiddenGroups} hidden by the privacy threshold` : ''}`}
+        actions={<button type="button" className="reports-card-action" onClick={() => onOpen(sectionId)}>Questions →</button>}>
+        {ranked.length ? <ScoreBars theme={theme} rows={ranked} reference={score} referenceLabel="All groups" onSelect={(groupId) => onOpen(sectionId, groupId)} /> : <p className="reports-chart-notice">No group has a released rating for this section.</p>}
+      </ChartCard>
+      <ChartCard title={`How ${section.name} answers are spread`} subtitle={sectionBins?.availability === 'available' ? `${sectionBins.response_count} peer ratings across all groups` : undefined}>
+        {sectionBins?.availability === 'available' && sectionBins.bins ? <DistributionBars theme={theme} bins={sectionBins.bins} /> : <p className="reports-chart-notice">{sectionBins?.availability === 'suppressed' ? 'Hidden by the privacy threshold.' : 'No rating responses for this section.'}</p>}
+      </ChartCard>
+    </div>
+    {data.trend.length > 1 && <ChartCard title={`${section.name} over time`} subtitle={`Peer rating in recent reportable campaigns · dashed = ${groups.length ? 'all groups' : 'average of all sections'}`}>
+      <TrendLines theme={theme} points={trendPoints} series={trendSeries} />
+    </ChartCard>}
+    <p className="reports-chart-footnote"><Link to={`/reports/campaigns/${data.campaign.id}/detailed?section=${sectionId}`}>Open the question breakdown for {section.name}</Link></p>
+  </>;
 }

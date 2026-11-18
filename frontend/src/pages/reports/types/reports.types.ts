@@ -302,3 +302,34 @@ export type CampaignReportOverview = {
   employees: ReportEmployeeOverview;
   notes: ReportDataNotes;
 };
+
+export type ScoreAvailability = 'available' | 'no_data' | 'suppressed';
+export type DashboardScore = { score: number | null; availability: ScoreAvailability };
+export type DashboardDeltaScore = DashboardScore & { previous_score: number | null };
+export type DashboardGroup = {
+  id: number;
+  name: string;
+  employee_count: number;
+  completed_evaluations: number;
+  total_evaluations: number;
+  completion_rate: number | null;
+  overall: DashboardDeltaScore;
+  sections: Record<string, DashboardScore>;
+};
+export type DashboardTrendPoint = {
+  campaign: ReportCampaignOption;
+  overall: number | null;
+  completion_rate: number | null;
+  sections: Record<string, number | null>;
+  groups: Record<string, number | null>;
+  group_sections: Record<string, Record<string, number | null>>;
+};
+export type CampaignDashboard = {
+  campaign: ReportCampaignOption;
+  previous_campaign: ReportCampaignOption | null;
+  completion: { completed_evaluations: number; total_evaluations: number; rate: number | null; previous_rate: number | null };
+  overall: DashboardDeltaScore;
+  sections: Array<DashboardDeltaScore & { id: number; name: string }>;
+  groups: DashboardGroup[];
+  trend: DashboardTrendPoint[];
+};

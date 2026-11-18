@@ -820,6 +820,57 @@ class ReportDataNotes(BaseModel):
     confidentiality: str
 
 
+class DashboardScore(BaseModel):
+    score: float | None = None
+    availability: Literal["available", "no_data", "suppressed"]
+
+
+class DashboardDeltaScore(DashboardScore):
+    previous_score: float | None = None
+
+
+class DashboardSection(DashboardDeltaScore):
+    id: int
+    name: str
+
+
+class DashboardCompletion(BaseModel):
+    completed_evaluations: int
+    total_evaluations: int
+    rate: int | None = None
+    previous_rate: int | None = None
+
+
+class DashboardGroup(BaseModel):
+    id: int
+    name: str
+    employee_count: int
+    completed_evaluations: int
+    total_evaluations: int
+    completion_rate: int | None = None
+    overall: DashboardDeltaScore
+    sections: dict[int, DashboardScore]
+
+
+class DashboardTrendPoint(BaseModel):
+    campaign: ReportCampaignOption
+    overall: float | None = None
+    completion_rate: int | None = None
+    sections: dict[int, float | None]
+    groups: dict[int, float | None]
+    group_sections: dict[int, dict[int, float | None]]
+
+
+class CampaignDashboardResponse(BaseModel):
+    campaign: ReportCampaignOption
+    previous_campaign: ReportCampaignOption | None = None
+    completion: DashboardCompletion
+    overall: DashboardDeltaScore
+    sections: list[DashboardSection]
+    groups: list[DashboardGroup]
+    trend: list[DashboardTrendPoint]
+
+
 class CampaignReportOverviewResponse(BaseModel):
     campaign: ReportCampaignOption
     kpis: ReportKpiSummary

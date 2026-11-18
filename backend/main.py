@@ -27,6 +27,7 @@ import email_service
 import models
 import form_snapshot_service
 import reporting_service
+import report_dashboard_service
 import question_analytics_service
 import evaluation_quality_service
 import ai_workflow_service
@@ -2228,6 +2229,17 @@ def get_campaign_report_overview(
 ):
     reject_conflicting_requester(requester_user_id, actor)
     return reporting_service.build_campaign_report_overview(campaign_id, actor, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/dashboard", response_model=schemas.CampaignDashboardResponse)
+def get_campaign_report_dashboard(
+    campaign_id: int,
+    requester_user_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    reject_conflicting_requester(requester_user_id, actor)
+    return report_dashboard_service.build_campaign_dashboard(campaign_id, actor, db)
 
 
 @app.get("/reports/campaigns/{campaign_id}/evaluation-quality", response_model=schemas.EvaluationQualityResponse)

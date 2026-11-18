@@ -3,10 +3,6 @@ import { Link } from 'react-router';
 import type { ChartSeries } from './ReportCharts';
 
 const label = (value: string, length = 19) => value.length > length ? `${value.slice(0, length - 1)}…` : value;
-const employeeLabel = (name: string) => {
-  const parts = name.trim().split(/\s+/);
-  return parts.length > 1 ? `${label(parts[0], 8)} ${parts[parts.length - 1][0]}.` : label(name, 11);
-};
 
 function useVisible(series: ChartSeries[], legend: boolean) {
   const [selection, setSelection] = useState<string[] | null>(null);
@@ -53,24 +49,4 @@ export function Histogram({ buckets, compact = false }: { buckets: Array<{ label
     <text className="reports-svg-axis" x={width / 2 + 30} y={compact ? 195 : 225} textAnchor="middle">Rating (1–5)</text>
     <text className="reports-svg-axis" transform={`translate(14 ${compact ? 96 : 112}) rotate(-90)`} textAnchor="middle">Share of ratings (%)</text>
   </svg></div>;
-}
-
-export function ComparisonChart({ series, employeesPath }: { series: ChartSeries[]; employeesPath: string }) {
-  const [selection, setSelection] = useState<string[] | null>(null);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<'highest' | 'lowest' | 'name'>('highest');
-  const ordered = [...series].sort((a, b) => sort === 'name' ? a.label.localeCompare(b.label) : sort === 'lowest' ? a.value! - b.value! || a.label.localeCompare(b.label) : b.value! - a.value! || a.label.localeCompare(b.label));
-  const active = selection ?? [...series].sort((a, b) => b.value! - a.value! || a.label.localeCompare(b.label)).slice(0, 6).map((item) => item.id);
-  const chosen = ordered.filter((item) => active.includes(item.id) && item.value !== null);
-  const legendSeries = ordered.filter((item) => item.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
-  const width = Math.max(520, 70 * chosen.length + 70);
-  const left = 42;
-  const bottom = 190;
-  const plotWidth = width - left - 14;
-  const step = plotWidth / Math.max(1, chosen.length);
-  return <><div className="reports-comparison-controls"><input className="form-control" type="search" aria-label="Search employee legend" placeholder="Find employee" value={search} onChange={(event) => setSearch(event.target.value)} /><select className="form-control" aria-label="Sort employee comparison" value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="highest">Highest rating</option><option value="lowest">Lowest rating</option><option value="name">Name A–Z</option></select></div><EntityLegend series={legendSeries} active={active} onToggle={setSelection} />{search && legendSeries.length === 0 && <p className="reports-chart-notice">No matching employees. Selected bars remain visible.</p>}{!chosen.length ? <ChartNotice>{active.length ? 'No reportable employee ratings for this selection.' : 'Select employees in the legend to compare them.'}</ChartNotice> : <div className="reports-svg-wrap reports-comparison-scroll" tabIndex={0} aria-label="Scroll employee rating chart horizontally"><svg className="reports-svg" viewBox={`0 0 ${width} 226`} style={{ width: chosen.length > 6 ? `${width}px` : '100%' }} role="img" aria-label="Reportable peer ratings by employee, normalized to five">
-    {[0, 1, 2, 3, 4, 5].map((tick) => { const y = bottom - tick * 30; return <g key={tick}><line className="reports-svg-grid" x1={left} x2={width - 14} y1={y} y2={y} /><text className="reports-svg-axis" x={left - 8} y={y + 4} textAnchor="end">{tick}</text></g>; })}
-    {chosen.map((item, index) => { const x = left + index * step + step * .23; const barHeight = item.value! / 5 * 150; const short = employeeLabel(item.label); const duplicate = chosen.some((other) => other.id !== item.id && employeeLabel(other.label) === short); return <Link to={item.href!} aria-label={`${item.label}: ${item.value?.toFixed(2)} out of 5. View employee report.`} className="reports-svg-link" key={item.id}><title>{`${item.label}: ${item.value?.toFixed(2)} / 5`}</title><rect x={x} y={bottom - barHeight} width={step * .54} height={barHeight} rx={4} fill={item.color} /><text className="reports-svg-value" x={x + step * .27} y={bottom - barHeight - 6} textAnchor="middle">{item.value?.toFixed(2)}</text><text className="reports-svg-axis" x={x + step * .27} y={bottom + 18} textAnchor="middle">{duplicate ? label(item.label, 11) : short}</text></Link>; })}
-    <text className="reports-svg-axis" x={width / 2} y={222} textAnchor="middle">Employees · peer rating / 5</text>
-  </svg></div>}<div className="reports-comparison-footer"><Link to={employeesPath}>All employees</Link></div></>;
 }
