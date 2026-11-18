@@ -3,6 +3,7 @@ import QuestionAnalytics from './components/QuestionAnalytics';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsLayout from './ReportsLayout';
 import type { RolePerspective } from './types/reports.types';
+import ReportsLoadError from './components/ReportsLoadError';
 
 function positiveId(value: string | null) {
   const number = Number(value);
@@ -26,7 +27,7 @@ export default function QuestionAnalyticsPage() {
   return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{({ campaigns, getAccessToken, loadingCampaigns, campaignsError, retryCampaigns }) => {
     if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
     if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
-    if (campaignsError) return <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={retryCampaigns}>Retry</button></div>;
+    if (campaignsError) return <ReportsLoadError message={campaignsError} onRetry={retryCampaigns} />;
     if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
     return <div className="reports-overview">{scoped && <div className="reports-question-scope"><span>{employeeId !== undefined ? 'Employee' : groupId !== undefined ? 'Group' : 'Company role'} question responses</span><Link to={`/reports/campaigns/${selectedCampaignId}/questions`}>View entire campaign</Link></div>}<QuestionAnalytics campaignId={selectedCampaignId} getAccessToken={getAccessToken} scope={scope} /></div>;
   }}</ReportsLayout>;

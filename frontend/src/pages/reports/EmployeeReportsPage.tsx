@@ -9,6 +9,7 @@ import WrittenFeedbackPreview from './components/WrittenFeedbackPreview';
 import type { EmployeeReportDetail, EmployeeReportRow, EmployeeReportsOverview } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { usePageTitle } from '../../app/usePageTitle';
+import ReportsLoadError from './components/ReportsLoadError';
 
 function formatScore(value: number | null) {
   if (value === null) return '—';
@@ -16,7 +17,7 @@ function formatScore(value: number | null) {
 }
 
 function LoadingOrError({ error, retry }: { error: string; retry: () => void }) {
-  if (error) return <div className="reports-state reports-error" role="alert"><span>{error}</span><button className="btn btn-secondary" type="button" onClick={retry}>Retry</button></div>;
+  if (error) return <ReportsLoadError message={error} onRetry={retry} />;
   return <div className="reports-state">Loading employee analytics...</div>;
 }
 
@@ -71,7 +72,7 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccess
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
-  if (campaignsError) return <div className="reports-state reports-error" role="alert"><span>{campaignsError}</span><button className="btn btn-secondary" type="button" onClick={retryCampaigns}>Retry</button></div>;
+  if (campaignsError) return <ReportsLoadError message={campaignsError} onRetry={retryCampaigns} />;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
   if (data === null || data.campaign.id !== selectedCampaignId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiAccessError, type AccessTokenGetter } from '../../../auth/authenticated-api';
 import { fetchEvaluationQuality } from '../api/reports.api';
 import type { EvaluationQualityCategory, EvaluationQualityFinding, EvaluationQualityReport } from '../types/reports.types';
+import ReportsLoadError from './ReportsLoadError';
 
 const categories: Array<{ key: EvaluationQualityCategory; label: string }> = [
   { key: 'uniform_rating_pattern', label: 'Uniform rating patterns' },
@@ -98,7 +99,7 @@ function QualityContent({ campaignId, getAccessToken }: { campaignId: number; ge
       {current && <EvaluationQualityStatus status={current.analysis_status} />}
     </div>
     {status === 'idle' || status === 'loading' || status === 'loaded' && !current ? <p className="quality-summary-note" role="status">Loading evaluation quality...</p> : null}
-    {status === 'error' && <div className="quality-summary-error" role="alert"><span>{error}</span><button type="button" className="reports-text-button" onClick={() => setReloadKey((key) => key + 1)}>Retry</button></div>}
+    {status === 'error' && <ReportsLoadError message={error} onRetry={() => setReloadKey((key) => key + 1)} />}
     {current && status === 'loaded' && <>
       {current.analysis_status === 'preliminary' && <p className="quality-summary-note">Preliminary analysis based on completed evaluations. Findings may change as additional reviews are submitted.</p>}
       {current.analysis_status === 'final' && <p className="quality-summary-note">Final analysis based on completed campaign evaluations.</p>}

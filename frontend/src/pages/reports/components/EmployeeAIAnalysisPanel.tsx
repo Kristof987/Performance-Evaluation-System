@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { AccessTokenGetter } from '../../../auth/authenticated-api';
 import { approveAIAnalysis, fetchAIAnalyses, fetchGenerationJob, fetchLatestGenerationJob, generateAIAnalysis, generationErrorMessage, saveAIAnalysis } from '../api/ai-analysis.api';
 import type { AIAnalysis, AIAnalysisGenerationJob, AIAnalysisHistory, AIAnalysisScope, AnalysisEvidence, AnalysisFinding, AnalysisVersion } from '../types/ai-analysis.types';
-import { useConfirm } from '../../../components/feedback/feedback-context';
+import { useConfirm, useToast } from '../../../components/feedback/feedback-context';
+import InlineMessage from '../../../components/feedback/InlineMessage';
+import ReportsLoadError from './ReportsLoadError';
 
 type Props = { scope: AIAnalysisScope; getAccessToken: AccessTokenGetter };
 
@@ -126,12 +128,13 @@ export default function EmployeeAIAnalysisPanel({ scope, getAccessToken }: Props
 
 function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   const confirm = useConfirm();
+  const toast = useToast();
   const [history, setHistory] = useState<AIAnalysisHistory | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editing, setEditing] = useState<AIAnalysis | null>(null);
   const [busy, setBusy] = useState<'generate' | 'save' | 'approve' | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [actionError, setActionError] = useState('');
   const [reload, setReload] = useState(0);
   const [jobReload, setJobReload] = useState(0);
   const [job, setJob] = useState<AIAnalysisGenerationJob | null>(null);
@@ -204,7 +207,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
               handledSuccessJobId.current = latest.id;
               if (!editingRef.current) setSelectedId(latest.analysis_id);
               setReload((value) => value + 1);
-              setNotice('New Draft generated. Review it before approval.');
+              toast.success('New draft generated. Review it before approval');
             }
           }
         })
@@ -222,8 +225,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     const controller = new AbortController();
     actionController.current = controller;
     setBusy(kind);
-    setError('');
-    setNotice('');
+    setActionError('');
     try {
       const result = await task();
       if (controller.signal.aborted) return;
@@ -232,10 +234,10 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
       setHistory((current) => current && { ...current,
         versions: [result, ...current.versions.filter((version) => version.id !== result.id).map((version) => kind === 'approve' && version.is_current_approved ? { ...version, is_current_approved: false } : version)].sort((a, b) => b.version - a.version),
       });
-      setNotice(kind === 'approve' ? 'Analysis approved.' : 'Edited Draft saved as a new version.');
+      toast.success(kind === 'approve' ? `Version ${result.version} approved` : `Edited draft saved as version ${result.version}`);
       setReload((value) => value + 1);
     } catch (cause) {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Analysis request failed.');
+      if (!controller.signal.aborted) setActionError(cause instanceof Error ? cause.message : (kind === 'approve' ? 'The analysis couldn’t be approved.' : 'The edited draft couldn’t be saved.'));
     } finally {
       actionPending.current = false;
       if (actionController.current === controller) actionController.current = null;
@@ -250,8 +252,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     const controller = new AbortController();
     actionController.current = controller;
     setBusy('generate');
-    setError('');
-    setNotice('');
+    setActionError('');
     try {
       const started = await generateAIAnalysis(getAccessToken, scope, controller.signal);
       if (controller.signal.aborted) return;
@@ -265,7 +266,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
           handledSuccessJobId.current = started.id;
           if (!editingRef.current) setSelectedId(started.analysis_id);
           setReload((value) => value + 1);
-          setNotice('New Draft generated. Review it before approval.');
+          toast.success('New draft generated. Review it before approval');
         }
       }
     } catch (cause) {
@@ -314,14 +315,14 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     <div className="reports-section-heading"><h2>{copy.heading}</h2>{scope.type !== 'employee' && history?.scope_label && <strong>{history.scope_label}</strong>}<p>{copy.description}</p></div>
     <AIExplanation employeeScope={scope.type === 'employee'} />
     {!history && !error && <p className="reports-state">Loading saved analyses...</p>}
-    {error && <div className="reports-state reports-error" role="alert">{error}<button type="button" className="btn btn-secondary btn-small" onClick={() => setReload((value) => value + 1)}>Retry</button></div>}
-    {notice && <p className="reports-ai-notice" role="status">{notice}</p>}
-    {jobError && <div className="reports-state reports-error" role="alert">Generation status could not be checked: {jobError}<button type="button" className="btn btn-secondary btn-small" onClick={() => setJobReload((value) => value + 1)}>Retry status check</button></div>}
-    {jobReady && !jobError && jobActive && <p className="reports-ai-notice" role="status">AI analysis {job?.status === 'queued' ? 'queued' : 'running'}. You can leave this page; generation will continue.</p>}
-    {jobReady && !jobError && job?.status === 'failed' && <p className="reports-state reports-error" role="alert">{generationErrorMessage(job.error_code)} Use Retry generation to start a new attempt.</p>}
+    {error && <ReportsLoadError message={error} onRetry={() => setReload((value) => value + 1)} />}
+    {actionError && <InlineMessage tone="error" onDismiss={() => setActionError('')}>{actionError}</InlineMessage>}
+    {jobError && <ReportsLoadError message={`Couldn’t confirm the generation status: ${jobError}`} retryLabel="Check status again" onRetry={() => setJobReload((value) => value + 1)} />}
+    {jobReady && !jobError && jobActive && <InlineMessage tone="info">AI analysis {job?.status === 'queued' ? 'queued' : 'running'}. You can leave this page; generation will continue.</InlineMessage>}
+    {jobReady && !jobError && job?.status === 'failed' && <InlineMessage tone="error">{generationErrorMessage(job.error_code)} Use Retry generation to start a new attempt.</InlineMessage>}
     {history && <>
       <div className="reports-ai-toolbar">
-        {history.versions.length > 0 && <label>Analysis version<select className="form-control" value={selected?.id ?? ''} onChange={(event) => { setEditing(null); setSelectedId(Number(event.target.value)); setNotice(''); }}>
+        {history.versions.length > 0 && <label>Analysis version<select className="form-control" value={selected?.id ?? ''} onChange={(event) => { setEditing(null); setSelectedId(Number(event.target.value)); setActionError(''); }}>
           {history.versions.map((version) => <option key={version.id} value={version.id}>Version {version.version} · {version.status === 'draft' ? 'Draft' : 'Approved'}{version.is_current_approved ? ' · Current approved' : ''}{version.outdated ? ' · Outdated' : ''}</option>)}
         </select></label>}
          {canGenerate && <button type="button" className="btn btn-primary" disabled={busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={async () => {
@@ -329,12 +330,12 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
            void startGeneration();
          }}>{busy === 'generate' ? 'Starting generation...' : jobActive ? 'Generation in progress...' : job?.status === 'failed' ? 'Retry generation' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
       </div>
-      {!aiEnabled && <p className="reports-ai-notice" role="status">AI features are turned off in workspace settings. Saved analyses stay available to read.</p>}
-      {!history.has_eligible_evidence && <p className="reports-ai-warning">No reportable submitted evidence is available. Insufficient data is not an indication of low performance.</p>}
+      {!aiEnabled && <InlineMessage tone="info">AI features are turned off in workspace settings. Saved analyses stay available to read.</InlineMessage>}
+      {!history.has_eligible_evidence && <InlineMessage tone="info">No reportable submitted evidence is available. Insufficient data is not an indication of low performance.</InlineMessage>}
        {!selected && <p className="reports-ai-intro">{copy.intro} AI conclusions are not shown until explicitly generated, reviewed and approved by an authorized manager.</p>}
       {selected && <>
         <AIContentLabel approved={selected.status === 'approved'} approvedAt={selected.approved_at} approvedBy={selected.approved_by_user_id} />
-        {selected.outdated && <p className="reports-ai-warning" role="alert">Outdated analysis: submitted evaluation data has changed. This version remains historical; regenerate before editing or approval.</p>}
+        {selected.outdated && <InlineMessage tone="warning">Outdated analysis: submitted evaluation data has changed. This version remains historical; regenerate before editing or approval.</InlineMessage>}
         <div className="reports-ai-meta"><span>{selected.status === 'approved' ? 'Approved' : 'Draft'}{selected.is_current_approved ? ' · Current approved' : ''}</span><span>Generated {dateLabel(selected.generated_at)} by user #{selected.generated_by_user_id} · {selected.model_identifier}{selected.prompt_version ? ` · prompt ${selected.prompt_version}` : ''}{selected.token_usage ? ` · ${(selected.token_usage.input_tokens + selected.token_usage.output_tokens).toLocaleString()} tokens` : ''}</span>{selected.edited_at && <span>Edited {dateLabel(selected.edited_at)} by user #{selected.edited_by_user_id}</span>}{selected.approved_at && <span>Approved {dateLabel(selected.approved_at)} by user #{selected.approved_by_user_id}</span>}</div>
         <div className="reports-ai-sections">
             <div><h3>Overall Assessment</h3><FindingCard key={selected.id} finding={editing?.overall_assessment ?? selected.analysis.overall_assessment} evidence={selected.evidence} employeeScope={scope.type === 'employee'} edit={editing !== null} onChange={(next) => updateFinding('overall_assessment', null, next)} /></div>
@@ -345,7 +346,10 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
           </div>)}
         </div>
         {(canEdit || canApprove) && <div className="reports-ai-actions">
-           {editing ? <><button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (editing) void perform('save', () => saveAIAnalysis(getAccessToken, scope, selected.id, editing)); }}>{busy === 'save' ? 'Saving...' : 'Save as new Draft'}</button><button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={() => setEditing(null)}>Cancel editing</button></>
+           {editing ? <><button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (editing) void perform('save', () => saveAIAnalysis(getAccessToken, scope, selected.id, editing)); }}>{busy === 'save' ? 'Saving...' : 'Save as new Draft'}</button><button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={async () => {
+               if (editing && JSON.stringify(editing) !== JSON.stringify(selected.analysis) && !(await confirm({ title: 'Discard your edits?', message: 'Your changes to this draft haven’t been saved.', confirmLabel: 'Discard edits', tone: 'danger' }))) return;
+               setEditing(null);
+             }}>Cancel editing</button></>
              : selected.status === 'draft' && mayWrite && <>{canEdit && <button type="button" className="btn btn-secondary" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}>Edit Draft</button>}{canApprove && <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={async () => { if (await confirm({ title: `Approve version ${selected.version}?`, message: 'Approved content becomes read-only and replaces the currently approved version.', confirmLabel: 'Approve analysis' })) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? 'Approving...' : 'Approve Analysis'}</button>}</>}
         </div>}
       </>}
