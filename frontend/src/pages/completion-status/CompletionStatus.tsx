@@ -7,6 +7,7 @@ import { ApiAccessError } from '../../auth/authenticated-api';
 import { formatShortDate } from '../hr-home/utils/hrHome.utils';
 import { fetchCompletionStatus, type CompletionStatusResponse } from './completionStatus.api';
 import CampaignEmails from './CampaignEmails';
+import InlineMessage from '../../components/feedback/InlineMessage';
 import './completion-status.css';
 
 const PAGE_SIZE = 25;
@@ -82,9 +83,9 @@ export default function CompletionStatus() {
         <p>Track evaluation progress and outstanding questionnaires.</p>
       </header>
 
-      {invalidRequest && <div className="card card-padded completion-state completion-error" role="alert">Campaign not found.</div>}
+      {invalidRequest && <InlineMessage tone="error">Campaign not found.</InlineMessage>}
       {!invalidRequest && loading && <div className="card card-padded completion-state">Loading completion status...</div>}
-      {!invalidRequest && !loading && error && <div className="card card-padded completion-state completion-error" role="alert">{error}</div>}
+      {!invalidRequest && !loading && error && <InlineMessage tone="error">{error}</InlineMessage>}
       {!invalidRequest && !loading && !error && data && summary && <>
         <section className="card completion-kpis" aria-label="Completion status metrics">
           <div className="completion-kpi completion-kpi-primary"><span>Completion rate</span><strong>{summary.completion_rate}%</strong><small>{summary.completed} of {summary.total_evaluations} completed</small></div>
@@ -97,7 +98,7 @@ export default function CompletionStatus() {
 
         <CampaignEmails campaignId={campaignId} isActive={data.campaign.is_active} hasEndDate={data.campaign.end_date !== null} />
 
-        {data.duplicate_assignment_count > 0 && <div className="card card-padded completion-warning" role="status">{data.duplicate_assignment_count} duplicate assignment group detected. Rows are kept separate by FilledForm id.</div>}
+        {data.duplicate_assignment_count > 0 && <InlineMessage tone="warning">{data.duplicate_assignment_count} duplicate assignment {data.duplicate_assignment_count === 1 ? 'group' : 'groups'} detected. Each evaluation is still listed as its own row.</InlineMessage>}
 
         <section className="card completion-table-card">
           <div className="completion-toolbar">

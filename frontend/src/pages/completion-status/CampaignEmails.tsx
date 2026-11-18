@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useAppAuth } from '../../auth/AppAuth';
-import { formatShortDate } from '../hr-home/utils/hrHome.utils';
+import InlineMessage from '../../components/feedback/InlineMessage';
+import { useConfirm, useToast } from '../../components/feedback/feedback-context';
 import {
   addCampaignReminder,
   deleteCampaignReminder,
@@ -15,6 +16,13 @@ import {
 } from './campaignEmails.api';
 
 type Audience = 'everyone' | 'not_started' | 'in_progress';
+
+const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Budapest' });
+/** Email times are full timestamps (not plain dates), shown as the Budapest calendar day. */
+function formatEmailDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : dateFormat.format(date);
+}
 
 function ReminderDialog({ campaignId, onClose, onSent }: {
   campaignId: number; onClose: () => void; onSent: (text: string, failed: boolean) => void;
@@ -60,8 +68,8 @@ function ReminderDialog({ campaignId, onClose, onSent }: {
       const result = await sendReminderNow(getAccessToken, campaignId, [...selected]);
       const parts = [`${result.sent} sent`];
       if (result.skipped_recently_reminded) parts.push(`${result.skipped_recently_reminded} skipped (reminded in the last 24 hours)`);
-      if (result.failed) parts.push(`${result.failed} failed`);
-      onSent(`Reminder emails: ${parts.join(', ')}.`, result.failed > 0);
+      if (result.failed) parts.push(`${result.failed} couldn’t be delivered`);
+      onSent(`Reminder emails: ${parts.join(', ')}`, result.failed > 0);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Reminder emails could not be sent.');
       setSending(false);
@@ -80,7 +88,7 @@ function ReminderDialog({ campaignId, onClose, onSent }: {
         <button className="close" type="button" onClick={onClose} disabled={sending} aria-label="Close">×</button>
       </div>
       <div className="modal-body">
-        {error && <p className="completion-emails-message error" role="alert">{error}</p>}
+        {error && <InlineMessage tone="error">{error}</InlineMessage>}
         {recipients === null && !error && <p className="completion-emails-muted">Loading recipients…</p>}
         {recipients !== null && recipients.length === 0 && <p className="completion-emails-muted">Everyone has finished their evaluations.</p>}
         {recipients !== null && recipients.length > 0 && <>
@@ -105,7 +113,7 @@ function ReminderDialog({ campaignId, onClose, onSent }: {
                 <span className="campaign-reminder-counts">
                   {item.not_started > 0 && <em className="not-started">{item.not_started} not started</em>}
                   {item.in_progress > 0 && <em className="in-progress">{item.in_progress} in progress</em>}
-                  {item.last_reminded_at && <small>{item.recently_reminded ? 'Reminded today' : `Last reminded ${formatShortDate(item.last_reminded_at)}`}</small>}
+                  {item.last_reminded_at && <small>{item.recently_reminded ? 'Reminded today' : `Last reminded ${formatEmailDate(item.last_reminded_at)}`}</small>}
                 </span>
               </label>
             </li>)}
@@ -130,25 +138,27 @@ export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { c
   const [days, setDays] = useState('3');
   const [busy, setBusy] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [error, setError] = useState('');
+  const confirm = useConfirm();
+  const toast = useToast();
 
   useEffect(() => {
     if (!getAccessToken) return;
     const controller = new AbortController();
     fetchCampaignEmails(getAccessToken, campaignId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
-      .catch((cause) => { if (!controller.signal.aborted) setMessage({ tone: 'error', text: cause instanceof Error ? cause.message : 'Campaign emails could not be loaded.' }); });
+      .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Campaign emails could not be loaded.'); });
     return () => controller.abort();
   }, [campaignId, getAccessToken]);
 
   async function run(action: () => Promise<CampaignEmailOverview>, success: string) {
     if (!getAccessToken || busy) return;
-    setBusy(true); setMessage(null);
+    setBusy(true); setError('');
     try {
       setData(await action());
-      setMessage({ tone: 'success', text: success });
+      toast.success(success);
     } catch (cause) {
-      setMessage({ tone: 'error', text: cause instanceof Error ? cause.message : 'Campaign emails could not be updated.' });
+      setError(cause instanceof Error ? cause.message : 'Campaign emails could not be updated.');
     } finally {
       setBusy(false);
     }
@@ -158,12 +168,13 @@ export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { c
     event.preventDefault();
     const value = Number(days);
     if (!getAccessToken || !Number.isInteger(value) || value < 0 || value > 90) return;
-    void run(() => addCampaignReminder(getAccessToken, campaignId, value), `Reminder added: ${reminderDayLabel(value).toLowerCase()}.`);
+    void run(() => addCampaignReminder(getAccessToken, campaignId, value), `Reminder added: ${reminderDayLabel(value).toLowerCase()}`);
   }
 
   async function afterSend(text: string, failed: boolean) {
     setDialogOpen(false);
-    setMessage({ tone: failed ? 'error' : 'success', text });
+    if (failed) toast.warning(`${text}. Check the email settings, then try again for those people.`);
+    else toast.success(text);
     if (getAccessToken) setData(await fetchCampaignEmails(getAccessToken, campaignId).catch(() => data));
   }
 
@@ -179,9 +190,9 @@ export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { c
         onClick={() => setDialogOpen(true)}>Send reminder…</button>}
     </div>
 
-    {message && <p className={`completion-emails-message ${message.tone}`} role={message.tone === 'success' ? 'status' : 'alert'}>{message.text}</p>}
-    {data && !data.email_configured && <p className="completion-emails-message error" role="status">Email sending is not configured on the server, so no emails go out yet.</p>}
-    {!data && !message && <p className="completion-emails-muted">Loading email schedule…</p>}
+    {error && <InlineMessage tone="error" onDismiss={data ? () => setError('') : undefined}>{error}</InlineMessage>}
+    {data && !data.email_configured && <InlineMessage tone="warning">Email sending isn’t configured on the server, so no emails go out yet.</InlineMessage>}
+    {!data && !error && <p className="completion-emails-muted">Loading email schedule…</p>}
 
     {data && <>
       <p className="completion-emails-muted">
@@ -192,15 +203,15 @@ export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { c
         <li>
           <div><strong>When the campaign opens</strong><span>{data.launch_sent_count > 0 ? `Sent to ${data.launch_sent_count}` : data.launch_email_enabled ? 'Scheduled' : 'Off'}</span></div>
           {canManage && <label className="completion-check"><input type="checkbox" checked={data.launch_email_enabled} disabled={busy}
-            onChange={(event) => { const enabled = event.target.checked; if (getAccessToken) void run(() => setLaunchEmail(getAccessToken, campaignId, enabled), enabled ? 'Launch email turned on.' : 'Launch email turned off.'); }} /> Send</label>}
+            onChange={(event) => { const enabled = event.target.checked; if (getAccessToken) void run(() => setLaunchEmail(getAccessToken, campaignId, enabled), enabled ? 'Launch email turned on' : 'Launch email turned off'); }} /> Send</label>}
         </li>
         {data.reminders.map((reminder) => <li key={reminder.days_before_end}>
           <div>
             <strong>{reminderDayLabel(reminder.days_before_end)}{data.uses_workspace_defaults ? ' · default' : ''}</strong>
-            <span>{reminder.scheduled_for ? formatShortDate(reminder.scheduled_for) : 'No end date'} · {reminder.sent_count > 0 ? `Sent to ${reminder.sent_count}` : 'Scheduled'}</span>
+            <span>{reminder.scheduled_for ? formatEmailDate(reminder.scheduled_for) : 'No end date'} · {reminder.sent_count > 0 ? `Sent to ${reminder.sent_count}` : 'Scheduled'}</span>
           </div>
           {canManage && <button className="btn btn-secondary" type="button" disabled={busy}
-            onClick={() => { if (getAccessToken) void run(() => deleteCampaignReminder(getAccessToken, campaignId, reminder.days_before_end), 'Reminder removed for this campaign.'); }}>Remove</button>}
+            onClick={() => { if (getAccessToken) void run(() => deleteCampaignReminder(getAccessToken, campaignId, reminder.days_before_end), `Reminder removed: ${reminderDayLabel(reminder.days_before_end).toLowerCase()}`); }}>Remove</button>}
         </li>)}
         {data.reminders.length === 0 && <li><span className="completion-emails-muted">No reminders before the end date.</span></li>}
       </ul>
@@ -215,10 +226,17 @@ export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { c
           title={hasEndDate ? undefined : 'Set a campaign end date first.'}>Add</button>
       </form>
       {!data.uses_workspace_defaults && <button className="btn btn-secondary" type="button" disabled={busy}
-        onClick={() => { if (getAccessToken) void run(() => resetCampaignReminders(getAccessToken, campaignId), 'This campaign follows the workspace defaults again.'); }}>Use workspace defaults</button>}
+        onClick={async () => {
+          if (!getAccessToken || !(await confirm({
+            title: 'Use the workspace default reminders?',
+            message: 'This campaign’s own reminder schedule is replaced by the defaults from Settings. Reminders already sent are not affected.',
+            confirmLabel: 'Use defaults',
+          }))) return;
+          void run(() => resetCampaignReminders(getAccessToken, campaignId), 'This campaign follows the workspace defaults again');
+        }}>Use workspace defaults</button>}
     </div>}
-    {data && data.failed_count > 0 && <p className="completion-emails-muted">{data.failed_count} {data.failed_count === 1 ? 'email' : 'emails'} could not be delivered.</p>}
-    {data?.manual_last_sent_at && <p className="completion-emails-muted">Last manual reminder: {formatShortDate(data.manual_last_sent_at)}</p>}
+    {data && data.failed_count > 0 && <InlineMessage tone="warning">{data.failed_count} {data.failed_count === 1 ? 'email' : 'emails'} couldn’t be delivered.</InlineMessage>}
+    {data?.manual_last_sent_at && <p className="completion-emails-muted">Last manual reminder: {formatEmailDate(data.manual_last_sent_at)}</p>}
     {dialogOpen && <ReminderDialog campaignId={campaignId} onClose={() => setDialogOpen(false)} onSent={(text, failed) => void afterSend(text, failed)} />}
   </section>;
 }
