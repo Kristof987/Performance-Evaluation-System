@@ -4,6 +4,7 @@ import { usePreferences } from '../preferences-context';
 import { formatSettingsDate } from '../settings-date';
 import { fetchAuditLog, type AuditCategory, type AuditEntry } from '../workspace.api';
 import LoadError from '../../../components/feedback/LoadError';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 const PAGE_SIZE = 50;
 
@@ -81,7 +82,7 @@ export default function AuditLogSettings() {
           {entry.is_automatic ? 'Automatic' : entry.actor_name ?? (entry.actor_user_id ? `User #${entry.actor_user_id}` : 'Unknown user')}</small>
       </li>)}
     </ol>}
-    {loading && <p className="settings-state" role="status">Loading audit log...</p>}
+    {loading && <LoadingState variant="section" label="Loading audit log" />}
     {hasMore && !loading && <button className="btn btn-secondary settings-load-more" type="button" onClick={() => void loadMore()}>
       Load older entries</button>}
   </section>;

@@ -3,6 +3,7 @@ import { ApiAccessError, type AccessTokenGetter } from '../../../auth/authentica
 import { fetchEvaluationQuality } from '../api/reports.api';
 import type { EvaluationQualityCategory, EvaluationQualityFinding, EvaluationQualityReport } from '../types/reports.types';
 import LoadError from '../../../components/feedback/LoadError';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 const categories: Array<{ key: EvaluationQualityCategory; label: string }> = [
   { key: 'uniform_rating_pattern', label: 'Uniform rating patterns' },
@@ -98,7 +99,7 @@ function QualityContent({ campaignId, getAccessToken }: { campaignId: number; ge
     <div className="quality-summary-heading"><div><h2 id="quality-summary-title">Evaluation Quality</h2><p>Campaign-level patterns in completed, valid peer evaluations. Informational only; scores are unchanged.</p></div>
       {current && <EvaluationQualityStatus status={current.analysis_status} />}
     </div>
-    {status === 'idle' || status === 'loading' || status === 'loaded' && !current ? <p className="quality-summary-note" role="status">Loading evaluation quality...</p> : null}
+    {status === 'idle' || status === 'loading' || status === 'loaded' && !current ? <LoadingState variant="section" label="Loading evaluation quality" /> : null}
     {status === 'error' && <LoadError message={error} onRetry={() => setReloadKey((key) => key + 1)} />}
     {current && status === 'loaded' && <>
       {current.analysis_status === 'preliminary' && <p className="quality-summary-note">Preliminary analysis based on completed evaluations. Findings may change as additional reviews are submitted.</p>}

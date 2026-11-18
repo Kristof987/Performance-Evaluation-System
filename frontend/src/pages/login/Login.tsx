@@ -8,6 +8,8 @@ import { safeReturnPath } from '../../auth/return-path';
 import { useAppAuth } from '../../auth/AppAuth';
 import './Login.css';
 import InlineMessage from '../../components/feedback/InlineMessage';
+import Pending from '../../components/feedback/Pending';
+import LoadingState from '../../components/feedback/LoadingState';
 
 function LoginWithAuth0() {
   const { state } = useAppAuth();
@@ -29,7 +31,7 @@ function Login() {
     const target = saved && saved !== '/' ? saved : dashboard;
     navigate(target, { replace: true });
   }, [state, navigate, location.state]);
-  if (state.status === 'authenticated') return <main role="status">Opening your dashboard...</main>;
+  if (state.status === 'authenticated') return <LoadingState variant="screen" label="Opening your dashboard" />;
   return AUTH0_CONFIGURED
     ? <LoginWithAuth0 />
     : <LoginContent showDevelopmentLogin={import.meta.env.DEV} auth0Content={
@@ -113,7 +115,7 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
             {errorMessage && <InlineMessage tone="error" id="login-error">{errorMessage}</InlineMessage>}
 
             <button className="btn btn-primary login-submit" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Selecting identity...' : 'Select development identity'}
+              {isSubmitting ? <Pending label="Selecting identity" /> : 'Select development identity'}
             </button>
           </form>
 

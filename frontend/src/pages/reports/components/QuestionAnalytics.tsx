@@ -6,6 +6,7 @@ import type { AccessTokenGetter } from '../../../auth/authenticated-api';
 import { useAppAuth } from '../../../auth/AppAuth';
 import WrittenFeedbackList from './WrittenFeedbackList';
 import LoadError from '../../../components/feedback/LoadError';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 function Distribution({ question, result, label }: { question: ReportQuestion; result: QuestionResult; label: string }) {
   if (result.availability === 'suppressed') return <p className="reports-question-status">{label} results are hidden for confidentiality. Counts and values are withheld.</p>;
@@ -106,7 +107,7 @@ function EmployeeQuestions({ campaignId, getAccessToken, employeeId, feedbackSta
       {(['all', 'peer', 'self'] as const).map((value) => <button key={value} type="button" className={mode === value ? 'active' : ''} aria-pressed={mode === value} onClick={() => { setMode(value); setOpenSections(null); setOpenQuestions([]); }}>{value === 'all' ? 'All' : value === 'peer' ? 'Peer' : 'Self'}</button>)}
     </div>
     {error ? <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />
-      : !reports || reports.peer.evaluation_type !== 'peer' || reports.self.evaluation_type !== 'self' ? <p className="reports-question-status">Loading question analytics...</p>
+      : !reports || reports.peer.evaluation_type !== 'peer' || reports.self.evaluation_type !== 'self' ? <LoadingState variant="section" label="Loading question analytics" />
         : issued.size === 0 ? <p className="reports-question-status">No {mode === 'all' ? '' : `${mode} `}questions were issued for this employee.</p>
           : <><div className="reports-question-filters"><label>Search questions<input className="form-control" type="search" value={search} placeholder="Search text, type, section or category" onChange={(event) => { setSearch(event.target.value); setOpenQuestions([]); setOpenSections((current) => current?.filter((id) => !id.startsWith('closed:')) ?? null); }} /></label></div>
             {sections.size === 0 ? <p className="reports-question-status">No questions match your search.</p> : Array.from(sections, ([id, section]) => {

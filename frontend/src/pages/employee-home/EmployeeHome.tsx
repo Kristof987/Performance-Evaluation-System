@@ -8,6 +8,7 @@ import { dashboardWork, evaluationOverdue, evaluationStatus, evaluationTitle } f
 import '../hr-home/components/MetricsGrid.css';
 import './employee-home.css';
 import InlineMessage from '../../components/feedback/InlineMessage';
+import LoadingState from '../../components/feedback/LoadingState';
 
 function formatDate(value: string | null) {
   if (!value) return 'No deadline';
@@ -96,7 +97,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
         <div className="employee-work-overview">
           <section className="card employee-dashboard-panel employee-tasks-panel" aria-labelledby="employee-tasks-heading">
             <div className="employee-panel-heading"><h2 id="employee-tasks-heading">Your tasks</h2></div>
-            {loading ? <p className="employee-plain-empty">Loading evaluations...</p>
+            {loading ? <LoadingState variant="section" label="Loading evaluations" />
               : error ? <InlineMessage tone="error">{error}</InlineMessage>
               : actionable.length ? <div className="employee-compact-list">{actionable.map((item) => <EvaluationRow key={item.id} evaluation={item} />)}</div>
               : <p className="employee-plain-empty">You're all caught up. No evaluations need your attention right now.</p>}
@@ -111,7 +112,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
 
         <section className="card employee-dashboard-panel employee-history-panel" aria-labelledby="employee-history-heading">
           <div className="employee-panel-heading"><h2 id="employee-history-heading">History</h2></div>
-          {loading ? <p className="employee-plain-empty">Loading history...</p>
+          {loading ? <LoadingState variant="section" label="Loading history" />
             : error ? <p className="employee-plain-empty">History could not be loaded.</p>
             : history.length ? <>
               <div className="employee-history-list">{visibleHistory.map((item) => <div key={item.id}><strong>{evaluationTitle(item)}</strong><span>{item.formName} · {item.campaignName} · {item.finishDate ? `Completed ${formatDate(item.finishDate)}` : 'Completed'}</span></div>)}</div>

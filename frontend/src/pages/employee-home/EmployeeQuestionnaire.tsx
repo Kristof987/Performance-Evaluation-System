@@ -13,6 +13,8 @@ import './employee-home.css';
 import './employee-questionnaire.css';
 import InlineMessage from '../../components/feedback/InlineMessage';
 import { useConfirm, useToast } from '../../components/feedback/feedback-context';
+import Pending from '../../components/feedback/Pending';
+import LoadingState from '../../components/feedback/LoadingState';
 
 type AnswerValue = QuestionnaireAnswer['value'];
 type SaveState = 'idle' | 'saved' | 'failed';
@@ -201,13 +203,16 @@ export default function EmployeeQuestionnaire() {
   const answeredCount = questions.filter((question) => isQuestionAnswered(question, answers.find((answer) => answer.question_id === question.id)?.value)).length;
   const questionCount = questions.length;
   const progress = questionCount === 0 ? 0 : Math.round((answeredCount / questionCount) * 100);
-  const saveLabel = saving ? 'Saving...' : dirty ? 'Unsaved changes' : saveState === 'saved' ? 'All changes saved' : saveState === 'failed' ? 'Save failed' : 'No unsaved changes';
+  const saveLabel = saving ? <Pending label="Saving" /> : dirty ? 'Unsaved changes' : saveState === 'saved' ? 'All changes saved' : saveState === 'failed' ? 'Save failed' : 'No unsaved changes';
 
   return <AppLayout activePage={fromHr ? 'my-evaluations' : 'employee-home'} pageClassName="employee-home-page">
     <main className="main-content employee-home-main employee-questionnaire-page">
       <div className="employee-questionnaire-shell">
         <Link className="campaign-details-link" to={backPath} onClick={(event) => { void leave(event); }}>← Back to your tasks</Link>
-         {!visibleQuestionnaire ? <p className="card card-padded employee-questionnaire-state" role={error ? 'alert' : 'status'}>{error || (questionnaire?.evaluation.id === evaluationId ? 'This questionnaire is not currently available.' : userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0 ? 'Questionnaire not found.' : 'Loading questionnaire...')}</p> : <>
+         {!visibleQuestionnaire ? (error ? <InlineMessage tone="error">{error}</InlineMessage>
+           : questionnaire?.evaluation.id === evaluationId ? <p className="card card-padded employee-questionnaire-state">This questionnaire is not currently available.</p>
+             : userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0 ? <p className="card card-padded employee-questionnaire-state">Questionnaire not found.</p>
+               : <LoadingState variant="page" label="Loading questionnaire" />) : <>
           <header className="employee-questionnaire-header">
              <p className="employee-questionnaire-context">{visibleQuestionnaire.evaluation.campaignName} · {visibleQuestionnaire.evaluation.evaluatorId === visibleQuestionnaire.evaluation.evaluateeId ? 'Self-evaluation' : 'Evaluation'}</p>
              <h1>{visibleQuestionnaire.evaluation.formName}</h1>
@@ -237,7 +242,7 @@ export default function EmployeeQuestionnaire() {
             })}
           </section>
            {error && <InlineMessage tone="error" className="employee-questionnaire-inline">{error}</InlineMessage>}
-            {!readOnly && <div className="card employee-questionnaire-actions"><span className={saveState === 'failed' ? 'failed' : ''} role="status">{saveLabel}</span><div><button className="btn btn-secondary" type="button" disabled={saving || !dirty} onClick={() => save(false)}>{saving ? 'Saving...' : 'Save draft'}</button><button className="btn btn-primary" type="button" disabled={saving || !questions.length || questions.some((question) => question.required && question.type === 'File upload')} onClick={requestSubmit}>Submit evaluation</button></div></div>}
+            {!readOnly && <div className="card employee-questionnaire-actions"><span className={saveState === 'failed' ? 'failed' : ''} role="status">{saveLabel}</span><div><button className="btn btn-secondary" type="button" disabled={saving || !dirty} onClick={() => save(false)}>{saving ? <Pending label="Saving" /> : 'Save draft'}</button><button className="btn btn-primary" type="button" disabled={saving || !questions.length || questions.some((question) => question.required && question.type === 'File upload')} onClick={requestSubmit}>Submit evaluation</button></div></div>}
         </>}
       </div>
     </main>

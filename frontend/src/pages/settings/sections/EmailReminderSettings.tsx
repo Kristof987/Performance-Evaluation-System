@@ -6,6 +6,7 @@ import { reminderDayLabel } from '../../completion-status/campaignEmails.api';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
 import { useToast } from '../../../components/feedback/feedback-context';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 type Draft = { days: number[]; launch: boolean };
 
@@ -37,7 +38,7 @@ export default function EmailReminderSettings() {
   }, [getAccessToken, attempt]);
 
   if (loadError) return <LoadError message={loadError} onRetry={() => setAttempt((value) => value + 1)} />;
-  if (!saved) return <div className="card card-padded settings-state" role="status">Loading email reminder settings...</div>;
+  if (!saved) return <LoadingState variant="page" label="Loading email reminder settings" />;
 
   const dirty = draft.launch !== saved.default_launch_email
     || draft.days.join(',') !== saved.default_reminder_days.join(',');

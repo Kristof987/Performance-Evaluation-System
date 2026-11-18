@@ -44,6 +44,8 @@ import {
 import '../hr-home/hr-home.css';
 import '../hr-home/components/MetricsGrid.css';
 import './people.css';
+import Pending from '../../components/feedback/Pending';
+import LoadingState from '../../components/feedback/LoadingState';
 
 type SortKey = 'name' | 'role' | 'groups' | 'status' | 'signIn';
 
@@ -1747,8 +1749,8 @@ export default function People() {
                 </table>
                 {(isPeopleLoading || peopleError || sortedEmployees.length === 0) && (
                   <div className="people-empty-log">
-                    {isPeopleLoading && 'Loading people from database...'}
-                    {!isPeopleLoading && peopleError && peopleError}
+                    {isPeopleLoading && <LoadingState variant="section" label="Loading people" />}
+                    {!isPeopleLoading && peopleError && <InlineMessage tone="error">{peopleError}</InlineMessage>}
                     {!isPeopleLoading &&
                       !peopleError &&
                       employees.length === 0 &&
@@ -1855,8 +1857,8 @@ export default function People() {
                 </table>
                 {(isPeopleLoading || peopleError || filteredGroups.length === 0) && (
                   <div className="people-empty-log">
-                    {isPeopleLoading && 'Loading groups from database...'}
-                    {!isPeopleLoading && peopleError && peopleError}
+                    {isPeopleLoading && <LoadingState variant="section" label="Loading groups" />}
+                    {!isPeopleLoading && peopleError && <InlineMessage tone="error">{peopleError}</InlineMessage>}
                     {!isPeopleLoading &&
                       !peopleError &&
                       groups.length === 0 &&
@@ -1927,7 +1929,7 @@ export default function People() {
                           disabled={isSavingSystemRole}
                           onClick={() => void handleSaveSystemRole(selectedEmployee, systemRoleDraft.roleId)}
                         >
-                          {isSavingSystemRole ? 'Saving...' : 'Save'}
+                          {isSavingSystemRole ? <Pending label="Saving" /> : 'Save'}
                         </button>
                       )}
                     </div>
@@ -1980,7 +1982,7 @@ export default function People() {
               disabled={isSendingInvitation}
               onClick={() => void handleSendInvitation(selectedEmployee)}
             >
-              {isSendingInvitation ? 'Sending...' : selectedEmployee.signIn === 'Not invited' ? 'Send invitation' : 'Resend invitation'}
+              {isSendingInvitation ? <Pending label="Sending" /> : selectedEmployee.signIn === 'Not invited' ? 'Send invitation' : 'Resend invitation'}
             </button>}
             {invitationMessage?.employeeId === selectedEmployee.id && (
               <InlineMessage tone="error" className="people-inline-message" onDismiss={() => setInvitationMessage(null)}>{invitationMessage.text}</InlineMessage>
@@ -2061,7 +2063,7 @@ export default function People() {
                         disabled={removingGroupMemberId === employee.id}
                         aria-label={`Remove ${employee.name} from ${selectedGroup.name}`}
                       >
-                        {removingGroupMemberId === employee.id ? 'Removing...' : 'Remove'}
+                        {removingGroupMemberId === employee.id ? <Pending label="Removing" /> : 'Remove'}
                       </button>}
                     </div>
                   ))}
@@ -2092,7 +2094,7 @@ export default function People() {
                 onClick={() => handleAddGroupMember(selectedGroup.id, sidePanelEmployeeId)}
                 disabled={isAddingGroupMember || sidePanelEmployeeId === ''}
               >
-                {isAddingGroupMember ? 'Adding...' : 'Add to group'}
+                {isAddingGroupMember ? <Pending label="Adding" /> : 'Add to group'}
               </button>
               {groupMemberMessage !== '' && (
                 <InlineMessage tone="error">{groupMemberMessage}</InlineMessage>
@@ -2123,7 +2125,7 @@ export default function People() {
             </div>
             <div className="modal-body">
               {companyRoleMessage !== '' && <InlineMessage tone="error" className="people-inline-message">{companyRoleMessage}</InlineMessage>}
-              {companyRoleUsage === null && companyRoleMessage === '' && <p className="people-empty-inline">Loading…</p>}
+              {companyRoleUsage === null && companyRoleMessage === '' && <LoadingState variant="section" label="Loading company roles" />}
               {companyRoleUsage !== null && companyRoleUsage.filter((role) => !role.archived).length === 0 && <p className="people-empty-inline">No company roles yet.</p>}
               {companyRoleUsage !== null && <ul className="people-role-list">
                 {companyRoleUsage.filter((role) => !role.archived).map((role) => (
@@ -2136,7 +2138,7 @@ export default function People() {
                       disabled={role.employee_count > 0 || removingCompanyRoleId !== null}
                       title={role.employee_count > 0 ? 'Move its employees to another role first.' : undefined}
                       onClick={() => void handleRemoveCompanyRole(role)}>
-                      {removingCompanyRoleId === role.id ? 'Removing...' : role.used_in_campaigns ? 'Archive' : 'Delete'}
+                      {removingCompanyRoleId === role.id ? <Pending label="Removing" /> : role.used_in_campaigns ? 'Archive' : 'Delete'}
                     </button>
                   </li>
                 ))}
@@ -2303,7 +2305,7 @@ export default function People() {
                   disabled={isSavingEmployee}
                 >
                   {isSavingEmployee
-                    ? 'Saving...'
+                    ? <Pending label="Saving" />
                     : editingEmployeeId === null
                       ? 'Save employee'
                       : 'Update employee'}
@@ -2450,7 +2452,7 @@ export default function People() {
                     disabled={isSavingGroup}
                   >
                     {isSavingGroup
-                      ? 'Saving...'
+                      ? <Pending label="Saving" />
                       : editingGroupId === null
                         ? 'Create group'
                         : 'Save changes'}

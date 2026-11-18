@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useAppAuth } from '../../auth/AppAuth';
 import InlineMessage from '../../components/feedback/InlineMessage';
 import { useConfirm, useToast } from '../../components/feedback/feedback-context';
+import Pending from '../../components/feedback/Pending';
+import LoadingState from '../../components/feedback/LoadingState';
 import {
   addCampaignReminder,
   deleteCampaignReminder,
@@ -89,7 +91,7 @@ function ReminderDialog({ campaignId, onClose, onSent }: {
       </div>
       <div className="modal-body">
         {error && <InlineMessage tone="error">{error}</InlineMessage>}
-        {recipients === null && !error && <p className="completion-emails-muted">Loading recipients…</p>}
+        {recipients === null && !error && <LoadingState variant="section" label="Loading recipients" />}
         {recipients !== null && recipients.length === 0 && <p className="completion-emails-muted">Everyone has finished their evaluations.</p>}
         {recipients !== null && recipients.length > 0 && <>
           <div className="campaign-reminder-quick" role="group" aria-label="Quick selection">
@@ -122,7 +124,7 @@ function ReminderDialog({ campaignId, onClose, onSent }: {
         <div className="modal-actions">
           <button className="btn btn-secondary" type="button" onClick={onClose} disabled={sending}>Cancel</button>
           <button className="btn btn-primary" type="button" onClick={() => void send()} disabled={sending || selected.size === 0}>
-            {sending ? 'Sending...' : `Send to ${selected.size} ${selected.size === 1 ? 'person' : 'people'}`}
+            {sending ? <Pending label="Sending" /> : `Send to ${selected.size} ${selected.size === 1 ? 'person' : 'people'}`}
           </button>
         </div>
       </div>
@@ -192,7 +194,7 @@ export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { c
 
     {error && <InlineMessage tone="error" onDismiss={data ? () => setError('') : undefined}>{error}</InlineMessage>}
     {data && !data.email_configured && <InlineMessage tone="warning">Email sending isn’t configured on the server, so no emails go out yet.</InlineMessage>}
-    {!data && !error && <p className="completion-emails-muted">Loading email schedule…</p>}
+    {!data && !error && <LoadingState variant="section" label="Loading email schedule" />}
 
     {data && <>
       <p className="completion-emails-muted">

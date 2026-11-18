@@ -19,6 +19,7 @@ import { usePreferences } from './preferences-context';
 import './settings.css';
 import InlineMessage from '../../components/feedback/InlineMessage';
 import LoadError from '../../components/feedback/LoadError';
+import LoadingState from '../../components/feedback/LoadingState';
 
 export default function SettingsPage() {
   const { section } = useParams();
@@ -76,12 +77,12 @@ export default function SettingsPage() {
             {section === 'permissions' && <PermissionsSettings />}
             {section === 'audit' && <AuditLogSettings />}
           </>}
-          {!workspace && loading && <div className="card card-padded settings-state">Loading settings...</div>}
+          {!workspace && loading && <LoadingState variant="page" label="Loading settings" />}
           {!workspace && error && <InlineMessage tone="error">{error}</InlineMessage>}
           {!workspace && profile && section === 'profile' && <ProfileSettings profile={profile} />}
           {!workspace && profile && section === 'security' && <SecuritySettings />}
           {!workspace && profile && (section === 'notifications' || section === 'appearance') && (
-            preferenceState.loading ? <div className="card card-padded" role="status">Loading preferences...</div>
+            preferenceState.loading ? <LoadingState variant="page" label="Loading preferences" />
               : preferenceState.error ? <LoadError message={preferenceState.error} onRetry={preferenceState.retry} />
                 : <PreferenceSettings key={`${userId}:${section}`} section={section} />
           )}

@@ -3,6 +3,7 @@ import { ApiAccessError, type AccessTokenGetter } from '../../../auth/authentica
 import { fetchWrittenFeedback } from '../api/reports.api';
 import type { WrittenFeedbackResponse } from '../types/reports.types';
 import LoadError from '../../../components/feedback/LoadError';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 export default function WrittenFeedbackList({ campaignId, questionKey, sectionId, employeeId, evaluationType, getAccessToken }: {
   campaignId: number;
@@ -43,7 +44,7 @@ export default function WrittenFeedbackList({ campaignId, questionKey, sectionId
     <strong>{label} written feedback</strong>
     {denied ? <p>Written feedback is unavailable for this account.</p>
       : error ? <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />
-        : !current ? <p role="status">Loading responses...</p>
+        : !current ? <LoadingState variant="section" label="Loading responses" />
           : current.availability === 'suppressed' ? <p>Written feedback is unavailable for this question.</p>
             : current.availability === 'not_applicable' ? <p>No {label.toLowerCase()} question was issued for this scope.</p>
               : current.availability === 'no_data' ? <p>No written responses yet</p>

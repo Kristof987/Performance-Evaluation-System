@@ -10,6 +10,7 @@ import type { EmployeeReportDetail, EmployeeReportRow, EmployeeReportsOverview }
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { usePageTitle } from '../../app/usePageTitle';
 import LoadError from '../../components/feedback/LoadError';
+import LoadingState from '../../components/feedback/LoadingState';
 
 function formatScore(value: number | null) {
   if (value === null) return '—';
@@ -18,7 +19,7 @@ function formatScore(value: number | null) {
 
 function LoadingOrError({ error, retry }: { error: string; retry: () => void }) {
   if (error) return <LoadError message={error} onRetry={retry} />;
-  return <div className="reports-state">Loading employee analytics...</div>;
+  return <LoadingState variant="page" label="Loading employee report" />;
 }
 
 export function EmployeeReportsPage() {
@@ -71,7 +72,7 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccess
   }, [data, group, query, role, sort]);
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
-  if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
+  if (loadingCampaigns) return <LoadingState variant="page" label="Loading campaigns" />;
   if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
   if (data === null || data.campaign.id !== selectedCampaignId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
@@ -129,6 +130,6 @@ function EmployeeReportDetailContent({ campaignId, employeeId, getAccessToken }:
   }, [campaignId, employeeId, !!getAccessToken, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.employee.id !== employeeId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-  if (!getAccessToken) return <div className="reports-state">Waiting for authentication...</div>;
+  if (!getAccessToken) return <LoadingState variant="page" label="Checking your account" />;
   return <EmployeeReportDetailView data={data} getAccessToken={getAccessToken} onBack={() => navigate(`/reports/campaigns/${campaignId}/employees`)} />;
 }

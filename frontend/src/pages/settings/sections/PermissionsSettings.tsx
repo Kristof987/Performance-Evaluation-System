@@ -5,6 +5,7 @@ import SaveBar from './SaveBar';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
 import { useConfirm, useToast } from '../../../components/feedback/feedback-context';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 // Removing these from your own role would lock you out of this page.
 const SELF_PROTECTED = new Set(['permissions.manage', 'settings.read']);
@@ -49,7 +50,7 @@ export default function PermissionsSettings() {
   }, [getAccessToken, attempt]);
 
   if (loadError) return <LoadError message={loadError} onRetry={() => setAttempt((value) => value + 1)} />;
-  if (!matrix) return <div className="card card-padded settings-state" role="status">Loading permissions...</div>;
+  if (!matrix) return <LoadingState variant="page" label="Loading permissions" />;
 
   const saved = grantsOf(matrix);
   const changedRoles = matrix.roles.filter((role) => draft[role.id]?.join() !== saved[role.id]?.join());

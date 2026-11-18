@@ -5,6 +5,8 @@ import type { AIAnalysis, AIAnalysisGenerationJob, AIAnalysisHistory, AIAnalysis
 import { useConfirm, useToast } from '../../../components/feedback/feedback-context';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
+import Pending from '../../../components/feedback/Pending';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 type Props = { scope: AIAnalysisScope; getAccessToken: AccessTokenGetter };
 
@@ -314,7 +316,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   return <section className="reports-card reports-ai-panel" aria-label={copy.heading}>
     <div className="reports-section-heading"><h2>{copy.heading}</h2>{scope.type !== 'employee' && history?.scope_label && <strong>{history.scope_label}</strong>}<p>{copy.description}</p></div>
     <AIExplanation employeeScope={scope.type === 'employee'} />
-    {!history && !error && <p className="reports-state">Loading saved analyses...</p>}
+    {!history && !error && <LoadingState variant="section" label="Loading saved analyses" />}
     {error && <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />}
     {actionError && <InlineMessage tone="error" onDismiss={() => setActionError('')}>{actionError}</InlineMessage>}
     {jobError && <LoadError message={`Couldn’t confirm the generation status: ${jobError}`} retryLabel="Check status again" onRetry={() => setJobReload((value) => value + 1)} />}
@@ -328,7 +330,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
          {canGenerate && <button type="button" className="btn btn-primary" disabled={busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={async () => {
            if (history.versions.length > 0 && !(await confirm({ title: 'Regenerate the analysis?', message: 'This sends a new request to the AI provider and may incur API cost. A new draft is created; earlier versions stay available.', confirmLabel: 'Regenerate' }))) return;
            void startGeneration();
-         }}>{busy === 'generate' ? 'Starting generation...' : jobActive ? 'Generation in progress...' : job?.status === 'failed' ? 'Retry generation' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
+         }}>{busy === 'generate' ? <Pending label="Starting generation" /> : jobActive ? 'Generation in progress...' : job?.status === 'failed' ? 'Retry generation' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
       </div>
       {!aiEnabled && <InlineMessage tone="info">AI features are turned off in workspace settings. Saved analyses stay available to read.</InlineMessage>}
       {!history.has_eligible_evidence && <InlineMessage tone="info">No reportable submitted evidence is available. Insufficient data is not an indication of low performance.</InlineMessage>}
@@ -346,11 +348,11 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
           </div>)}
         </div>
         {(canEdit || canApprove) && <div className="reports-ai-actions">
-           {editing ? <><button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (editing) void perform('save', () => saveAIAnalysis(getAccessToken, scope, selected.id, editing)); }}>{busy === 'save' ? 'Saving...' : 'Save as new Draft'}</button><button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={async () => {
+           {editing ? <><button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (editing) void perform('save', () => saveAIAnalysis(getAccessToken, scope, selected.id, editing)); }}>{busy === 'save' ? <Pending label="Saving" /> : 'Save as new Draft'}</button><button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={async () => {
                if (editing && JSON.stringify(editing) !== JSON.stringify(selected.analysis) && !(await confirm({ title: 'Discard your edits?', message: 'Your changes to this draft haven’t been saved.', confirmLabel: 'Discard edits', tone: 'danger' }))) return;
                setEditing(null);
              }}>Cancel editing</button></>
-             : selected.status === 'draft' && mayWrite && <>{canEdit && <button type="button" className="btn btn-secondary" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}>Edit Draft</button>}{canApprove && <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={async () => { if (await confirm({ title: `Approve version ${selected.version}?`, message: 'Approved content becomes read-only and replaces the currently approved version.', confirmLabel: 'Approve analysis' })) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? 'Approving...' : 'Approve Analysis'}</button>}</>}
+             : selected.status === 'draft' && mayWrite && <>{canEdit && <button type="button" className="btn btn-secondary" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}>Edit Draft</button>}{canApprove && <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={async () => { if (await confirm({ title: `Approve version ${selected.version}?`, message: 'Approved content becomes read-only and replaces the currently approved version.', confirmLabel: 'Approve analysis' })) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? <Pending label="Approving" /> : 'Approve Analysis'}</button>}</>}
         </div>}
       </>}
     </>}

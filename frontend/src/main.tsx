@@ -30,6 +30,7 @@ import PreferencesProvider from './pages/settings/PreferencesProvider'
 import { applyTheme, cachedTheme } from './pages/settings/theme'
 import FeedbackProvider from './components/feedback/FeedbackProvider'
 import ErrorBoundary from './components/feedback/ErrorBoundary'
+import LoadingState from './components/feedback/LoadingState'
 
 function EvaluationQualityRedirect() {
   const { campaignId } = useParams()
@@ -56,7 +57,7 @@ function LegacyEvaluationRedirect() {
 function ProtectedPage({ rule, children }: { rule?: AccessRule; children: ReactNode }) {
   const { state } = useAppAuth()
   const location = useLocation()
-  if (state.status === 'loading') return <main role="status">Checking your PerfEval account...</main>
+  if (state.status === 'loading') return <LoadingState variant="screen" label="Checking your account" />
   if (state.status !== 'authenticated') {
     return <Navigate to="/" state={{ from: location.pathname + location.search + location.hash }} replace />
   }

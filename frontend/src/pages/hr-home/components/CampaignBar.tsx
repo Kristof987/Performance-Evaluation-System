@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import type { Campaign } from '../hrHome.types';
 import CampaignStatusBadge from '../../campaigns/components/CampaignStatusBadge';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 type CampaignBarProps = {
   isLoading: boolean;
@@ -33,7 +34,7 @@ function CampaignBar({
       <div className="campaign-bar">
         <div className="campaign-selector">
           <Folder size={16} color="#4553C4" />
-          <div className="campaign-name">Loading dashboard...</div>
+          <LoadingState variant="section" label="Loading dashboard" />
         </div>
       </div>
     );

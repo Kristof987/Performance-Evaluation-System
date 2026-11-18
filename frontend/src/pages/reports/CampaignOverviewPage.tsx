@@ -12,6 +12,7 @@ import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { useAppAuth } from '../../auth/AppAuth';
 import { hasTeamReportsOnly } from '../../app/access';
 import LoadError from '../../components/feedback/LoadError';
+import LoadingState from '../../components/feedback/LoadingState';
 
 function DashboardCard({ title, info, children, actions, className = '' }: { title: string; info: string; children: ReactNode; actions?: ReactNode; className?: string }) {
   return <section className={`reports-card reports-dashboard-card ${className}`}><div className="reports-dashboard-card-heading"><div className="reports-dashboard-card-title"><h2>{title}</h2><span className="reports-info-icon" title={info} aria-label={info} tabIndex={0}><Info size={15} /></span></div>{actions}</div>{children}</section>;
@@ -42,10 +43,10 @@ export function ReportsIndexPage() {
   const { state } = useAppAuth();
   const teamOnly = state.status === 'authenticated' && hasTeamReportsOnly(state.user.permissions);
   return <ReportsLayout selectedCampaignId={null}>{({ loadingCampaigns, campaignsError, campaigns, retryCampaigns }) => {
-    if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
+    if (loadingCampaigns) return <LoadingState variant="page" label="Loading campaigns" />;
     if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
     if (campaigns.length === 0) return <ReportsEmptyState title="No campaigns available." message={teamOnly ? 'There are no campaigns yet for the groups you lead.' : 'Create a campaign before reports can be shown.'} />;
-    return <div className="reports-state">Opening selected campaign...</div>;
+    return <LoadingState variant="page" label="Opening campaign" />;
   }}</ReportsLayout>;
 }
 
@@ -115,12 +116,12 @@ function OverviewContent({
   }, [!!getAccessToken, reloadKey, selectedCampaignId, validCampaignId, qualityPreview]);
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
-  if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
+  if (loadingCampaigns) return <LoadingState variant="page" label="Loading campaigns" />;
   if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
   if (qualityPreview) return <div className="reports-overview reports-overview-dashboard"><p className="reports-dashboard-note">Campaign performance charts become available in Review. Completed peer evaluations can already be checked for campaign-level quality patterns.</p><EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
   if (error) return <LoadError message={error} onRetry={() => setReloadKey((value) => value + 1)} />;
-  if (data === null || data.campaign.id !== selectedCampaignId) return <div className="reports-state">Loading campaign analytics...</div>;
+  if (data === null || data.campaign.id !== selectedCampaignId) return <LoadingState variant="page" label="Loading campaign report" />;
 
   const noAssignments = data.kpis.total_evaluations === 0;
   const noCompleted = data.kpis.total_evaluations > 0 && data.kpis.completed_evaluations === 0;

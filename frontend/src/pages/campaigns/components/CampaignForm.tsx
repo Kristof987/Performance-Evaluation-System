@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import InlineMessage from '../../../components/feedback/InlineMessage';
+import Pending from '../../../components/feedback/Pending';
 import type {
   Campaign,
   CampaignFormValues,
@@ -108,7 +109,7 @@ export default function CampaignForm({
           type="submit"
           disabled={isSaving || !hasChanges}
         >
-           {isSaving ? 'Saving...' : campaign ? 'Save changes' : 'Create draft'}
+           {isSaving ? <Pending label="Saving" /> : campaign ? 'Save changes' : 'Create draft'}
         </button>
       </div>
     </form>

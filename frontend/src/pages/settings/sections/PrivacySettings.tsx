@@ -5,6 +5,7 @@ import SaveBar from './SaveBar';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
 import { useToast } from '../../../components/feedback/feedback-context';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 type Draft = { peers: string; cohort: string };
 
@@ -42,7 +43,7 @@ export default function PrivacySettings() {
   }, [getAccessToken, attempt]);
 
   if (loadError) return <LoadError message={loadError} onRetry={() => setAttempt((value) => value + 1)} />;
-  if (!saved) return <div className="card card-padded settings-state" role="status">Loading privacy settings...</div>;
+  if (!saved) return <LoadingState variant="page" label="Loading privacy settings" />;
 
   const peers = parse(draft.peers);
   const cohort = parse(draft.cohort);

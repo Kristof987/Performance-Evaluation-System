@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { Check, ChevronDown, Search, SlidersHorizontal, X } from 'lucide-react';
 import CampaignStatusBadge from './CampaignStatusBadge';
 import { formatDate } from '../campaign.utils';
+import LoadingState from '../../../components/feedback/LoadingState';
 import type {
   Campaign,
   CampaignStatusFilter,
@@ -109,7 +110,7 @@ export default function CampaignList({
             {isCampaignsLoading && (
               <tr>
                 <td className="campaign-state-cell" colSpan={6}>
-                  Loading campaigns...
+                  <LoadingState variant="section" label="Loading campaigns" />
                 </td>
               </tr>
             )}

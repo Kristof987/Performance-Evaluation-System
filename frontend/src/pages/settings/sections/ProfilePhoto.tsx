@@ -4,6 +4,7 @@ import Avatar from '../../../components/Avatar';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import { useConfirm, useToast } from '../../../components/feedback/feedback-context';
 import { setProfilePhotoOverride } from '../profile-photo-store';
+import Pending from '../../../components/feedback/Pending';
 import {
   deleteProfilePhoto, PROFILE_PHOTO_MAX_BYTES, PROFILE_PHOTO_TYPES, uploadProfilePhoto,
 } from '../settings.api';
@@ -63,13 +64,13 @@ export default function ProfilePhoto({ name, employeeId, initialPhoto }: {
           onChange={(event) => choose(event.target.files?.[0] ?? null)} />
         {file ? <>
           <button className="btn btn-primary" type="button" disabled={busy !== null} onClick={() => void run('upload')}>
-            {busy === 'upload' ? 'Saving...' : 'Save photo'}</button>
+            {busy === 'upload' ? <Pending label="Saving" /> : 'Save photo'}</button>
           <button className="btn btn-secondary" type="button" disabled={busy !== null} onClick={() => setFile(null)}>Cancel</button>
         </> : <>
           <button className="btn btn-secondary" type="button" disabled={busy !== null} onClick={() => input.current?.click()}>
             {photo ? 'Change photo' : 'Upload photo'}</button>
           {photo && <button className="btn btn-ghost" type="button" disabled={busy !== null} onClick={() => void run('remove')}>
-            {busy === 'remove' ? 'Removing...' : 'Remove'}</button>}
+            {busy === 'remove' ? <Pending label="Removing" /> : 'Remove'}</button>}
         </>}
       </div>}
       {error && <InlineMessage tone="error" onDismiss={() => setError('')}>{error}</InlineMessage>}

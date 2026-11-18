@@ -12,6 +12,7 @@ import WrittenFeedbackPreview from './components/WrittenFeedbackPreview';
 import { useAppAuth } from '../../auth/AppAuth';
 import type { CampaignRatingDistribution, CampaignReportOverview, ReportQuestion, ReportQuestions, ReportSectionComparison, ReportSectionScore } from './types/reports.types';
 import LoadError from '../../components/feedback/LoadError';
+import LoadingState from '../../components/feedback/LoadingState';
 
 const colors = ['#3468cc', '#8061cb', '#1a9d7b', '#4384b8', '#549d89', '#926fb1'];
 const sectionRating = (section: ReportSectionScore) => section.availability === 'suppressed' ? 'Restricted' : section.availability === 'no_data' ? 'No data' : section.average_score === null ? 'Unavailable' : `${section.average_score.toFixed(2)} / 5`;
@@ -136,7 +137,7 @@ function DetailedContent({ campaignId, getAccessToken }: { campaignId: number; g
   }
 
   if (error) return <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />;
-  if (!overview || !peer || !self || overview.campaign.id !== campaignId) return <div className="reports-state">Loading detailed results...</div>;
+  if (!overview || !peer || !self || overview.campaign.id !== campaignId) return <LoadingState variant="page" label="Loading detailed results" />;
   const sections = overview.sections;
   const selected = sectionId === null ? null : sections.find((section) => String(section.id) === sectionId);
 

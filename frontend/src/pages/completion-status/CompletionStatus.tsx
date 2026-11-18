@@ -9,6 +9,7 @@ import { fetchCompletionStatus, type CompletionStatusResponse } from './completi
 import CampaignEmails from './CampaignEmails';
 import InlineMessage from '../../components/feedback/InlineMessage';
 import './completion-status.css';
+import LoadingState from '../../components/feedback/LoadingState';
 
 const PAGE_SIZE = 25;
 
@@ -84,7 +85,7 @@ export default function CompletionStatus() {
       </header>
 
       {invalidRequest && <InlineMessage tone="error">Campaign not found.</InlineMessage>}
-      {!invalidRequest && loading && <div className="card card-padded completion-state">Loading completion status...</div>}
+      {!invalidRequest && loading && <LoadingState variant="page" label="Loading completion status" />}
       {!invalidRequest && !loading && error && <InlineMessage tone="error">{error}</InlineMessage>}
       {!invalidRequest && !loading && !error && data && summary && <>
         <section className="card completion-kpis" aria-label="Completion status metrics">

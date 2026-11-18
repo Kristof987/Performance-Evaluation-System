@@ -4,6 +4,7 @@ import { useLocation } from 'react-router';
 import { useAppAuth } from '../../auth/AppAuth';
 import { safeReturnPath } from '../../auth/return-path';
 import InlineMessage from '../../components/feedback/InlineMessage';
+import LoadingState from '../../components/feedback/LoadingState';
 
 export default function Auth0SignIn() {
   const { error, loginWithRedirect } = useAuth0();
@@ -27,7 +28,7 @@ export default function Auth0SignIn() {
     <div className="login-auth0">
       <h2>Sign in with Auth0</h2>
       <p>Use your organization account. Access to PerfEval requires a linked account.</p>
-      {state.status === 'loading' ? <p role="status">Checking your PerfEval account...</p> :
+      {state.status === 'loading' ? <LoadingState variant="section" label="Checking your account" /> :
         state.status === 'unlinked' ? (
           <>
             <InlineMessage tone="error">This Auth0 account is not linked to an active PerfEval account, or its session was rejected. Contact an administrator if you need account linking.</InlineMessage>

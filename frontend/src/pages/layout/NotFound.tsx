@@ -4,13 +4,14 @@ import { getAuthenticatedDashboardPath } from './sidebar-user';
 import AppLayout from './AppLayout';
 import { usePageTitle } from '../../app/usePageTitle';
 import './auth0-transition.css';
+import LoadingState from '../../components/feedback/LoadingState';
 
 /** Shown for any URL that matches no route (typos, removed pages, broken links). */
 export default function NotFound() {
   const { state } = useAppAuth();
   const location = useLocation();
   usePageTitle('Page not found');
-  if (state.status === 'loading') return <main role="status">Checking your PerfEval account...</main>;
+  if (state.status === 'loading') return <LoadingState variant="screen" label="Checking your account" />;
   if (state.status !== 'authenticated') {
     return <Navigate to="/" state={{ from: location.pathname + location.search + location.hash }} replace />;
   }

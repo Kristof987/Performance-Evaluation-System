@@ -5,6 +5,7 @@ import { defaultPreferences, type Preferences } from '../settings.api';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import { useToast } from '../../../components/feedback/feedback-context';
 import { useUnsavedChangesGuard } from '../../../components/feedback/useUnsavedChangesGuard';
+import Pending from '../../../components/feedback/Pending';
 
 function Toggle({ id, label, description, checked, disabled, onChange }: {
   id: string; label: string; description: string; checked: boolean;
@@ -102,7 +103,7 @@ export default function PreferenceSettings({ section }: { section: 'notification
       {error && <InlineMessage tone="error" onDismiss={() => setError('')}>{error} Changes were rolled back.</InlineMessage>}
     </section>
     {(dirty || saving) && <div className="settings-save-bar" aria-busy={saving}>
-      <span role="status">{saving ? 'Saving...' : 'Unsaved changes'}</span>
+      <span role="status">{saving ? <Pending label="Saving" /> : 'Unsaved changes'}</span>
       <button className="btn btn-secondary" type="button" disabled={saving}
         onClick={() => { setDraft(baseline); setError(''); }}>Discard</button>
       <button className="btn btn-primary" type="submit" disabled={disabled}>Save</button>

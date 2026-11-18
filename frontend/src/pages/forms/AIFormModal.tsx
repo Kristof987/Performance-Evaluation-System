@@ -4,6 +4,7 @@ import { generateAIForm, type AIGenerateRequest, type AIGeneratedForm, type AIGe
 import type { Section } from './sections.api';
 import InlineMessage from '../../components/feedback/InlineMessage';
 import { useConfirm } from '../../components/feedback/feedback-context';
+import Pending from '../../components/feedback/Pending';
 
 type Mapping = number | 'create' | null;
 
@@ -93,7 +94,7 @@ export default function AIFormModal({ sections, canManageSections, getAccessToke
         {generated.sections.some((item) => item.section_id === null) && <p className="forms-ai-note">Proposed Sections are created only if you choose Create new and confirm the import. You can instead select an existing Section. A Section created during import remains in the catalog if a later step fails.</p>}
       </div>}
     </div>
-    <div className="forms-editor-modal-actions"><button className="btn btn-secondary" type="button" disabled={importing} onClick={close}>Cancel</button>{generated && <button className="btn btn-secondary" type="button" disabled={disabled} onClick={generate}>Regenerate</button>}{generated ? <button className="btn btn-primary" type="button" disabled={disabled || mappings.some((item) => item === null)} onClick={importDraft}>{importing ? 'Importing...' : 'Edit in Form Builder'}</button> : <button className="btn btn-primary" type="button" disabled={disabled || !request.description.trim()} onClick={generate}>{pending ? 'Generating...' : 'Generate draft'}</button>}</div>
+    <div className="forms-editor-modal-actions"><button className="btn btn-secondary" type="button" disabled={importing} onClick={close}>Cancel</button>{generated && <button className="btn btn-secondary" type="button" disabled={disabled} onClick={generate}>Regenerate</button>}{generated ? <button className="btn btn-primary" type="button" disabled={disabled || mappings.some((item) => item === null)} onClick={importDraft}>{importing ? <Pending label="Importing" /> : 'Edit in Form Builder'}</button> : <button className="btn btn-primary" type="button" disabled={disabled || !request.description.trim()} onClick={generate}>{pending ? <Pending label="Generating" /> : 'Generate draft'}</button>}</div>
   </div></div>;
 }
 

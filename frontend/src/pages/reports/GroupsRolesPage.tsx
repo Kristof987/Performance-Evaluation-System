@@ -10,6 +10,7 @@ import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { useAppAuth } from '../../auth/AppAuth';
 import { hasTeamReportsOnly } from '../../app/access';
 import LoadError from '../../components/feedback/LoadError';
+import LoadingState from '../../components/feedback/LoadingState';
 
 function useTeamReportsOnly() {
   const { state } = useAppAuth();
@@ -32,7 +33,7 @@ function LoadingOrError({ error, retry }: { error: string; retry: () => void }) 
   if (error) {
     return <LoadError message={error} onRetry={retry} />;
   }
-  return <div className="reports-state">Loading report analytics...</div>;
+  return <LoadingState variant="page" label="Loading report" />;
 }
 
 function ReportKpis({ items }: { items: Array<{ label: string; value: string | number; context?: string }> }) {
@@ -70,7 +71,7 @@ function GroupsRolesContent({ selectedCampaignId, validCampaignId, getAccessToke
     return () => controller.abort();
   }, [selectedCampaignId, getAccessToken, reloadGroups, validCampaignId, view]);
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
-  if (loadingCampaigns) return <div className="reports-state">Loading campaigns...</div>;
+  if (loadingCampaigns) return <LoadingState variant="page" label="Loading campaigns" />;
   if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
   return <div className="reports-overview"><GroupsRolesTabs campaignId={selectedCampaignId} view={view} />{view === 'groups' ? groupData?.campaign.id === selectedCampaignId ? <GroupsOverview data={groupData} campaignId={selectedCampaignId} /> : <LoadingOrError error={groupError} retry={() => setReloadGroups((value) => value + 1)} /> : <RolesOverview campaignId={selectedCampaignId} getAccessToken={getAccessToken} />}</div>;

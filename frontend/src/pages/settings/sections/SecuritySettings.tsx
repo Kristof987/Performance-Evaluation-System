@@ -5,6 +5,8 @@ import { formatSettingsDate } from '../settings-date';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
 import { useToast } from '../../../components/feedback/feedback-context';
+import Pending from '../../../components/feedback/Pending';
+import LoadingState from '../../../components/feedback/LoadingState';
 import {
   fetchSecuritySettings, requestPasswordReset,
   type SecuritySettings as SecurityData,
@@ -54,7 +56,7 @@ export default function SecuritySettings() {
       <p>Manage your sign-in and account protection.</p></div>
     {error && (security ? <InlineMessage tone="error" onDismiss={() => setError('')}>{error}</InlineMessage>
       : <LoadError message={error} onRetry={() => setRetry((value) => value + 1)} />)}
-        {!security && !error && <p role="status">Loading security settings...</p>}
+        {!security && !error && <LoadingState variant="section" label="Loading security settings" />}
     {development ? <div className="settings-security-section"><h3>Development account</h3>
       <p>Development account — security settings unavailable.</p></div> : security && <>
       <div className="settings-security-section"><h3>Sign-in method</h3>
@@ -62,7 +64,7 @@ export default function SecuritySettings() {
         {security.password_reset_available ? <>
           <p className="settings-note">Auth0 sends a secure reset email. Compass never handles your password.</p>
           <button className="btn btn-secondary" type="button" disabled={!canManage || pending}
-            onClick={() => void sendPasswordReset()}>{pending ? 'Sending...' : 'Send password reset email'}</button>
+            onClick={() => void sendPasswordReset()}>{pending ? <Pending label="Sending" /> : 'Send password reset email'}</button>
         </> : <p className="settings-note">Password changes are managed by your sign-in provider or organization.</p>}
       </div>
     </>}

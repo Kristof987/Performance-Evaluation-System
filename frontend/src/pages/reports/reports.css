@@ -146,7 +146,6 @@
 .reports-campaign-selector select:focus-visible, .reports-chart-toolbar select:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 .reports-selector-empty,
-.reports-state,
 .reports-empty {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -155,12 +154,6 @@
   padding: 18px;
 }
 
-.reports-state {
-  align-items: center;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-}
 
 
 .reports-empty {

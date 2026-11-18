@@ -1,4 +1,5 @@
 import { useUnsavedChangesGuard } from '../../../components/feedback/useUnsavedChangesGuard';
+import Pending from '../../../components/feedback/Pending';
 
 /** Sticky "Unsaved changes" bar; also asks before leaving the page with unsaved edits. */
 export default function SaveBar({ dirty, saving, canSave = true, onDiscard, onSave }: {
@@ -8,7 +9,7 @@ export default function SaveBar({ dirty, saving, canSave = true, onDiscard, onSa
 
   if (!dirty && !saving) return null;
   return <div className="settings-save-bar" aria-busy={saving}>
-    <span role="status">{saving ? 'Saving...' : 'Unsaved changes'}</span>
+    <span role="status">{saving ? <Pending label="Saving" /> : 'Unsaved changes'}</span>
     <button className="btn btn-secondary" type="button" disabled={saving} onClick={onDiscard}>Discard</button>
     <button className="btn btn-primary" type="button" disabled={saving || !canSave} onClick={onSave}>Save</button>
   </div>;

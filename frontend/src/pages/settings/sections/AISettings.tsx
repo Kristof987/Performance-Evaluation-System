@@ -9,6 +9,7 @@ import SaveBar from './SaveBar';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
 import { useToast } from '../../../components/feedback/feedback-context';
+import LoadingState from '../../../components/feedback/LoadingState';
 
 const AI_PERMISSIONS = [
   { name: 'ai_analysis.generate', label: 'Generate and edit' },
@@ -45,7 +46,7 @@ export default function AISettings() {
   }, [getAccessToken, attempt]);
 
   if (loadError) return <LoadError message={loadError} onRetry={() => setAttempt((value) => value + 1)} />;
-  if (!saved || !matrix) return <div className="card card-padded settings-state" role="status">Loading AI settings...</div>;
+  if (!saved || !matrix) return <LoadingState variant="page" label="Loading AI settings" />;
 
   const modelValid = /^[A-Za-z0-9._:-]{0,100}$/.test(draft.model.trim());
   const dirty = draft.enabled !== saved.ai_enabled || draft.model.trim() !== (saved.ai_model ?? '');

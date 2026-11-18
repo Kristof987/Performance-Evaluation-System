@@ -21,6 +21,8 @@ import CampaignGroupPreview from './components/CampaignGroupPreview';
 import { fetchPeople, type Employee } from '../people/people.api';
 import { useConfirm } from '../../components/feedback/feedback-context';
 import InlineMessage from '../../components/feedback/InlineMessage';
+import Pending from '../../components/feedback/Pending';
+import LoadingState from '../../components/feedback/LoadingState';
 
 function countLabel(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -462,7 +464,7 @@ export function CampaignDetails() {
     return (
       <CampaignPage>
         <div className="campaign-view">
-          <p>Loading campaign...</p>
+          <LoadingState variant="page" label="Loading campaign" />
         </div>
       </CampaignPage>
     );
@@ -533,7 +535,7 @@ export function CampaignDetails() {
                 {canManageCampaigns && (campaign.status === 'draft' || campaign.status === 'scheduled') && <button type="button" role="menuitem" disabled={isLoadingEligibility || isChangingArchive || !deletionEligibility?.can_delete} title={deletionEligibility?.reason ?? undefined} onClick={() => { setActionsOpen(false); actionsTrigger.current?.focus(); openDestructiveConfirmation('delete'); }}>Delete campaign</button>}
               </div>}
             </div>}
-            {canManageCampaigns && campaign.status === 'draft' && !campaign.isArchived && <button className="btn btn-primary" type="button" disabled={isChangingSchedule || isSavingCampaign} onClick={() => handleScheduleAction('schedule')}>{isChangingSchedule ? 'Updating...' : 'Schedule campaign'}</button>}
+            {canManageCampaigns && campaign.status === 'draft' && !campaign.isArchived && <button className="btn btn-primary" type="button" disabled={isChangingSchedule || isSavingCampaign} onClick={() => handleScheduleAction('schedule')}>{isChangingSchedule ? <Pending label="Updating" /> : 'Schedule campaign'}</button>}
             {canManageCampaigns && !campaign.isArchived && campaign.status === 'active' && (
               <button className="btn btn-primary" type="button" disabled={isChangingLifecycle || isLoadingMetrics} onClick={() => openLifecycleConfirmation('review')}>Move to review</button>
             )}
@@ -542,7 +544,7 @@ export function CampaignDetails() {
             )}
             {canManageCampaigns && !campaign.isArchived && campaign.status === 'paused' && (
               <button className="btn btn-primary" type="button" disabled={isChangingLifecycle} onClick={() => handleLifecycleAction('resume')}>
-                {isChangingLifecycle ? 'Updating...' : 'Resume campaign'}
+                {isChangingLifecycle ? <Pending label="Updating" /> : 'Resume campaign'}
               </button>
             )}
           </div>
@@ -597,7 +599,7 @@ export function CampaignDetails() {
               <h2>Campaign groups</h2>
               <p>Select which company groups are included in this campaign.</p>
             </div>
-            {canEdit && <span className="campaign-group-autosave" role="status">{isSavingGroups || isSavingSetup ? 'Saving groups...' : hasGroupChanges ? groupsMessage ? 'Not saved' : 'Waiting to save...' : 'Saved automatically'}</span>}
+            {canEdit && <span className="campaign-group-autosave" role="status">{isSavingGroups || isSavingSetup ? <Pending label="Saving groups" /> : hasGroupChanges ? groupsMessage ? 'Not saved' : 'Waiting to save...' : 'Saved automatically'}</span>}
           </div>
 
           {campaignGroups.availableGroups.length === 0 ? (
@@ -643,7 +645,7 @@ export function CampaignDetails() {
         </div>}
 
         {setupSection === 'pairs' && <section className="campaign-rules-card campaign-matrix-workspace" id="campaign-evaluation-matrix" tabIndex={-1}>
-          {isSetupPreviewLoading && campaign.status === 'scheduled' ? <><div className="campaign-matrix-inline-header"><div><h2>Evaluation matrix</h2><p>Select which employees evaluate which other employees.</p></div></div><div className="campaign-groups-empty">Loading selected group evaluation matrix...</div></> : activeMatrixGroup ?
+          {isSetupPreviewLoading && campaign.status === 'scheduled' ? <><div className="campaign-matrix-inline-header"><div><h2>Evaluation matrix</h2><p>Select which employees evaluate which other employees.</p></div></div><LoadingState variant="section" label="Loading evaluation pairs" /></> : activeMatrixGroup ?
             <EvaluationMatrix
               group={matrixGroupWithSelfLocks(evaluationMatrix, activeMatrixGroup)}
               notice={matrixNotice}
@@ -679,12 +681,12 @@ export function CampaignDetails() {
               <h2>Questionnaire assignments</h2>
               <p>Assign questionnaires to evaluator–evaluatee role relationships.</p>
             </div>
-            {canAssignForms && <div className="campaign-assignment-autosave"><span role="status">{isSavingRules ? 'Saving questionnaires...' : hasRuleChanges ? rulesMessage ? 'Not saved' : hasGroupChanges || hasMatrixChanges ? 'Waiting for groups and matrix...' : 'Waiting to save...' : rulesMessage ? 'Saved; refresh required' : 'Saved automatically'}</span>{hasRuleChanges && !setupSaveBusy && <button className="btn btn-secondary" type="button" onClick={discardRules}>Discard changes</button>}{hasRuleChanges && rulesMessage && <button className="btn btn-secondary" type="button" disabled={setupSaveBusy || hasGroupChanges || hasMatrixChanges || isSetupPreviewLoading || !!setupPreviewError} onClick={handleUpdateRules}>Retry saving</button>}</div>}
+            {canAssignForms && <div className="campaign-assignment-autosave"><span role="status">{isSavingRules ? <Pending label="Saving questionnaires" /> : hasRuleChanges ? rulesMessage ? 'Not saved' : hasGroupChanges || hasMatrixChanges ? 'Waiting for groups and matrix...' : 'Waiting to save...' : rulesMessage ? 'Saved; refresh required' : 'Saved automatically'}</span>{hasRuleChanges && !setupSaveBusy && <button className="btn btn-secondary" type="button" onClick={discardRules}>Discard changes</button>}{hasRuleChanges && rulesMessage && <button className="btn btn-secondary" type="button" disabled={setupSaveBusy || hasGroupChanges || hasMatrixChanges || isSetupPreviewLoading || !!setupPreviewError} onClick={handleUpdateRules}>Retry saving</button>}</div>}
           </div>
           {!isSetupPreviewLoading && savedPairCount === 0 && selectedGroupIds.length > 0 && <div className="campaign-questionnaire-empty-plan" role="alert"><strong>No saved evaluation pairs yet.</strong><span>{selectedPairs > 0 ? 'Save your staged matrix selections first. ' : 'Select and save evaluation pairs first. '}You can review optional role assignments here, but required questionnaires are determined by saved pairs.</span><button className="campaign-link" type="button" onClick={() => changeTab('setup', 'pairs')}>Open evaluation assignments</button></div>}
 
           {isSetupPreviewLoading && campaign.status === 'scheduled' ? (
-            <div className="campaign-groups-empty">Loading questionnaire assignments...</div>
+            <LoadingState variant="section" label="Loading questionnaire assignments" />
           ) : evaluationRules.groups.length === 0 ? (
             <div className="campaign-groups-empty">
               Select at least one campaign group before assigning forms to role relationships.
@@ -776,7 +778,7 @@ export function CampaignDetails() {
           <div className="campaign-rule-next"><div><strong>What happens next?</strong><p>Review optional self-evaluations, or finish any missing questionnaires before issuance.</p>{isSetupPreviewLoading || setupPreviewError ? <small>{setupPreviewError ? 'The setup preview is unavailable.' : 'Loading required questionnaire relationships.'}</small> : formProgress.missing > 0 ? <small>{countLabel(formProgress.missing, 'selected role relationship')} {formProgress.missing === 1 ? 'still needs' : 'still need'} a questionnaire before issuance.</small> : hasRuleChanges ? <small>{rulesMessage ? 'Automatic saving failed. Retry or discard changes before issuance.' : 'Questionnaire changes are saving automatically. Wait before continuing.'}</small> : missingPlannedForms ? <small>Planned self-evaluation pairs need individual questionnaires before issuance.</small> : savedPairCount > 0 ? <small>Required questionnaires are assigned. Planned pairs are ready for issuance when the campaign lifecycle allows it.</small> : <small>Save evaluation pairs first to determine which questionnaires are required.</small>}</div>
             <button className="btn btn-secondary" type="button" disabled={setupSaveBusy || hasRuleChanges} onClick={() => changeTab('setup', 'self')}>Continue to self-evaluations <ArrowUpRight size={16} aria-hidden="true" /></button>
           </div>
-          {unissuedPairCount > 0 && <div className="campaign-rule-issue"><div><strong>{countLabel(unissuedPairCount, 'planned evaluation')} pending issuance</strong><p>{campaign.status === 'paused' ? 'Ready pairs will be issued on resume; employees cannot access them while paused.' : campaign.status === 'draft' || campaign.status === 'scheduled' ? 'Validated plans are issued during campaign activation.' : formProgress.missing > 0 || missingPlannedForms ? 'Assign questionnaires for every planned pair before issuing; changes save automatically.' : setupDirty || setupSaveBusy ? 'Wait for automatic saving, or resolve any unsaved changes, before issuing.' : 'Issue validated plans with immutable questionnaire snapshots.'}</p></div>{canAssignForms && (campaign.status === 'active' || campaign.status === 'review') && <button className="btn btn-primary" type="button" disabled={setupSaveBusy || setupDirty || formProgress.missing > 0 || missingPlannedForms || !!rulesMessage || !!selfMessage || !!matrixSaveError || !!groupsMessage} onClick={async () => { if (await confirm({ title: `Issue ${countLabel(unissuedPairCount, 'planned evaluation')}?`, message: 'Evaluators get access right away, and the questionnaire snapshots can’t be changed once issued.', confirmLabel: 'Issue evaluations' })) void handleIssuePlanned(); }}>{isIssuingPlanned ? 'Issuing...' : 'Issue ready evaluations'}</button>}</div>}
+          {unissuedPairCount > 0 && <div className="campaign-rule-issue"><div><strong>{countLabel(unissuedPairCount, 'planned evaluation')} pending issuance</strong><p>{campaign.status === 'paused' ? 'Ready pairs will be issued on resume; employees cannot access them while paused.' : campaign.status === 'draft' || campaign.status === 'scheduled' ? 'Validated plans are issued during campaign activation.' : formProgress.missing > 0 || missingPlannedForms ? 'Assign questionnaires for every planned pair before issuing; changes save automatically.' : setupDirty || setupSaveBusy ? 'Wait for automatic saving, or resolve any unsaved changes, before issuing.' : 'Issue validated plans with immutable questionnaire snapshots.'}</p></div>{canAssignForms && (campaign.status === 'active' || campaign.status === 'review') && <button className="btn btn-primary" type="button" disabled={setupSaveBusy || setupDirty || formProgress.missing > 0 || missingPlannedForms || !!rulesMessage || !!selfMessage || !!matrixSaveError || !!groupsMessage} onClick={async () => { if (await confirm({ title: `Issue ${countLabel(unissuedPairCount, 'planned evaluation')}?`, message: 'Evaluators get access right away, and the questionnaire snapshots can’t be changed once issued.', confirmLabel: 'Issue evaluations' })) void handleIssuePlanned(); }}>{isIssuingPlanned ? <Pending label="Issuing" /> : 'Issue ready evaluations'}</button>}</div>}
           {issuanceMessage && <InlineMessage tone="error" className="campaign-inline-message">{issuanceMessage}</InlineMessage>}
         </section>}
 
@@ -790,7 +792,7 @@ export function CampaignDetails() {
           </div>
            {(hasMatrixChanges || hasGroupChanges) && <p className="campaign-setup-guidance" role="status">Wait for matrix and group changes to save, or discard them, before changing self-evaluation questionnaires.</p>}
            {isSetupPreviewLoading && campaign.status === 'scheduled' ? (
-             <div className="campaign-groups-empty">Loading selected group participants...</div>
+             <LoadingState variant="section" label="Loading participants" />
            ) : selfEvaluations.participants.length === 0 ? (
                <div className="campaign-groups-empty">Select campaign groups with active participants to configure self-evaluations.</div>
            ) : (
@@ -835,7 +837,7 @@ export function CampaignDetails() {
                <button className="btn btn-secondary" type="button" disabled={isChangingArchive} onClick={closeDestructiveConfirmation}>Cancel</button>
                <button className={`btn ${destructiveAction === 'delete' ? 'btn-danger' : 'btn-primary'}`} type="button" disabled={isChangingArchive || (destructiveAction === 'delete' && !deletionEligibility?.can_delete)}
                  onClick={handleDestructiveAction}>
-                 {isChangingArchive ? 'Updating...' : destructiveAction === 'delete' ? 'Delete permanently' : destructiveAction === 'archive' ? 'Archive campaign' : 'Unarchive campaign'}
+                 {isChangingArchive ? <Pending label="Updating" /> : destructiveAction === 'delete' ? 'Delete permanently' : destructiveAction === 'archive' ? 'Archive campaign' : 'Unarchive campaign'}
                </button>
              </div>
            </div>
@@ -849,7 +851,7 @@ export function CampaignDetails() {
               <p>{confirmationAction === 'review'
                 ? 'Incomplete assigned evaluations remain fillable during Review, including after the configured deadline. The campaign end timestamp will not change.'
                 : 'Closing blocks employee questionnaire access. Incomplete assignments remain incomplete historical records; submitted answers and snapshots are preserved.'}</p>
-             {isLoadingMetrics && <p role="status">Loading current completion metrics...</p>}
+             {isLoadingMetrics && <LoadingState variant="section" label="Loading completion figures" />}
              {operationalMetrics && !isLoadingMetrics && (
                <dl className="campaign-copy-counts">
                  <div><dt>Total issued</dt><dd>{operationalMetrics.total}</dd></div>
@@ -863,7 +865,7 @@ export function CampaignDetails() {
                <button className="btn btn-secondary" type="button" disabled={isChangingLifecycle} onClick={closeLifecycleConfirmation}>Cancel</button>
                <button className="btn btn-primary" type="button" disabled={isLoadingMetrics || isChangingLifecycle || !operationalMetrics || !!confirmationError}
                  onClick={() => handleLifecycleAction(confirmationAction)}>
-                 {isChangingLifecycle ? 'Updating...' : confirmationAction === 'review' ? 'Confirm move to review' : 'Confirm close'}
+                 {isChangingLifecycle ? <Pending label="Updating" /> : confirmationAction === 'review' ? 'Confirm move to review' : 'Confirm close'}
                </button>
              </div>
            </div>
@@ -887,7 +889,7 @@ export function CampaignDetails() {
               <button className="btn btn-secondary" type="button" disabled={isSavingSetup} onClick={() => { discardGroups(); setConfirmGroupRemoval(false); }}>Cancel</button>
               <button className="btn btn-danger" type="button" disabled={isSavingSetup || removedAssignments.some((item) => item.issued)}
                 onClick={async () => { if (await handleUpdateSetup()) setConfirmGroupRemoval(false); }}>
-                {isSavingSetup ? 'Saving...' : 'Remove and save setup'}
+                {isSavingSetup ? <Pending label="Saving" /> : 'Remove and save setup'}
               </button>
             </div>
           </div>
