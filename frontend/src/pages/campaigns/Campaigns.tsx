@@ -1,4 +1,6 @@
-import { useLocation } from 'react-router';
+import { useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router';
+import { useToast } from '../../components/feedback/feedback-context';
 import CampaignPage from './components/CampaignPage';
 import CampaignList from './components/CampaignList';
 import CampaignStats from './components/CampaignStats';
@@ -9,6 +11,17 @@ export { CampaignDetails } from './CampaignDetails';
 export function Campaigns() {
   const location = useLocation();
   const state = useCampaigns();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const campaignDeleted = (location.state as { campaignDeleted?: string } | null)?.campaignDeleted;
+  const announced = useRef<string | null>(null);
+  useEffect(() => {
+    if (!campaignDeleted || announced.current === location.key) return;
+    announced.current = location.key;
+    toast.success(`“${campaignDeleted}” permanently deleted`);
+    // Clear the flag so a reload or Back doesn't show it again.
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [campaignDeleted, toast, navigate, location.key, location.pathname, location.search]);
   return (
     <CampaignPage>
       <div className="campaign-view">
@@ -27,12 +40,6 @@ export function Campaigns() {
             </button>}
           </div>
         </div>
-        {state.successMessage !== '' && (
-          <div className="campaign-success-message">{state.successMessage}</div>
-        )}
-        {(location.state as { campaignDeleted?: boolean } | null)?.campaignDeleted && (
-          <div className="campaign-success-message" role="status">Campaign permanently deleted.</div>
-        )}
         <CampaignStats campaignList={state.summaryCampaigns} archived={state.statusFilter === 'Archived'} />
         <CampaignList
           campaignList={state.campaignList}

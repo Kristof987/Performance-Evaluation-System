@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { useAppAuth } from '../../../auth/AppAuth';
 import { ApiAccessError } from '../../../auth/authenticated-api';
+import { useToast } from '../../../components/feedback/feedback-context';
 import type {
   Campaign,
   CampaignEvaluationMatrix,
@@ -143,7 +144,6 @@ export function useCampaignDetails(id: string | undefined) {
   const [isIssuingPlanned, setIsIssuingPlanned] = useState(false);
   const [issuanceMessage, setIssuanceMessage] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [configurationFeedback, setConfigurationFeedback] = useState<CampaignFeedback | null>(null);
   const [isChangingSchedule, setIsChangingSchedule] = useState(false);
@@ -168,11 +168,16 @@ export function useCampaignDetails(id: string | undefined) {
   const saving = useRef(false);
   const routeVersion = useRef(0);
 
-  useEffect(() => {
-    if (!successMessage) return;
-    const timer = window.setTimeout(() => setSuccessMessage(''), 5000);
-    return () => window.clearTimeout(timer);
-  }, [successMessage]);
+  const toast = useToast();
+  /**
+   * Finished user actions get a toast. Plain autosaves don't: their sections already show
+   * "Saved automatically". A save that sent the campaign back to Draft is worth a lasting warning.
+   */
+  const notifySuccess = useCallback((message: string) => {
+    const text = message.replace(/\.$/, '');
+    if (/returned to Draft/.test(message)) toast.warning(message);
+    else if (!/saved automatically$/.test(text)) toast.success(text);
+  }, [toast]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -207,7 +212,6 @@ export function useCampaignDetails(id: string | undefined) {
     setIsIssuingPlanned(false);
     setIsEditOpen(false);
     setSaveMessage('');
-    setSuccessMessage('');
     setActionMessage('');
     setConfigurationFeedback(null);
     setIsChangingSchedule(false);
@@ -346,14 +350,14 @@ export function useCampaignDetails(id: string | undefined) {
           return;
         }
         await deleteCampaign(getAccessTokenSilently, campaign.id);
-        if (routeVersion.current === version) navigate('/campaigns', { replace: true, state: { campaignDeleted: true } });
+        if (routeVersion.current === version) navigate('/campaigns', { replace: true, state: { campaignDeleted: campaign.name } });
       } else {
         const updated = await changeCampaignArchive(getAccessTokenSilently, campaign.id, action);
         if (routeVersion.current !== version) return;
         setCampaign(updated);
         setForm(getCampaignForm(updated));
         setDestructiveAction(null);
-        setSuccessMessage(action === 'archive' ? 'Campaign archived.' : 'Campaign unarchived.');
+        notifySuccess(action === 'archive' ? 'Campaign archived.' : 'Campaign unarchived.');
         setConfigurationFeedback(null);
         try {
           const refreshed = await fetchCampaign(getAccessTokenSilently, campaign.id, new AbortController().signal);
@@ -363,7 +367,7 @@ export function useCampaignDetails(id: string | undefined) {
           }
         } catch (refreshError) {
           handleAuthError(refreshError);
-          if (routeVersion.current === version) setActionMessage('Campaign updated, but its latest details could not be refreshed. Reload to see the latest status.');
+          if (routeVersion.current === version) toast.warning('Campaign updated, but its latest details couldn’t refresh. Reload to see the latest status.');
         }
       }
     } catch (error) {
@@ -432,14 +436,12 @@ export function useCampaignDetails(id: string | undefined) {
   const updateForm: UpdateCampaignField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
     setSaveMessage('');
-    setSuccessMessage('');
   };
   function openEdit() {
     if (!campaign || !canManageCampaigns || campaign.isArchived ||
         !['draft', 'scheduled', 'active'].includes(campaign.status)) return;
     setForm(getCampaignForm(campaign));
     setSaveMessage('');
-    setSuccessMessage('');
     setIsEditOpen(true);
   }
   function closeEdit() {
@@ -474,7 +476,6 @@ export function useCampaignDetails(id: string | undefined) {
     const version = routeVersion.current;
     setIsChangingSchedule(true);
     setActionMessage('');
-    setSuccessMessage('');
     setConfigurationFeedback(null);
     try {
       const updated = await changeCampaignSchedule(getAccessTokenSilently, campaign.id, action);
@@ -482,7 +483,7 @@ export function useCampaignDetails(id: string | undefined) {
       setCampaign(updated);
       setForm(getCampaignForm(updated));
       setConfigurationFeedback(null);
-      setSuccessMessage(action === 'schedule' ? 'Campaign scheduled.' : 'Campaign returned to draft.');
+      notifySuccess(action === 'schedule' ? 'Campaign scheduled.' : 'Campaign returned to draft.');
     } catch (error) {
       handleAuthError(error);
       if (routeVersion.current === version) setConfigurationFeedback(campaignFeedbackFromError(error, action, {
@@ -544,7 +545,7 @@ export function useCampaignDetails(id: string | undefined) {
       setConfirmationError('');
       setIsEditOpen(false);
       setConfigurationFeedback(null);
-      setSuccessMessage(action === 'pause' ? 'Campaign paused.' : action === 'resume' ? 'Campaign resumed.' : action === 'review' ? 'Campaign moved to review.' : 'Campaign closed.');
+      notifySuccess(action === 'pause' ? 'Campaign paused.' : action === 'resume' ? 'Campaign resumed.' : action === 'review' ? 'Campaign moved to review.' : 'Campaign closed.');
     } catch (error) {
       handleAuthError(error);
       if (routeVersion.current === version) {
@@ -566,7 +567,7 @@ export function useCampaignDetails(id: string | undefined) {
           }
         } catch (error) {
           handleAuthError(error);
-          if (routeVersion.current === version) setActionMessage('Campaign status could not be refreshed. Reload for the latest status.');
+          if (routeVersion.current === version) toast.warning('The campaign status couldn’t refresh. Reload for the latest status.');
         }
         if (routeVersion.current === version) setIsChangingLifecycle(false);
       }
@@ -603,7 +604,6 @@ export function useCampaignDetails(id: string | undefined) {
     setIsSavingSetup(true);
     setGroupsMessage('');
     setActionMessage('');
-    setSuccessMessage('');
     setConfigurationFeedback(null);
     let setupSaved = false;
     try {
@@ -629,7 +629,6 @@ export function useCampaignDetails(id: string | undefined) {
       setupSaved = true;
       if (routeVersion.current !== version) return false;
       setConfigurationFeedback(null);
-      setSuccessMessage('Campaign setup saved.');
       const controller = new AbortController();
       const [loadedGroups, loadedRules, loadedSelf, loadedMatrix, loadedCampaign] = await Promise.all([
         fetchCampaignGroups(getAccessTokenSilently, campaign.id, controller.signal),
@@ -651,7 +650,7 @@ export function useCampaignDetails(id: string | undefined) {
       savedMatrix.current = loadedMatrix;
       setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setCampaign(loadedCampaign);
-      setSuccessMessage(removedCount
+      notifySuccess(removedCount
         ? `${removedCount} campaign ${removedCount === 1 ? 'group' : 'groups'} removed with dependent configuration. Shared participants and eligible planned assignments were retained.`
         : 'Campaign setup saved.');
       return true;
@@ -687,7 +686,6 @@ export function useCampaignDetails(id: string | undefined) {
     setGroupsMessage('');
     setRulesMessage('');
     setMatrixMessage('');
-    setSuccessMessage('');
   }
 
   function discardGroups() {
@@ -709,7 +707,6 @@ export function useCampaignDetails(id: string | undefined) {
     }));
     setRulesMessage('');
     setMatrixMessage('');
-    setSuccessMessage('');
   }
 
   function toggleMatrixAssignment(
@@ -726,7 +723,6 @@ export function useCampaignDetails(id: string | undefined) {
       return next === current || evaluatorId !== evaluateeId ? next : synchronizeSelfPair(evaluationMatrix.groups, next, groupId, evaluatorId, Boolean(next[matrixKey(groupId, evaluatorId, evaluateeId)]));
     });
     setMatrixMessage('');
-    setSuccessMessage('');
   }
 
   function applyMatrixSelectAll(groupId: number) {
@@ -740,7 +736,6 @@ export function useCampaignDetails(id: string | undefined) {
     }
     setSelectedMatrixAssignments(next);
     setMatrixMessage(matrixDirty(next, selectedMatrixAssignments) ? '' : 'All eligible pairs are already selected.');
-    setSuccessMessage('');
   }
 
   function applyMatrixSelfEvaluations(groupId: number) {
@@ -756,7 +751,6 @@ export function useCampaignDetails(id: string | undefined) {
     }
     setSelectedMatrixAssignments(next);
     setMatrixMessage(`${matrixDirty(next, selectedMatrixAssignments) ? 'Self-evaluation pairs selected as plans. Individual questionnaires are required before issuance.' : 'All eligible self-evaluation pairs are already selected.'}${protectedCount ? ` ${protectedCount} already-issued self-evaluations remain locked.` : ''}`);
-    setSuccessMessage('');
   }
 
   function applyMatrixMinimumReviewers(groupId: number, minimumReviewers: number) {
@@ -771,7 +765,6 @@ export function useCampaignDetails(id: string | undefined) {
     } catch (error) {
       setMatrixMessage(error instanceof Error ? error.message : 'Invalid review minimum.');
     }
-    setSuccessMessage('');
   }
 
   function applyMatrixDeleteAll(groupId: number) {
@@ -787,7 +780,6 @@ export function useCampaignDetails(id: string | undefined) {
       return next;
     });
     setMatrixMessage('');
-    setSuccessMessage('');
   }
 
   function discardMatrix() {
@@ -825,7 +817,7 @@ export function useCampaignDetails(id: string | undefined) {
       setSelfEvaluations(saved);
       savedSelf.current = saved;
       setSelectedSelfForms(selfFormMap(saved));
-      setSuccessMessage('Self-evaluation questionnaires saved automatically.');
+      notifySuccess('Self-evaluation questionnaires saved automatically.');
       setConfigurationFeedback(null);
       try {
         const controller = new AbortController();
@@ -839,7 +831,7 @@ export function useCampaignDetails(id: string | undefined) {
         savedMatrix.current = loadedMatrix;
         setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
         setCampaign(loadedCampaign);
-        if (campaign.status === 'scheduled' && loadedCampaign.status === 'draft') setSuccessMessage('Self-evaluations saved automatically. Campaign returned to Draft because the scheduled setup is incomplete.');
+        if (campaign.status === 'scheduled' && loadedCampaign.status === 'draft') notifySuccess('Self-evaluations saved automatically. Campaign returned to Draft because the scheduled setup is incomplete.');
         setEvaluationRules(loadedRules);
         savedRules.current = loadedRules;
         if (!hasRuleChanges) setSelectedRuleFormIds(getRuleFormMap(loadedRules));
@@ -912,7 +904,7 @@ export function useCampaignDetails(id: string | undefined) {
       setSelectedRuleFormIds(getRuleFormMap(loadedRules));
       setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
       setCampaign(loadedCampaign);
-      setSuccessMessage(previousStatus === 'scheduled' && loadedCampaign.status === 'draft'
+      notifySuccess(previousStatus === 'scheduled' && loadedCampaign.status === 'draft'
         ? 'Groups saved. Campaign returned to Draft because the scheduled setup is incomplete.'
         : 'Campaign groups saved automatically.');
       setConfigurationFeedback(null);
@@ -960,7 +952,7 @@ export function useCampaignDetails(id: string | undefined) {
       setEvaluationRules(saved);
       savedRules.current = saved;
       setSelectedRuleFormIds(getRuleFormMap(saved));
-      setSuccessMessage('Questionnaire assignments saved automatically.');
+      notifySuccess('Questionnaire assignments saved automatically.');
       setConfigurationFeedback(null);
       try {
         const controller = new AbortController();
@@ -973,7 +965,7 @@ export function useCampaignDetails(id: string | undefined) {
         savedMatrix.current = loadedMatrix;
         setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
         setCampaign(loadedCampaign);
-        if (campaign.status === 'scheduled' && loadedCampaign.status === 'draft') setSuccessMessage('Questionnaires saved automatically. Campaign returned to Draft because the scheduled setup is incomplete.');
+        if (campaign.status === 'scheduled' && loadedCampaign.status === 'draft') notifySuccess('Questionnaires saved automatically. Campaign returned to Draft because the scheduled setup is incomplete.');
       } catch (error) {
         handleAuthError(error);
         if (routeVersion.current === version) setRulesMessage('Questionnaires were saved, but assignment status could not be refreshed. Reload before making further changes.');
@@ -1046,13 +1038,6 @@ export function useCampaignDetails(id: string | undefined) {
         if (routeVersion.current === version) setMatrixSaveError('Matrix saved, but the latest assignment details could not be refreshed. Reload before making further changes.');
       }
       if (routeVersion.current !== version) return;
-      setSuccessMessage(
-        `Evaluation plan saved. Planned pairs added: ${saved.createdCount}, removed: ${saved.removedCount}${
-          saved.keptCompletedCount > 0
-            ? `, kept completed: ${saved.keptCompletedCount}`
-            : ''
-        }. No questionnaires were issued by this save.`,
-      );
       setConfigurationFeedback(null);
     } catch (error) {
       handleAuthError(error);
@@ -1084,7 +1069,7 @@ export function useCampaignDetails(id: string | undefined) {
       setEvaluationMatrix(issued);
       savedMatrix.current = issued;
       setSelectedMatrixAssignments(getMatrixAssignmentMap(issued));
-      setSuccessMessage('Planned evaluations issued with immutable questionnaire snapshots.');
+      notifySuccess('Planned evaluations issued');
       const controller = new AbortController();
       try {
         const [loadedCampaign, loadedRules] = await Promise.all([
@@ -1098,7 +1083,7 @@ export function useCampaignDetails(id: string | undefined) {
         setSelectedRuleFormIds(getRuleFormMap(loadedRules));
       } catch (error) {
         handleAuthError(error);
-        if (routeVersion.current === version) setIssuanceMessage('Evaluations were issued, but the latest campaign details could not be refreshed.');
+        if (routeVersion.current === version) toast.warning('Evaluations were issued, but the latest campaign details couldn’t refresh. Reload to see them.');
       }
     } catch (error) {
       handleAuthError(error);
@@ -1130,7 +1115,7 @@ export function useCampaignDetails(id: string | undefined) {
       setCampaign(saved);
       setForm(getCampaignForm(saved));
       setIsEditOpen(false);
-      setSuccessMessage('Campaign updated successfully.');
+      notifySuccess('Campaign details saved');
       setConfigurationFeedback(null);
       try {
         const controller = new AbortController();
@@ -1145,7 +1130,7 @@ export function useCampaignDetails(id: string | undefined) {
         setSelectedSelfForms(selfFormMap(loadedSelf));
       } catch (error) {
         handleAuthError(error);
-        if (routeVersion.current === version) setMatrixMessage('Campaign updated, but assignments could not be refreshed. Reload to see their current status.');
+        if (routeVersion.current === version) toast.warning('Campaign updated, but assignments couldn’t refresh. Reload to see their current status.');
       }
     } catch (error) {
       handleAuthError(error);
@@ -1193,7 +1178,6 @@ export function useCampaignDetails(id: string | undefined) {
     matrixMessage,
     matrixSaveError,
     saveMessage,
-    successMessage,
     actionMessage,
     configurationFeedback: campaign?.id === id ? configurationFeedback : null,
     isChangingSchedule,

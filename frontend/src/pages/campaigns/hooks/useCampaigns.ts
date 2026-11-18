@@ -11,6 +11,7 @@ import { createCampaign, fetchCampaigns } from '../campaign.api';
 import { formatUserName } from '../../layout/sidebar-user';
 import { useAppAuth } from '../../../auth/AppAuth';
 import { ApiAccessError } from '../../../auth/authenticated-api';
+import { useToast } from '../../../components/feedback/feedback-context';
 
 export function useCampaigns() {
   const navigate = useNavigate();
@@ -26,7 +27,7 @@ export function useCampaigns() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [form, setForm] = useState<CampaignFormValues>(emptyCampaignForm);
   const [createMessage, setCreateMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const toast = useToast();
   const [isSavingCampaign, setIsSavingCampaign] = useState(false);
   const saving = useRef(false);
   const filteredCampaigns = campaignList.filter(
@@ -61,7 +62,6 @@ export function useCampaigns() {
   };
   function openCreate() {
     if (!canManageCampaigns) return;
-    setSuccessMessage('');
     setCreateMessage('');
     setIsCreateOpen(true);
   }
@@ -90,7 +90,7 @@ export function useCampaigns() {
       setCampaignList((current) => [saved, ...current]);
        setIsCreateOpen(false);
        setForm(emptyCampaignForm);
-       setSuccessMessage('Campaign saved successfully.');
+       toast.success(`“${saved.name}” created as a draft`);
        navigate(`/campaigns/${saved.id}`);
     } catch (error) {
       if (error instanceof ApiAccessError) retryAuth0();
@@ -115,7 +115,6 @@ export function useCampaigns() {
     isCreateOpen,
     form,
     createMessage,
-    successMessage,
     isSavingCampaign,
     canManageCampaigns,
     createdByName: user ? formatUserName(user.username) : 'User',

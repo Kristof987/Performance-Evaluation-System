@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react';
+import InlineMessage from '../../../components/feedback/InlineMessage';
 import type {
   Campaign,
   CampaignFormValues,
@@ -96,7 +97,7 @@ export default function CampaignForm({
 
        {!campaign && <span className="campaign-form-guidance campaign-field-wide">New campaigns are saved as drafts. Configure groups and evaluations before scheduling.</span>}
 
-      {message !== '' && !nameConflict && <div className="campaign-save-message">{message}</div>}
+      {message !== '' && !nameConflict && <InlineMessage tone="error" className="campaign-field-wide">{message}</InlineMessage>}
 
       <div className="campaign-modal-actions">
         <button className="btn btn-secondary" type="button" onClick={onCancel}>

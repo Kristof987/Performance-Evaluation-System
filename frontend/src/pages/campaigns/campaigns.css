@@ -274,10 +274,6 @@ body.modal-open {
   justify-content: space-between;
 }
 
-.campaign-groups-footer strong {
-  color: var(--color-danger);
-  font-weight: 600;
-}
 
 .campaign-rules-card {
   background: var(--color-surface);
@@ -544,15 +540,7 @@ body.modal-open {
   }
   .campaign-matrix-generate-tools, .campaign-matrix-clear-tools { border-left: 0; border-top: 1px solid var(--color-border); flex-basis: 100%; margin-left: 0; padding: 10px 0 0; }
 }
-.campaign-page .campaign-success-message {
-  background: var(--color-success-bg);
-  border: 1px solid var(--color-success);
-  border-radius: 12px;
-  color: var(--color-success);
-  font: 800 13px var(--font-sans);
-  margin: -8px 0 16px;
-  padding: 12px 14px;
-}
+.campaign-page .campaign-inline-message { margin: 0 0 16px; }
 
 .campaign-page .campaign-detail-heading { align-items: center; gap: 16px; margin-bottom: 10px; }
 .campaign-page .campaign-detail-heading h1 { font-size: 26px; margin: 6px 0; overflow-wrap: anywhere; }
@@ -754,7 +742,6 @@ body.modal-open {
 .campaign-rule-issue { align-items: center; background: var(--color-primary-soft); border: 1px solid var(--color-border); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: space-between; padding: 12px 14px; }
 .campaign-rule-issue strong { font-size: 12px; }
 .campaign-page .campaign-rule-issue p { color: var(--color-text-secondary); font-size: 12px; margin: 3px 0 0; }
-.campaign-rule-issue-feedback { color: var(--color-danger); font-size: 12px; margin: 0; }
 .campaign-groups-workspace { align-items: start; display: grid; gap: 14px; grid-template-columns: minmax(0, 45fr) minmax(0, 55fr); min-width: 0; }
 .campaign-groups-workspace .campaign-groups-card { gap: 14px; }
 .campaign-setup-workspace .campaign-groups-workspace .campaign-groups-grid { gap: 8px; grid-template-columns: minmax(0, 1fr); }

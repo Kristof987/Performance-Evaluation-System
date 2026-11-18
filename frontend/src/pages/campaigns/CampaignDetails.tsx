@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, ArrowUpRight, BarChart3, ChevronDown, Grid2X2, Info, ListChecks, LockKeyhole, UserRound, UsersRound } from 'lucide-react';
 import CampaignPage from './components/CampaignPage';
 import CampaignStats from './components/CampaignStats';
@@ -20,6 +20,7 @@ import CampaignEmails from '../completion-status/CampaignEmails';
 import CampaignGroupPreview from './components/CampaignGroupPreview';
 import { fetchPeople, type Employee } from '../people/people.api';
 import { useConfirm } from '../../components/feedback/feedback-context';
+import InlineMessage from '../../components/feedback/InlineMessage';
 
 function countLabel(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -27,10 +28,22 @@ function countLabel(count: number, singular: string, plural = `${singular}s`): s
 
 type SetupSection = 'groups' | 'questionnaires' | 'pairs' | 'self';
 
+const UNSAVED_TAB_CONFIRM = {
+  title: 'Go to Overview with unsaved changes?',
+  message: 'Your setup changes stay on this page, but they’ll be lost if you leave or reload before they’re saved.',
+  confirmLabel: 'Go to Overview',
+};
+
+/** "Saved, but couldn't refresh" and "state changed" messages are warnings; anything else that went wrong is an error. */
+function messageTone(message: string) {
+  return /, but |state changed|status changed/i.test(message) ? 'warning' : 'error';
+}
+
 export function CampaignDetails() {
   const { id } = useParams();
   const { state, getAccessToken } = useAppAuth();
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const canReadReports = state.status === 'authenticated' && state.user.permissions.includes('reports.read');
   const [activeMatrixGroupId, setActiveMatrixGroupId] = useState<number | null>(null);
   const [matrixMinimum, setMatrixMinimum] = useState('1');
@@ -62,7 +75,6 @@ export function CampaignDetails() {
     isSavingCampaign,
     campaignError,
     saveMessage,
-    successMessage,
     actionMessage,
     configurationFeedback,
     isChangingSchedule,
@@ -288,7 +300,10 @@ export function CampaignDetails() {
     if (setupSaveBusy) return false;
     if (setupDirty && !groupsMessage && !matrixSaveError && !rulesMessage && !selfMessage) return false;
     if (next === tab && (next !== 'setup' || section === setupSection && requestedSection === section)) return true;
-    if (tab === 'setup' && next === 'overview' && pendingChanges && !window.confirm('You have unsaved campaign changes. They will stay in this page, but will be lost if you leave or reload. Continue to Overview?')) return false;
+    if (tab === 'setup' && next === 'overview' && pendingChanges) {
+      void confirm(UNSAVED_TAB_CONFIRM).then((ok) => { if (ok) showOverview(); });
+      return false;
+    }
     if (next === 'setup') lastSetupSection.current = section;
     previousTab.current = next;
     setSearchParams((current) => {
@@ -310,19 +325,34 @@ export function CampaignDetails() {
     if (changeTab('setup', destination)) setSetupTarget(section);
   }
 
+  function showOverview() {
+    previousTab.current = 'overview';
+    setSearchParams((current) => {
+      const updated = new URLSearchParams(current);
+      updated.delete('tab'); updated.delete('section');
+      return updated;
+    });
+  }
+
   function confirmLeaveCampaign(event: MouseEvent<HTMLAnchorElement>) {
-    if (pendingChanges && !window.confirm('You have unsaved campaign changes. Leave this page and discard them?')) event.preventDefault();
+    if (!pendingChanges) return;
+    event.preventDefault();
+    const destination = event.currentTarget.getAttribute('href') ?? '/campaigns';
+    void confirm({ title: 'Leave with unsaved changes?', message: 'Your campaign changes haven’t been saved and will be discarded.', confirmLabel: 'Discard and leave', tone: 'danger' })
+      .then((ok) => { if (ok) navigate(destination); });
   }
 
   useEffect(() => {
     if (previousTab.current === tab) return;
-    if (previousTab.current === 'setup' && pendingChanges && !window.confirm('You have unsaved campaign changes. They remain in this page, but will be lost if you leave or reload. Continue to Overview?')) {
+    if (previousTab.current === 'setup' && pendingChanges) {
+      // Back/forward left Setup: stay there until the user decides.
       setSearchParams((current) => {
         const updated = new URLSearchParams(current);
         updated.set('tab', 'setup');
         updated.set('section', lastSetupSection.current);
         return updated;
       }, { replace: true });
+      void confirm(UNSAVED_TAB_CONFIRM).then((ok) => { if (ok) showOverview(); });
       return;
     }
     previousTab.current = tab;
@@ -523,14 +553,11 @@ export function CampaignDetails() {
           <button type="button" className={tab === 'setup' ? 'active' : ''} aria-current={tab === 'setup' ? 'page' : undefined} onClick={() => changeTab('setup')}>Setup &amp; Assignments</button>
         </nav>
 
-        {successMessage !== '' && (
-          <div className="campaign-success-message">{successMessage}</div>
-        )}
-        {actionMessage !== '' && <div className="campaign-save-message" role="alert">{actionMessage}</div>}
+        {actionMessage !== '' && <InlineMessage tone={messageTone(actionMessage)} className="campaign-inline-message">{actionMessage}</InlineMessage>}
         {configurationFeedback && <CampaignValidationPanel feedback={configurationFeedback} onNavigate={navigateToIssue} />}
         {canManageCampaigns && (campaign.status === 'draft' || campaign.status === 'scheduled') &&
           (eligibilityError || (deletionEligibility && !deletionEligibility.can_delete && deletionEligibility.reason)) && (
-            <div className="campaign-save-message" role="status">{eligibilityError || deletionEligibility?.reason}</div>
+            <InlineMessage tone={eligibilityError ? 'error' : 'info'} className="campaign-inline-message">{eligibilityError || deletionEligibility?.reason}</InlineMessage>
           )}
 
         {tab === 'overview' && <div className="campaign-detail-overview">
@@ -562,7 +589,7 @@ export function CampaignDetails() {
             <button type="button" className={setupSection === 'questionnaires' ? 'active' : ''} aria-current={setupSection === 'questionnaires' ? 'page' : undefined} onClick={() => changeTab('setup', 'questionnaires')}><ListChecks size={17} aria-hidden="true" /><strong>Questionnaire assignments</strong></button>
             <button type="button" className={setupSection === 'self' ? 'active' : ''} aria-current={setupSection === 'self' ? 'page' : undefined} onClick={() => changeTab('setup', 'self')}><UserRound size={17} aria-hidden="true" /><strong>Self-evaluations</strong></button>
           </nav>
-        {setupPreviewError && <div className="campaign-save-message" role="alert">{setupPreviewError}</div>}
+        {setupPreviewError && <InlineMessage tone="error" className="campaign-inline-message">{setupPreviewError}</InlineMessage>}
 
         {setupSection === 'groups' && <div className="campaign-groups-workspace"><section className="campaign-groups-card" id="campaign-groups" tabIndex={-1}>
           <div className="campaign-groups-heading">
@@ -606,8 +633,8 @@ export function CampaignDetails() {
 
           <div className="campaign-groups-footer">
             <span>{countLabel(selectedGroupIds.length, 'group')} selected</span>
-            {groupsMessage !== '' && <strong role="alert">{groupsMessage}</strong>}
           </div>
+          {groupsMessage !== '' && <InlineMessage tone={messageTone(groupsMessage)} className="campaign-inline-message">{groupsMessage}</InlineMessage>}
           {canEdit && groupSaveBlocked && <p className="campaign-setup-guidance">Save or discard questionnaire, matrix and self-evaluation changes before changing campaign groups.</p>}
           {canEdit && hasGroupChanges && !isSavingGroups && !isSavingSetup && groupsMessage && <div className="campaign-heading-actions"><button className="btn btn-secondary" type="button" disabled={groupSaveBlocked} onClick={retryGroupSave}>Retry saving</button><button className="btn btn-secondary" type="button" onClick={discardGroups}>Discard group changes</button></div>}
         </section>
@@ -750,7 +777,7 @@ export function CampaignDetails() {
             <button className="btn btn-secondary" type="button" disabled={setupSaveBusy || hasRuleChanges} onClick={() => changeTab('setup', 'self')}>Continue to self-evaluations <ArrowUpRight size={16} aria-hidden="true" /></button>
           </div>
           {unissuedPairCount > 0 && <div className="campaign-rule-issue"><div><strong>{countLabel(unissuedPairCount, 'planned evaluation')} pending issuance</strong><p>{campaign.status === 'paused' ? 'Ready pairs will be issued on resume; employees cannot access them while paused.' : campaign.status === 'draft' || campaign.status === 'scheduled' ? 'Validated plans are issued during campaign activation.' : formProgress.missing > 0 || missingPlannedForms ? 'Assign questionnaires for every planned pair before issuing; changes save automatically.' : setupDirty || setupSaveBusy ? 'Wait for automatic saving, or resolve any unsaved changes, before issuing.' : 'Issue validated plans with immutable questionnaire snapshots.'}</p></div>{canAssignForms && (campaign.status === 'active' || campaign.status === 'review') && <button className="btn btn-primary" type="button" disabled={setupSaveBusy || setupDirty || formProgress.missing > 0 || missingPlannedForms || !!rulesMessage || !!selfMessage || !!matrixSaveError || !!groupsMessage} onClick={async () => { if (await confirm({ title: `Issue ${countLabel(unissuedPairCount, 'planned evaluation')}?`, message: 'Evaluators get access right away, and the questionnaire snapshots can’t be changed once issued.', confirmLabel: 'Issue evaluations' })) void handleIssuePlanned(); }}>{isIssuingPlanned ? 'Issuing...' : 'Issue ready evaluations'}</button>}</div>}
-          {issuanceMessage && <p className="campaign-rule-issue-feedback" role="alert">{issuanceMessage}</p>}
+          {issuanceMessage && <InlineMessage tone="error" className="campaign-inline-message">{issuanceMessage}</InlineMessage>}
         </section>}
 
         {setupSection === 'self' && <section className="campaign-rules-card campaign-self-workspace" id="campaign-self-evaluations" tabIndex={-1}>
@@ -786,7 +813,7 @@ export function CampaignDetails() {
                </table></div>
              </div>
            )}
-            {selfMessage && <div className="campaign-rule-totals"><strong role="alert">{selfMessage}</strong></div>}
+            {selfMessage && <InlineMessage tone={messageTone(selfMessage)} className="campaign-inline-message">{selfMessage}</InlineMessage>}
         </section>}
 
         </div>}
@@ -803,10 +830,10 @@ export function CampaignDetails() {
                     : `Archive ${campaign.name}? It will remain Closed and hidden from the default list. All historical evaluations, snapshots and answers will be preserved.`
                   : `Unarchive ${campaign.name}? It will appear in the default campaign list again.`}</p>
               {destructiveAction === 'delete' && <p>The campaign and its campaign-specific setup will be permanently removed. Shared Groups, Forms and Employees will not be deleted.</p>}
-             {destructiveError && <div className="campaign-save-message" role="alert">{destructiveError}</div>}
+             {destructiveError && <InlineMessage tone="error">{destructiveError}</InlineMessage>}
              <div className="campaign-modal-actions">
                <button className="btn btn-secondary" type="button" disabled={isChangingArchive} onClick={closeDestructiveConfirmation}>Cancel</button>
-               <button className="btn btn-primary" type="button" disabled={isChangingArchive || (destructiveAction === 'delete' && !deletionEligibility?.can_delete)}
+               <button className={`btn ${destructiveAction === 'delete' ? 'btn-danger' : 'btn-primary'}`} type="button" disabled={isChangingArchive || (destructiveAction === 'delete' && !deletionEligibility?.can_delete)}
                  onClick={handleDestructiveAction}>
                  {isChangingArchive ? 'Updating...' : destructiveAction === 'delete' ? 'Delete permanently' : destructiveAction === 'archive' ? 'Archive campaign' : 'Unarchive campaign'}
                </button>
@@ -831,7 +858,7 @@ export function CampaignDetails() {
                  <div><dt>Completion</dt><dd>{operationalMetrics.completion_rate}%</dd></div>
                </dl>
              )}
-             {confirmationError && <div className="campaign-save-message" role="alert">{confirmationError}</div>}
+             {confirmationError && <InlineMessage tone="error">{confirmationError}</InlineMessage>}
              <div className="campaign-modal-actions">
                <button className="btn btn-secondary" type="button" disabled={isChangingLifecycle} onClick={closeLifecycleConfirmation}>Cancel</button>
                <button className="btn btn-primary" type="button" disabled={isLoadingMetrics || isChangingLifecycle || !operationalMetrics || !!confirmationError}
@@ -855,10 +882,10 @@ export function CampaignDetails() {
               <div><dt>Issued assignments protected</dt><dd>{removedAssignments.filter((item) => item.issued).length}</dd></div>
             </dl>
             <p>Participants and self-evaluations shared with remaining groups stay. Eligible shared planned assignments move to a remaining group; issued evaluations cannot be removed. If a Scheduled campaign becomes incomplete, it returns to Draft.</p>
-            {groupsMessage && <p className="campaign-save-message" role="alert">{groupsMessage}</p>}
+            {groupsMessage && <InlineMessage tone={messageTone(groupsMessage)}>{groupsMessage}</InlineMessage>}
             <div className="campaign-modal-actions">
               <button className="btn btn-secondary" type="button" disabled={isSavingSetup} onClick={() => { discardGroups(); setConfirmGroupRemoval(false); }}>Cancel</button>
-              <button className="btn btn-primary" type="button" disabled={isSavingSetup || removedAssignments.some((item) => item.issued)}
+              <button className="btn btn-danger" type="button" disabled={isSavingSetup || removedAssignments.some((item) => item.issued)}
                 onClick={async () => { if (await handleUpdateSetup()) setConfirmGroupRemoval(false); }}>
                 {isSavingSetup ? 'Saving...' : 'Remove and save setup'}
               </button>
