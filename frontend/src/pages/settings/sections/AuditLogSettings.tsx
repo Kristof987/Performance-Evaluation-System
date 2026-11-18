@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppAuth } from '../../../auth/AppAuth';
-import { usePreferences } from '../preferences-context';
-import { formatSettingsDate } from '../settings-date';
+import { useDates } from '../../../app/dates';
 import { fetchAuditLog, type AuditCategory, type AuditEntry } from '../workspace.api';
 import LoadError from '../../../components/feedback/LoadError';
 import LoadingState from '../../../components/feedback/LoadingState';
@@ -19,13 +18,11 @@ const CATEGORIES: { value: AuditCategory; label: string }[] = [
   { value: 'ai', label: 'AI settings' },
 ];
 
-const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
 const labelFor = (category: AuditCategory) => CATEGORIES.find((item) => item.value === category)?.label ?? category;
 
 export default function AuditLogSettings() {
   const { getAccessToken } = useAppAuth();
-  const { preferences } = usePreferences();
+  const dates = useDates();
   const [category, setCategory] = useState<AuditCategory | null>(null);
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -75,7 +72,7 @@ export default function AuditLogSettings() {
       {entries.map((entry) => <li key={entry.id}>
         <div className="settings-audit-meta">
           <span className={`settings-badge audit-${entry.category}`}>{labelFor(entry.category)}</span>
-          <time dateTime={entry.occurred_at}>{formatSettingsDate(entry.occurred_at, browserTimeZone, preferences)}</time>
+          <time dateTime={entry.occurred_at}>{dates.dateTime(entry.occurred_at, 'Not available')}</time>
         </div>
         <p>{entry.summary}</p>
         <small>{entry.campaign_name && <>{entry.campaign_name} · </>}

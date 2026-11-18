@@ -3,7 +3,8 @@ import { Lightbulb } from 'lucide-react';
 import { useState } from 'react';
 
 import { hrInsightTips } from './hrInsights.data';
-import { getFullDate, getTimeOfDay } from '../utils/hrHome.utils';
+import { getTimeOfDay } from '../utils/hrHome.utils';
+import { useDates } from '../../../app/dates';
 
 type DashboardTopbarProps = {
   userName: string;
@@ -11,6 +12,7 @@ type DashboardTopbarProps = {
 };
 
 function DashboardTopbar({ userName, currentDate }: DashboardTopbarProps) {
+  const dates = useDates();
   const [tipIndex, setTipIndex] = useState(0);
   const activeTip = hrInsightTips[tipIndex];
 
@@ -24,7 +26,7 @@ function DashboardTopbar({ userName, currentDate }: DashboardTopbarProps) {
         <div className="greeting-title">
           Good {getTimeOfDay()}, {userName}
         </div>
-        <div className="greeting-date">{getFullDate(currentDate)}</div>
+        <div className="greeting-date">{dates.day(currentDate, { weekday: true, month: 'long' }, '')}</div>
       </div>
       <aside className="hr-insights" aria-label="HR insights">
         <div className="hr-insights-heading">

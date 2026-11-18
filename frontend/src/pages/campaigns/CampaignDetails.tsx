@@ -10,7 +10,6 @@ import CampaignValidationPanel, { type CampaignIssue, type CampaignIssueSection 
 import { useCampaignDetails } from './hooks/useCampaignDetails';
 import { matrixGroupWithSelfLocks, matrixSelectedCount } from './matrix.utils';
 import EvaluationMatrix from './components/EvaluationMatrix';
-import { formatDate } from './campaign.utils';
 import { useAppAuth } from '../../auth/AppAuth';
 import { usePageTitle } from '../../app/usePageTitle';
 import { fetchDashboard } from '../hr-home/services/dashboardService';
@@ -23,6 +22,7 @@ import { useConfirm } from '../../components/feedback/feedback-context';
 import InlineMessage from '../../components/feedback/InlineMessage';
 import Pending from '../../components/feedback/Pending';
 import LoadingState from '../../components/feedback/LoadingState';
+import { useDates, zoneLabel } from '../../app/dates';
 
 function countLabel(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -42,6 +42,7 @@ function messageTone(message: string) {
 }
 
 export function CampaignDetails() {
+  const dates = useDates();
   const { id } = useParams();
   const { state, getAccessToken } = useAppAuth();
   const confirm = useConfirm();
@@ -499,7 +500,7 @@ export function CampaignDetails() {
             <div className="campaign-detail-meta">
               <CampaignStatusBadge status={campaign.status} />
               {campaign.isArchived && <span className="campaign-archived-label"> Archived</span>}
-              <span>{campaign.start} - {campaign.endAt ? campaign.end : 'No deadline'}</span>
+              <span>{dates.dateTime(campaign.startAt)} - {campaign.endAt ? dates.dateTime(campaign.endAt) : 'No deadline'}</span>
               {(campaign.activationError || campaign.lifecycleError) && <span className="campaign-detail-warning" role="status">Transition needs attention</span>}
               <details className="campaign-lifecycle-details">
               <summary><Info size={14} aria-hidden="true" /> Details</summary>
@@ -508,15 +509,15 @@ export function CampaignDetails() {
                 <dl className="campaign-lifecycle-facts">
                   <div><dt>Status on record</dt><dd><CampaignStatusBadge status={campaign.status} /></dd></div>
                   {campaign.status === 'paused' && <div><dt>Previous status</dt><dd>{campaign.pausedFromStatus ? <CampaignStatusBadge status={campaign.pausedFromStatus} /> : 'Not recorded'}</dd></div>}
-                  <div><dt>Start date</dt><dd>{campaign.start} (Budapest)</dd></div>
-                  <div><dt>End date</dt><dd>{campaign.endAt ? `${campaign.end} (Budapest)` : 'No deadline'}</dd></div>
+                  <div><dt>Start date</dt><dd>{dates.dateTime(campaign.startAt)} ({zoneLabel(dates.settings)})</dd></div>
+                  <div><dt>End date</dt><dd>{campaign.endAt ? `${dates.dateTime(campaign.endAt)} (${zoneLabel(dates.settings)})` : 'No deadline'}</dd></div>
                   <div><dt>Activation history</dt><dd className={campaign.activationError ? 'campaign-activation-failed' : undefined}>
                     {campaign.status === 'scheduled' ? campaign.activationError ? 'Failed, awaiting retry' : 'Waiting for start date' : campaign.status === 'draft' ? 'Not scheduled' : 'Previously activated'}
                   </dd></div>
-                  {campaign.activationRetryAt && campaign.status === 'scheduled' && <div><dt>Next activation retry</dt><dd>{formatDate(campaign.activationRetryAt)} (Budapest)</dd></div>}
+                  {campaign.activationRetryAt && campaign.status === 'scheduled' && <div><dt>Next activation retry</dt><dd>{dates.dateTime(campaign.activationRetryAt)} ({zoneLabel(dates.settings)})</dd></div>}
                   {campaign.activationError && campaign.activationAttempts > 0 && campaign.status === 'scheduled' && <div><dt>Activation attempts</dt><dd>{campaign.activationAttempts}</dd></div>}
-                  {campaign.lifecycleRetryAt && campaign.lifecycleError && campaign.status === 'active' && <div><dt>Next review transition retry</dt><dd>{formatDate(campaign.lifecycleRetryAt)} (Budapest)</dd></div>}
-                  {campaign.lastTransitionAt && <div><dt>Last status change</dt><dd>{formatDate(campaign.lastTransitionAt)} (Budapest)</dd></div>}
+                  {campaign.lifecycleRetryAt && campaign.lifecycleError && campaign.status === 'active' && <div><dt>Next review transition retry</dt><dd>{dates.dateTime(campaign.lifecycleRetryAt)} ({zoneLabel(dates.settings)})</dd></div>}
+                  {campaign.lastTransitionAt && <div><dt>Last status change</dt><dd>{dates.dateTime(campaign.lastTransitionAt)} ({zoneLabel(dates.settings)})</dd></div>}
                 </dl>
                 {campaign.activationError && campaign.status === 'scheduled' && <InlineMessage tone="error" className="campaign-inline-message"><strong>Activation couldn’t complete</strong><p>{campaign.activationError}</p><p>Review the error and correct the campaign setup or schedule. Activation retries automatically.</p></InlineMessage>}
                 {campaign.lifecycleError && campaign.status === 'active' && <InlineMessage tone="error" className="campaign-inline-message"><strong>Review transition couldn’t complete</strong><p>{campaign.lifecycleError}</p><p>Review the error and correct the issue. The transition retries automatically.</p></InlineMessage>}

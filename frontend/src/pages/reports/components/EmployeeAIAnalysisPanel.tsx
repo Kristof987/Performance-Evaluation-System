@@ -7,6 +7,7 @@ import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
 import Pending from '../../../components/feedback/Pending';
 import LoadingState from '../../../components/feedback/LoadingState';
+import { useDates } from '../../../app/dates';
 
 type Props = { scope: AIAnalysisScope; getAccessToken: AccessTokenGetter };
 
@@ -26,9 +27,6 @@ const scopeCopy = {
   campaign: { heading: 'AI Performance Analysis', description: 'Evidence-based summary of reportable campaign-wide results, not individual employee feedback. Drafts require explicit HR review and approval.', intro: 'Generate an analysis of eligible campaign results.' },
 };
 
-function dateLabel(value: string | null) {
-  return value ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Not recorded';
-}
 
 type EvidenceGroup = { key: string; entries: Array<{ id: string; item: AnalysisEvidence | undefined }> };
 
@@ -103,10 +101,11 @@ const blankFinding = (evidenceId: string): AnalysisFinding => ({ assessment: '',
 
 /** Every AI text is marked as such, with its review state, so nobody mistakes it for a human assessment. */
 function AIContentLabel({ approved, approvedAt, approvedBy }: { approved: boolean; approvedAt: string | null; approvedBy: number | null }) {
+  const dates = useDates();
   return <p className={`reports-ai-label${approved ? ' approved' : ''}`} role="note">
     <strong>AI-generated content.</strong>{' '}
     {approved
-      ? `Reviewed and approved by user #${approvedBy ?? '?'}${approvedAt ? ` on ${dateLabel(approvedAt)}` : ''}. It summarizes the data below and is not a decision.`
+      ? `Reviewed and approved by user #${approvedBy ?? '?'}${approvedAt ? ` on ${dates.dateTime(approvedAt, 'Not recorded')}` : ''}. It summarizes the data below and is not a decision.`
       : 'Draft awaiting human review. Do not rely on it or share it until an authorized reviewer approves it.'}
   </p>;
 }
@@ -129,6 +128,7 @@ export default function EmployeeAIAnalysisPanel({ scope, getAccessToken }: Props
 }
 
 function AIAnalysisPanel({ scope, getAccessToken }: Props) {
+  const dates = useDates();
   const confirm = useConfirm();
   const toast = useToast();
   const [history, setHistory] = useState<AIAnalysisHistory | null>(null);
@@ -338,7 +338,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
       {selected && <>
         <AIContentLabel approved={selected.status === 'approved'} approvedAt={selected.approved_at} approvedBy={selected.approved_by_user_id} />
         {selected.outdated && <InlineMessage tone="warning">Outdated analysis: submitted evaluation data has changed. This version remains historical; regenerate before editing or approval.</InlineMessage>}
-        <div className="reports-ai-meta"><span>{selected.status === 'approved' ? 'Approved' : 'Draft'}{selected.is_current_approved ? ' · Current approved' : ''}</span><span>Generated {dateLabel(selected.generated_at)} by user #{selected.generated_by_user_id} · {selected.model_identifier}{selected.prompt_version ? ` · prompt ${selected.prompt_version}` : ''}{selected.token_usage ? ` · ${(selected.token_usage.input_tokens + selected.token_usage.output_tokens).toLocaleString()} tokens` : ''}</span>{selected.edited_at && <span>Edited {dateLabel(selected.edited_at)} by user #{selected.edited_by_user_id}</span>}{selected.approved_at && <span>Approved {dateLabel(selected.approved_at)} by user #{selected.approved_by_user_id}</span>}</div>
+        <div className="reports-ai-meta"><span>{selected.status === 'approved' ? 'Approved' : 'Draft'}{selected.is_current_approved ? ' · Current approved' : ''}</span><span>Generated {dates.dateTime(selected.generated_at, 'Not recorded')} by user #{selected.generated_by_user_id} · {selected.model_identifier}{selected.prompt_version ? ` · prompt ${selected.prompt_version}` : ''}{selected.token_usage ? ` · ${(selected.token_usage.input_tokens + selected.token_usage.output_tokens).toLocaleString()} tokens` : ''}</span>{selected.edited_at && <span>Edited {dates.dateTime(selected.edited_at, 'Not recorded')} by user #{selected.edited_by_user_id}</span>}{selected.approved_at && <span>Approved {dates.dateTime(selected.approved_at, 'Not recorded')} by user #{selected.approved_by_user_id}</span>}</div>
         <div className="reports-ai-sections">
             <div><h3>Overall Assessment</h3><FindingCard key={selected.id} finding={editing?.overall_assessment ?? selected.analysis.overall_assessment} evidence={selected.evidence} employeeScope={scope.type === 'employee'} edit={editing !== null} onChange={(next) => updateFinding('overall_assessment', null, next)} /></div>
           {(['strengths', 'development_areas'] as const).map((section) => <div key={section}><h3>{section === 'strengths' ? 'Strengths' : 'Development Areas'}</h3>

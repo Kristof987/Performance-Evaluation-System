@@ -9,12 +9,7 @@ import '../hr-home/components/MetricsGrid.css';
 import './employee-home.css';
 import InlineMessage from '../../components/feedback/InlineMessage';
 import LoadingState from '../../components/feedback/LoadingState';
-
-function formatDate(value: string | null) {
-  if (!value) return 'No deadline';
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-    .format(new Date(`${value}T00:00:00`));
-}
+import { useDates } from '../../app/dates';
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -22,13 +17,14 @@ function getGreeting() {
 }
 
 function EvaluationRow({ evaluation, upcoming = false }: { evaluation: AssignedEvaluation; upcoming?: boolean }) {
+  const dates = useDates();
   const status = evaluationStatus(evaluation);
   const title = evaluationTitle(evaluation);
   return (
     <div className="employee-compact-row" data-assignment-id={evaluation.id}>
       <div>
         <strong>{title}</strong>
-        <span>{evaluation.formName} · {evaluation.campaignName} · {upcoming ? `Starts ${formatDate(evaluation.campaignStartDate)}` : `Due ${formatDate(evaluation.dueDate)}`}</span>
+        <span>{evaluation.formName} · {evaluation.campaignName} · {upcoming ? `Starts ${dates.day(evaluation.campaignStartDate, undefined, 'No deadline')}` : `Due ${dates.day(evaluation.dueDate, undefined, 'No deadline')}`}</span>
          <small>{upcoming ? 'Upcoming' : <>{status}{evaluation.campaignStatus === 'review' ? ' · Review' : ''}{evaluationOverdue(evaluation) ? ' · Overdue' : ''}</>}</small>
       </div>
       {!upcoming && (
@@ -44,6 +40,7 @@ function EvaluationRow({ evaluation, upcoming = false }: { evaluation: AssignedE
 type EmployeeHomeProps = { forceEmptyState?: boolean };
 
 export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomeProps) {
+  const dates = useDates();
   const { state, getAccessToken, retryAuth0 } = useAppAuth();
   const user = state.status === 'authenticated' ? state.user : null;
   const userId = user?.id;
@@ -77,7 +74,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
         <header className="employee-home-header">
           <h1>{getGreeting()}, {firstName}</h1>
           <p>Here's what needs your attention.</p>
-           {currentDate && <time dateTime={currentDate}>{new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${currentDate}T12:00:00Z`))}</time>}
+           {currentDate && <time dateTime={currentDate}>{dates.day(currentDate, { weekday: true, month: 'long' })}</time>}
         </header>
 
         {!forceEmptyState && !loading && !error && restrictedCampaigns.map((item) => (
@@ -91,7 +88,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
          <section className="card kpi-section employee-kpi-section" aria-label="Evaluation summary for active and review campaigns">
            <div className="kpi-item"><span className="kpi-label">To complete</span><strong className="kpi-value">{loading ? '…' : actionable.length}</strong><span className="kpi-context">Active and review campaigns</span></div>
            <div className="kpi-item"><span className="kpi-label">Completed</span><strong className="kpi-value">{loading ? '…' : completed.length}</strong><span className="kpi-context">Active and review campaigns</span></div>
-          <div className="kpi-item"><span className="kpi-label">Next deadline</span><strong className="kpi-value employee-deadline-value">{loading ? '…' : nextDeadline ? formatDate(nextDeadline.dueDate) : 'None'}</strong><span className="kpi-context">{nextDeadline?.campaignName ?? 'No upcoming deadlines'}</span></div>
+          <div className="kpi-item"><span className="kpi-label">Next deadline</span><strong className="kpi-value employee-deadline-value">{loading ? '…' : nextDeadline ? dates.day(nextDeadline.dueDate, undefined, 'No deadline') : 'None'}</strong><span className="kpi-context">{nextDeadline?.campaignName ?? 'No upcoming deadlines'}</span></div>
         </section>
 
         <div className="employee-work-overview">
@@ -115,7 +112,7 @@ export default function EmployeeHome({ forceEmptyState = false }: EmployeeHomePr
           {loading ? <LoadingState variant="section" label="Loading history" />
             : error ? <p className="employee-plain-empty">History could not be loaded.</p>
             : history.length ? <>
-              <div className="employee-history-list">{visibleHistory.map((item) => <div key={item.id}><strong>{evaluationTitle(item)}</strong><span>{item.formName} · {item.campaignName} · {item.finishDate ? `Completed ${formatDate(item.finishDate)}` : 'Completed'}</span></div>)}</div>
+              <div className="employee-history-list">{visibleHistory.map((item) => <div key={item.id}><strong>{evaluationTitle(item)}</strong><span>{item.formName} · {item.campaignName} · {item.finishDate ? `Completed ${dates.day(item.finishDate, undefined, 'No deadline')}` : 'Completed'}</span></div>)}</div>
               {history.length > historyLimit && <button type="button" className="employee-history-toggle" onClick={() => setHistoryLimit(historyLimit + 5)}>Show more evaluations</button>}
             </> : <p className="employee-plain-empty">No completed evaluations yet.</p>}
         </section>

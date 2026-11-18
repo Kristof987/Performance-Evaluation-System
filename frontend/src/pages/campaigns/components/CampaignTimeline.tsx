@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import type { Campaign } from '../campaign.types';
+import { useDates } from '../../../app/dates';
 
 const day = 24 * 60 * 60 * 1000;
-const dateLabel = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Europe/Budapest', day: 'numeric', month: 'short', year: 'numeric',
-});
 
 export default function CampaignTimeline({ campaign }: { campaign: Campaign }) {
+  const dates = useDates();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -34,14 +33,14 @@ export default function CampaignTimeline({ campaign }: { campaign: Campaign }) {
       <h2 id="campaign-timeline-title">Campaign timeline</h2>
       <span className="campaign-timeline-remaining">{headline}</span>
     </div>
-    <div className="campaign-timeline-visual" role="img" aria-label={`Campaign starts ${validStart ? dateLabel.format(start) : 'at an unavailable date'}; ${validEnd && end !== null ? `scheduled end ${dateLabel.format(end)}` : 'no scheduled end'}; ${headline}`}>
+    <div className="campaign-timeline-visual" role="img" aria-label={`Campaign starts ${validStart ? dates.day(new Date(start).toISOString()) : 'at an unavailable date'}; ${validEnd && end !== null ? `scheduled end ${dates.day(new Date(end).toISOString())}` : 'no scheduled end'}; ${headline}`}>
       {validEnd && <span className={`campaign-timeline-marker-label${elapsed <= 5 ? ' at-start' : elapsed >= 95 ? ' at-end' : ''}`} style={{ left: `${elapsed}%` }}>{campaign.status === 'closed' ? 'Closed' : 'Now'}</span>}
       <div className="campaign-timeline-track"><span style={{ width: `${elapsed}%` }} /></div>
       {validEnd && <span className={`campaign-timeline-marker${elapsed <= 5 ? ' at-start' : elapsed >= 95 ? ' at-end' : ''}`} style={{ left: `${elapsed}%` }} />}
     </div>
     <div className="campaign-timeline-dates">
-      <div><strong>{validStart ? dateLabel.format(start) : 'Date unavailable'}</strong><span>Start date</span></div>
-      <div><strong>{validEnd && end !== null ? dateLabel.format(end) : end === null ? 'No deadline' : 'Date unavailable'}</strong><span>End date</span></div>
+      <div><strong>{validStart ? dates.day(new Date(start).toISOString()) : 'Date unavailable'}</strong><span>Start date</span></div>
+      <div><strong>{validEnd && end !== null ? dates.day(new Date(end).toISOString()) : end === null ? 'No deadline' : 'Date unavailable'}</strong><span>End date</span></div>
     </div>
   </section>;
 }

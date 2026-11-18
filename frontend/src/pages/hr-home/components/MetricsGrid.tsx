@@ -2,8 +2,8 @@ import './MetricsGrid.css';
 import type { ReactNode } from 'react';
 
 import type { Campaign, DashboardMetrics } from '../hrHome.types';
+import { useDates } from '../../../app/dates';
 import {
-  formatCompactDate,
   formatStartsIn,
 } from '../utils/hrHome.utils';
 
@@ -39,6 +39,7 @@ function getNextCampaign(campaigns: Campaign[]): Campaign | null {
 }
 
 function MetricsGrid({ metrics, campaigns }: MetricsGridProps) {
+  const dates = useDates();
   const completionRate = Math.min(100, Math.max(0, metrics.completion_rate));
   const overdueStatus = metrics.overdue_count > 0 ? 'danger' : 'neutral';
   const overdueContext =
@@ -90,7 +91,7 @@ function MetricsGrid({ metrics, campaigns }: MetricsGridProps) {
         value={
           nextCampaign === null
             ? 'None'
-            : formatCompactDate(nextCampaign.start_date)
+            : dates.day(nextCampaign.start_date, { year: false })
         }
         context={
           nextCampaign === null ? (

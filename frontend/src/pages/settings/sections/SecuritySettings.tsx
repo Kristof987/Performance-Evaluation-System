@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppAuth } from '../../../auth/AppAuth';
-import { usePreferences } from '../preferences-context';
-import { formatSettingsDate } from '../settings-date';
+import { useDates, zoneLabel } from '../../../app/dates';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
 import { useToast } from '../../../components/feedback/feedback-context';
@@ -15,7 +14,7 @@ import {
 export default function SecuritySettings() {
   const toast = useToast();
   const { state, getAccessToken, signOut } = useAppAuth();
-  const { preferences } = usePreferences();
+  const dates = useDates();
   const [security, setSecurity] = useState<SecurityData | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -49,7 +48,7 @@ export default function SecuritySettings() {
     }
   }
 
-  const lastLogin = formatSettingsDate(security?.last_login ?? null, security?.timezone ?? 'Europe/Budapest', preferences);
+  const lastLogin = dates.dateTime(security?.last_login, 'Not available');
 
   return <section className="card settings-panel" aria-labelledby="security-settings-title">
     <div className="settings-panel-header"><h2 id="security-settings-title">Security</h2>
@@ -69,7 +68,7 @@ export default function SecuritySettings() {
       </div>
     </>}
     <div className="settings-security-section"><h3>Sessions</h3>
-      <div className="settings-field"><span>Last sign-in{security ? ` (${security.timezone})` : ''}</span>
+      <div className="settings-field"><span>Last sign-in ({zoneLabel(dates.settings)})</span>
         <strong>{lastLogin}</strong></div>
       <button className="btn btn-secondary" type="button" onClick={signOut}>Sign out on this device</button>
     </div>

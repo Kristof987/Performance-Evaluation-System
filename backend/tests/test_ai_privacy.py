@@ -135,6 +135,8 @@ def test_auth_me_tells_every_user_whether_ai_is_on(monkeypatch):
         for enabled in (True, False):
             monkeypatch.setattr(workspace_settings_service, "ai_enabled", lambda _db, value=enabled: value)
             assert TestClient(main.app).get("/auth/me").json()["ai_enabled"] is enabled
+        # Every page shows dates in the business time zone the server reports here.
+        assert TestClient(main.app).get("/auth/me").json()["timezone"] == main.BUSINESS_TIMEZONE.key
     finally:
         main.app.dependency_overrides.clear()
         db.rollback()

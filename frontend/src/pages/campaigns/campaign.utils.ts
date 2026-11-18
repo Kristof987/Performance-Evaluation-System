@@ -3,6 +3,7 @@ import type {
   CampaignResponse,
   CampaignFormValues,
 } from './campaign.types';
+import { defaultDateSettings, formatDateTime } from '../../app/dates';
 export const emptyCampaignForm: CampaignFormValues = {
   name: '',
   description: '',
@@ -41,14 +42,6 @@ export function budapestInstant(local: string): string {
   return [...matches][0];
 }
 
-export function formatDate(value: string) {
-  if (!value) return 'No deadline';
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: zone, day: 'numeric', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).format(new Date(value));
-}
-
 export function validateCampaignTimes(form: CampaignFormValues): string {
   try {
     const start = budapestInstant(form.startLocal);
@@ -69,8 +62,8 @@ export function mapCampaignFromResponse(campaign: CampaignResponse): Campaign {
     isArchived: campaign.is_archived,
     isActive: campaign.is_active,
     currentDate: campaign.current_date,
-    start: formatDate(campaign.start_at),
-    end: formatDate(campaign.end_at ?? ''),
+    start: formatDateTime(campaign.start_at, defaultDateSettings, 'No deadline'),
+    end: formatDateTime(campaign.end_at, defaultDateSettings, 'No deadline'),
     startDate: campaign.start_date,
     endDate: campaign.end_date ?? '',
     startAt: campaign.start_at,

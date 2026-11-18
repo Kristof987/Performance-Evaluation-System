@@ -1,10 +1,11 @@
 import { Link } from 'react-router';
 import { dashboardWork } from '../../employee-home/employee-home.utils';
-import { formatShortDate } from '../utils/hrHome.utils';
 import { useMyEvaluations } from '../hooks/useMyEvaluations';
 import './YourEvaluationsCard.css';
+import { useDates } from '../../../app/dates';
 
 export default function YourEvaluationsCard() {
+  const dates = useDates();
   const { evaluations, loading, error } = useMyEvaluations();
   if (loading || error) return null;
   const { actionable, nextDeadline } = dashboardWork(evaluations);
@@ -16,7 +17,7 @@ export default function YourEvaluationsCard() {
       <p>Personal questionnaires across all campaigns</p>
     </div>
     <div className="your-evaluations-count"><strong>{actionable.length}</strong><span>to complete</span></div>
-    <div className="your-evaluations-due"><span>Nearest due date</span><strong>{nextDeadline ? formatShortDate(nextDeadline.dueDate) : 'No deadline'}</strong></div>
+    <div className="your-evaluations-due"><span>Nearest due date</span><strong>{nextDeadline ? dates.day(nextDeadline.dueDate) : 'No deadline'}</strong></div>
     <Link className="btn btn-primary" to="/my-evaluations">View my evaluations</Link>
   </section>;
 }

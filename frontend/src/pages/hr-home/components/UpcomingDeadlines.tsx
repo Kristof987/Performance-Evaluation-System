@@ -2,7 +2,8 @@ import './UpcomingDeadlines.css';
 import { Flag, Play } from 'lucide-react';
 
 import type { DashboardUpcomingDeadline } from '../hrHome.types';
-import { formatRelativeDate, parseDateOnly } from '../utils/hrHome.utils';
+import { formatRelativeDate } from '../utils/hrHome.utils';
+import { monthLabel, useDates } from '../../../app/dates';
 
 type UpcomingDeadlinesProps = {
   deadlines: DashboardUpcomingDeadline[];
@@ -10,23 +11,12 @@ type UpcomingDeadlinesProps = {
   onOpenCampaign: (campaignId: number) => void;
 };
 
-function formatTimelineMonth(value: string): string {
-  return new Intl.DateTimeFormat('en-GB', { month: 'short' })
-    .format(parseDateOnly(value))
-    .toUpperCase();
-}
-
-function formatTimelineDay(value: string): string {
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric' }).format(
-    parseDateOnly(value),
-  );
-}
-
 function getDeadlineLabel(deadlineType: DashboardUpcomingDeadline['deadline_type']) {
   return deadlineType === 'Starts' ? 'Campaign starts' : 'Campaign ends';
 }
 
 function UpcomingDeadlines({ deadlines, currentDate, onOpenCampaign }: UpcomingDeadlinesProps) {
+  const dates = useDates();
   const visibleDeadlines = deadlines.slice(0, 4);
 
   return (
@@ -51,8 +41,8 @@ function UpcomingDeadlines({ deadlines, currentDate, onOpenCampaign }: UpcomingD
             onClick={() => onOpenCampaign(deadline.campaign_id)}
           >
             <span className="upcoming-date-block" aria-hidden="true">
-              <span>{formatTimelineMonth(deadline.date)}</span>
-              <strong>{formatTimelineDay(deadline.date)}</strong>
+              <span>{monthLabel(deadline.date, dates.settings)}</span>
+              <strong>{Number(deadline.date.slice(8, 10))}</strong>
             </span>
             <span className="upcoming-event-main">
               <strong>{deadline.name}</strong>

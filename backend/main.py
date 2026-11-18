@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, aliased
 
 from database import engine, Base, SessionLocal
 from auth0 import bearer_scheme, get_verified_auth0_sub
-from business_calendar import business_today as campaign_today, business_date, campaign_instant
+from business_calendar import BUSINESS_TIMEZONE, business_today as campaign_today, business_date, campaign_instant
 import campaign_lifecycle
 import campaign_reminder_service
 import email_service
@@ -268,6 +268,7 @@ def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Dep
             "system_role_id": user.system_role_id, "system_role_name": roles.system_role_name,
             "permissions": [name for (name,) in permissions],
             "is_active": user.is_active, "ai_enabled": workspace_settings_service.ai_enabled(db),
+            "timezone": BUSINESS_TIMEZONE.key,
             "employee": {"id": employee.id, "full_name": employee.full_name,
                          "company_role_id": employee.company_role_id,
                          "company_role_name": roles.company_role_name,
@@ -507,7 +508,7 @@ def get_my_security(actor: models.User = Depends(require_permission("settings.re
         "password_reset_available": bool(subject and subject.startswith("auth0|"))
         and auth0_management.password_reset_available(),
         "last_login": actor.last_login,
-        "timezone": os.getenv("APP_TIMEZONE", "Europe/Budapest"),
+        "timezone": BUSINESS_TIMEZONE.key,
     }
 
 

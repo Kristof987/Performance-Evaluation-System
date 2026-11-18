@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Check, ChevronDown, Search, SlidersHorizontal, X } from 'lucide-react';
 import CampaignStatusBadge from './CampaignStatusBadge';
-import { formatDate } from '../campaign.utils';
 import LoadingState from '../../../components/feedback/LoadingState';
+import { useDates, zoneLabel } from '../../../app/dates';
 import type {
   Campaign,
   CampaignStatusFilter,
@@ -38,6 +38,7 @@ export default function CampaignList({
   setSearchQuery,
   setStatusFilter,
 }: Props) {
+  const dates = useDates();
   const [statusOpen, setStatusOpen] = useState(false);
   const statusDropdown = useRef<HTMLDivElement>(null);
   const statusTrigger = useRef<HTMLButtonElement>(null);
@@ -164,12 +165,12 @@ export default function CampaignList({
                     <span className="campaign-activation-list-error">{campaign.lifecycleError}</span>
                   )}
                   {campaign.lastTransitionAt && (
-                    <span className="campaign-activation-note">Last transition: {formatDate(campaign.lastTransitionAt)} (Budapest)</span>
+                    <span className="campaign-activation-note">Last transition: {dates.dateTime(campaign.lastTransitionAt)} ({zoneLabel(dates.settings)})</span>
                   )}
                 </td>
                 <td>
-                  <span className="campaign-period-label">Start: {campaign.start}</span>
-                  <span className="campaign-period-label">End: {campaign.end}</span>
+                  <span className="campaign-period-label">Start: {dates.dateTime(campaign.startAt)}</span>
+                  <span className="campaign-period-label">End: {dates.dateTime(campaign.endAt, 'No deadline')}</span>
                 </td>
                 <td>
                   {campaign.sent === 0

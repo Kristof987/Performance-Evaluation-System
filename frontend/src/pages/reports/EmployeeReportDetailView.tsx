@@ -4,20 +4,11 @@ import EmployeeAIAnalysisPanel from './components/EmployeeAIAnalysisPanel';
 import QuestionAnalytics from './components/QuestionAnalytics';
 import type { EmployeeReportDetail } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
+import { useDates } from '../../app/dates';
 
 function formatScore(value: number | null) {
   if (value === null) return '—';
   return `${value.toFixed(2)} / 5`;
-}
-
-function formatDate(value: string | null) {
-  if (!value) return 'No deadline';
-  const timestamp = value.includes('T');
-  const parsed = new Date(timestamp ? value : `${value}T00:00:00Z`);
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    timeZone: timestamp ? 'Europe/Budapest' : 'UTC',
-  }).format(parsed);
 }
 
 const sectionEmptyState: Record<EmployeeReportDetail['section_availability'], { title: string; message: string }> = {
@@ -36,6 +27,7 @@ function availabilityLabel(availability: 'available' | 'suppressed' | 'no_data',
 }
 
 export default function EmployeeReportDetailView({ data, onBack, getAccessToken }: { data: EmployeeReportDetail; onBack: () => void; getAccessToken: AccessTokenGetter }) {
+  const dates = useDates();
   const [historyKey, setHistoryKey] = useState<string | null>(null);
   const historyOptions = data.history.map((series) => ({ series, key: series.section_id === null ? 'overall' : `section-${series.section_id}` }));
   const selectedHistory = historyOptions.find((option) => option.key === historyKey) ?? historyOptions.find((option) => option.key === 'overall') ?? historyOptions[0];
@@ -75,12 +67,12 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
     <div id="employee-ai-analysis"><EmployeeAIAnalysisPanel scope={{ type: 'employee', campaignId: data.campaign.id, employeeId: data.employee.id }} getAccessToken={getAccessToken} /></div>
     <section className="reports-card reports-employee-coverage">
       <h2>Evaluation coverage</h2>
-      <div className="reports-employee-coverage-facts"><span>{assigned === 0 ? 'No peer reviews assigned' : completed === assigned ? 'All assigned peer reviews completed' : `${data.coverage.peer_outstanding} ${data.coverage.peer_outstanding === 1 ? 'review' : 'reviews'} outstanding`}</span><span>Distinct peer evaluators: {data.coverage.distinct_peer_evaluators ?? 'Restricted'}</span>{data.coverage.campaign_end_date && <span>Campaign deadline: {formatDate(data.coverage.campaign_end_date)}</span>}</div>
+      <div className="reports-employee-coverage-facts"><span>{assigned === 0 ? 'No peer reviews assigned' : completed === assigned ? 'All assigned peer reviews completed' : `${data.coverage.peer_outstanding} ${data.coverage.peer_outstanding === 1 ? 'review' : 'reviews'} outstanding`}</span><span>Distinct peer evaluators: {data.coverage.distinct_peer_evaluators ?? 'Restricted'}</span>{data.coverage.campaign_end_date && <span>Campaign deadline: {dates.day(data.coverage.campaign_end_date, undefined, 'No deadline')}</span>}</div>
       {assigned > 0 && completed < assigned && <div className="reports-employee-coverage-track" role="progressbar" aria-label="Peer review completion" aria-valuemin={0} aria-valuemax={assigned} aria-valuenow={completed}><span style={{ width: `${percentage ?? 0}%` }} /></div>}
     </section>
     {selectedHistory && selectedHistory.series.points.length > 0 && <section className="reports-card">
       <div className="reports-section-heading"><h2>Performance over time</h2><p>Historical reportable section and overall peer scores.</p><select className="form-control reports-source-select" aria-label="Select history series" value={selectedHistory.key} onChange={(event) => setHistoryKey(event.target.value)}>{historyOptions.map(({ series, key }) => <option key={key} value={key}>{series.section_id === null ? 'Overall' : series.section_name}</option>)}</select></div>
-      <div className="reports-history-points">{selectedHistory.series.points.map((point) => <div className="reports-history-point" key={point.campaign_id}><span>{point.campaign_name}</span><strong>{formatScore(point.average_score)}</strong><small>{formatDate(point.campaign_start_date)} · {point.evaluator_count} evaluators · {point.reportable_sections} {point.reportable_sections === 1 ? 'section' : 'sections'}</small></div>)}</div>
+      <div className="reports-history-points">{selectedHistory.series.points.map((point) => <div className="reports-history-point" key={point.campaign_id}><span>{point.campaign_name}</span><strong>{formatScore(point.average_score)}</strong><small>{dates.day(point.campaign_start_date, undefined, 'No deadline')} · {point.evaluator_count} evaluators · {point.reportable_sections} {point.reportable_sections === 1 ? 'section' : 'sections'}</small></div>)}</div>
     </section>}
   </div>;
 }

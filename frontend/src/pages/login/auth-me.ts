@@ -9,6 +9,8 @@ export type AuthMe = {
   permissions: string[];
   is_active: boolean;
   ai_enabled?: boolean;
+  /** Business time zone; every date and time is shown in it. */
+  timezone?: string;
   employee: {
     id: number;
     full_name: string;

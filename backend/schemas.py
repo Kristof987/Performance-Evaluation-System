@@ -198,6 +198,8 @@ class AuthMeResponse(BaseModel):
     employee: AuthEmployeeResponse | None
     # Lets every page tell people when AI-assisted summaries may be made from their results.
     ai_enabled: bool = False
+    # The business time zone (APP_TIMEZONE): every date and time in the app is shown in it.
+    timezone: str = "Europe/Budapest"
 
     model_config = {"from_attributes": True}
 

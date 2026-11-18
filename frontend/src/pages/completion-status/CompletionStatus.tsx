@@ -4,21 +4,17 @@ import AppLayout from '../layout/AppLayout';
 import { formatUserName } from '../layout/sidebar-user';
 import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
-import { formatShortDate } from '../hr-home/utils/hrHome.utils';
 import { fetchCompletionStatus, type CompletionStatusResponse } from './completionStatus.api';
 import CampaignEmails from './CampaignEmails';
 import InlineMessage from '../../components/feedback/InlineMessage';
 import './completion-status.css';
 import LoadingState from '../../components/feedback/LoadingState';
+import { useDates } from '../../app/dates';
 
 const PAGE_SIZE = 25;
 
 function statusClass(status: string) {
   return status.toLowerCase().replace(/\s+/g, '-');
-}
-
-function formatDateOrDash(value: string | null) {
-  return value === null ? '—' : formatShortDate(value);
 }
 
 function SortButton({ label, value, sort, order, onSort }: { label: string; value: string; sort: string; order: 'asc' | 'desc'; onSort: (value: string) => void }) {
@@ -28,6 +24,8 @@ function SortButton({ label, value, sort, order, onSort }: { label: string; valu
 }
 
 export default function CompletionStatus() {
+  const dates = useDates();
+  const formatDateOrDash = (value: string | null) => dates.day(value);
   const { id } = useParams();
   const { getAccessToken, retryAuth0 } = useAppAuth();
   const campaignId = Number(id);
@@ -67,7 +65,7 @@ export default function CompletionStatus() {
     setPage(1);
   }
 
-  const dateRange = data ? `${formatShortDate(data.campaign.start_date)} – ${data.campaign.end_date === null ? 'No end date' : formatShortDate(data.campaign.end_date)}` : '';
+  const dateRange = data ? `${dates.day(data.campaign.start_date)} – ${data.campaign.end_date === null ? 'No end date' : dates.day(data.campaign.end_date)}` : '';
   const summary = data?.summary;
   const invalidRequest = !Number.isSafeInteger(campaignId) || campaignId <= 0;
   const loading = !invalidRequest && data === null && error === '';

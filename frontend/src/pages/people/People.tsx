@@ -46,6 +46,7 @@ import '../hr-home/components/MetricsGrid.css';
 import './people.css';
 import Pending from '../../components/feedback/Pending';
 import LoadingState from '../../components/feedback/LoadingState';
+import { useDates } from '../../app/dates';
 
 type SortKey = 'name' | 'role' | 'groups' | 'status' | 'signIn';
 
@@ -795,6 +796,7 @@ function ImportPanel({
 }
 
 export default function People() {
+  const dates = useDates();
   const { state, retryAuth0, getAccessToken: getAccessTokenSilently } = useAppAuth();
   const auth0User = state.status === 'authenticated' ? state.user : null;
   const permissions = auth0User?.permissions ?? [];
@@ -1951,7 +1953,7 @@ export default function People() {
                   <SignInBadge employee={selectedEmployee} />
                   {selectedEmployee.signIn === 'Invited' && selectedEmployee.invitationSentAt && (
                     <small className="people-signin-detail">
-                      Invitation sent {new Date(selectedEmployee.invitationSentAt).toLocaleString()}
+                      Invitation sent {dates.dateTime(selectedEmployee.invitationSentAt)}
                     </small>
                   )}
                   {selectedEmployee.signIn === 'Invitation failed' && (

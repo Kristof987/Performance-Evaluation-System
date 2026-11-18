@@ -4,6 +4,7 @@ import InlineMessage from '../../components/feedback/InlineMessage';
 import { useConfirm, useToast } from '../../components/feedback/feedback-context';
 import Pending from '../../components/feedback/Pending';
 import LoadingState from '../../components/feedback/LoadingState';
+import { useDates } from '../../app/dates';
 import {
   addCampaignReminder,
   deleteCampaignReminder,
@@ -19,16 +20,10 @@ import {
 
 type Audience = 'everyone' | 'not_started' | 'in_progress';
 
-const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Budapest' });
-/** Email times are full timestamps (not plain dates), shown as the Budapest calendar day. */
-function formatEmailDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : dateFormat.format(date);
-}
-
 function ReminderDialog({ campaignId, onClose, onSent }: {
   campaignId: number; onClose: () => void; onSent: (text: string, failed: boolean) => void;
 }) {
+  const dates = useDates();
   const { getAccessToken } = useAppAuth();
   const [recipients, setRecipients] = useState<ReminderRecipient[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -115,7 +110,7 @@ function ReminderDialog({ campaignId, onClose, onSent }: {
                 <span className="campaign-reminder-counts">
                   {item.not_started > 0 && <em className="not-started">{item.not_started} not started</em>}
                   {item.in_progress > 0 && <em className="in-progress">{item.in_progress} in progress</em>}
-                  {item.last_reminded_at && <small>{item.recently_reminded ? 'Reminded today' : `Last reminded ${formatEmailDate(item.last_reminded_at)}`}</small>}
+                  {item.last_reminded_at && <small>{item.recently_reminded ? 'Reminded today' : `Last reminded ${dates.day(item.last_reminded_at)}`}</small>}
                 </span>
               </label>
             </li>)}
@@ -134,6 +129,7 @@ function ReminderDialog({ campaignId, onClose, onSent }: {
 
 /** Launch email, scheduled reminders and manual reminders for one campaign. */
 export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { campaignId: number; isActive: boolean; hasEndDate: boolean }) {
+  const dates = useDates();
   const { state, getAccessToken } = useAppAuth();
   const canManage = state.status === 'authenticated' && state.user.permissions.includes('campaigns.manage');
   const [data, setData] = useState<CampaignEmailOverview | null>(null);
@@ -210,7 +206,7 @@ export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { c
         {data.reminders.map((reminder) => <li key={reminder.days_before_end}>
           <div>
             <strong>{reminderDayLabel(reminder.days_before_end)}{data.uses_workspace_defaults ? ' · default' : ''}</strong>
-            <span>{reminder.scheduled_for ? formatEmailDate(reminder.scheduled_for) : 'No end date'} · {reminder.sent_count > 0 ? `Sent to ${reminder.sent_count}` : 'Scheduled'}</span>
+            <span>{reminder.scheduled_for ? dates.day(reminder.scheduled_for) : 'No end date'} · {reminder.sent_count > 0 ? `Sent to ${reminder.sent_count}` : 'Scheduled'}</span>
           </div>
           {canManage && <button className="btn btn-secondary" type="button" disabled={busy}
             onClick={() => { if (getAccessToken) void run(() => deleteCampaignReminder(getAccessToken, campaignId, reminder.days_before_end), `Reminder removed: ${reminderDayLabel(reminder.days_before_end).toLowerCase()}`); }}>Remove</button>}
@@ -238,7 +234,7 @@ export default function CampaignEmails({ campaignId, isActive, hasEndDate }: { c
         }}>Use workspace defaults</button>}
     </div>}
     {data && data.failed_count > 0 && <InlineMessage tone="warning">{data.failed_count} {data.failed_count === 1 ? 'email' : 'emails'} couldn’t be delivered.</InlineMessage>}
-    {data?.manual_last_sent_at && <p className="completion-emails-muted">Last manual reminder: {formatEmailDate(data.manual_last_sent_at)}</p>}
+    {data?.manual_last_sent_at && <p className="completion-emails-muted">Last manual reminder: {dates.day(data.manual_last_sent_at)}</p>}
     {dialogOpen && <ReminderDialog campaignId={campaignId} onClose={() => setDialogOpen(false)} onSent={(text, failed) => void afterSend(text, failed)} />}
   </section>;
 }
