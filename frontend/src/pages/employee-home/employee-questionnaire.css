@@ -22,16 +22,9 @@
 .employee-questionnaire-empty-control { color: var(--color-text-secondary); font-size: 13px; margin: 0; }
 .employee-questionnaire-question.has-error { background: color-mix(in srgb, var(--color-danger-bg) 35%, var(--color-surface)); }
 .employee-questionnaire-error { color: var(--color-danger); font-size: 12px; font-weight: 700; margin: 0; }
-.employee-questionnaire-error.global { background: var(--color-danger-bg); border: 1px solid var(--color-danger); border-radius: var(--radius-md); padding: 10px 12px; }
+.employee-questionnaire-inline { margin: 0; }
 .employee-questionnaire-actions { align-items: center; display: flex; gap: 16px; justify-content: space-between; padding: 14px 16px; }
 .employee-questionnaire-actions > span { color: var(--color-text-secondary); font-size: 13px; font-weight: 700; }
 .employee-questionnaire-actions > span.failed { color: var(--color-danger); }
 .employee-questionnaire-actions div { display: flex; gap: 10px; }
-.employee-questionnaire-confirm { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 18px; box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22); color: var(--color-text); margin: auto; max-height: calc(100vh - 32px); max-width: calc(100vw - 32px); padding: 0; width: 460px; }
-.employee-questionnaire-confirm::backdrop { background: rgba(15, 23, 42, 0.42); }
-.employee-questionnaire-confirm-body { padding: 24px 24px 20px; }
-.employee-questionnaire-confirm h2 { font-size: 20px; margin: 0 0 10px; }
-.employee-questionnaire-confirm-body p { color: var(--color-text-secondary); font-size: 14px; line-height: 1.55; margin: 0; }
-.employee-questionnaire-confirm > .employee-questionnaire-error { margin: 0 24px 18px; }
-.employee-questionnaire-confirm-actions { border-top: 1px solid var(--color-border); display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; padding: 16px 24px; }
 @media (max-width: 720px) { .employee-questionnaire-section .employee-questionnaire-question { padding: 18px; } .employee-questionnaire-actions { align-items: stretch; flex-direction: column; } .employee-questionnaire-actions div { flex-direction: column; } }

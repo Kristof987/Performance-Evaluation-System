@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import AppLayout from '../layout/AppLayout';
 import { formatUserName } from '../layout/sidebar-user';
@@ -11,6 +11,8 @@ import { EmployeeEvaluationNotFoundError, fetchAssignedQuestionnaire, issuedQues
 import { evaluationAvailable, evaluationOverdue } from './employee-home.utils';
 import './employee-home.css';
 import './employee-questionnaire.css';
+import InlineMessage from '../../components/feedback/InlineMessage';
+import { useConfirm, useToast } from '../../components/feedback/feedback-context';
 
 type AnswerValue = QuestionnaireAnswer['value'];
 type SaveState = 'idle' | 'saved' | 'failed';
@@ -94,8 +96,8 @@ export default function EmployeeQuestionnaire() {
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const confirmRef = useRef<HTMLDialogElement>(null);
+  const confirm = useConfirm();
+  const toast = useToast();
   const requestVersion = useRef(0);
   const visibleQuestionnaire = questionnaire?.evaluation.id === evaluationId && evaluationAvailable(questionnaire.evaluation) ? questionnaire : null;
   usePageTitle(visibleQuestionnaire ? `Evaluating ${formatUserName(visibleQuestionnaire.evaluation.evaluateeName)}` : 'Evaluation');
@@ -112,7 +114,6 @@ export default function EmployeeQuestionnaire() {
     setDirty(false);
     setSaveState('idle');
     setSubmitAttempted(false);
-    setConfirmOpen(false);
     if (userId === undefined || !getAccessToken || !Number.isSafeInteger(evaluationId) || evaluationId <= 0) return;
     const controller = new AbortController();
     fetchAssignedQuestionnaire(getAccessToken, userId, evaluationId, controller.signal)
@@ -124,14 +125,21 @@ export default function EmployeeQuestionnaire() {
     return () => { controller.abort(); requestVersion.current++; };
   }, [userId, evaluationId, getAccessToken]);
 
+  // Answers live only in this page until saved: warn before a reload or tab close drops them.
   useEffect(() => {
-    if (!confirmOpen) return;
-    const dialog = confirmRef.current;
-    dialog?.showModal();
-    return () => { if (dialog?.open) dialog.close(); };
-  }, [confirmOpen]);
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
-  function requestSubmit() {
+  async function leave(event: MouseEvent<HTMLAnchorElement>) {
+    if (!dirty || saving) return;
+    event.preventDefault();
+    if (await confirm({ title: 'Leave without saving?', message: 'Your unsaved answers will be lost. Save a draft first if you want to continue later.', confirmLabel: 'Discard answers', tone: 'danger' })) navigate(backPath);
+  }
+
+  async function requestSubmit() {
     if (saving || readOnly) return;
     setSubmitAttempted(true);
     if (!questions.length || questions.some((question) => question.required && !isQuestionAnswered(question, answers.find((answer) => answer.question_id === question.id)?.value))) {
@@ -139,7 +147,8 @@ export default function EmployeeQuestionnaire() {
       return;
     }
     setError('');
-    setConfirmOpen(true);
+    const evaluatee = visibleQuestionnaire ? formatUserName(visibleQuestionnaire.evaluation.evaluateeName) : 'this person';
+    if (await confirm({ title: 'Submit evaluation?', message: `Once submitted, your answers about ${evaluatee} can’t be edited.`, confirmLabel: 'Submit evaluation' })) void save(true);
   }
 
   function updateAnswer(questionId: string, value: AnswerValue | null) {
@@ -169,15 +178,16 @@ export default function EmployeeQuestionnaire() {
       setAnswers(evaluationAvailable(saved.evaluation) ? saved.answers : []);
       setDirty(false);
       setSaveState('saved');
-      if (submit) setConfirmOpen(false);
-      if (submit) navigate(backPath);
+      if (submit) {
+        toast.success(`Evaluation of ${formatUserName(visibleQuestionnaire.evaluation.evaluateeName)} submitted`);
+        navigate(backPath);
+      } else toast.success('Draft saved');
     } catch (cause) {
       if (requestVersion.current !== version) return;
       if (cause instanceof ApiAccessError && cause.status === 401) retryAuth0();
       if (cause instanceof EmployeeEvaluationNotFoundError || cause instanceof ApiAccessError && cause.status === 403) {
         setQuestionnaire(null);
         setAnswers([]);
-        setConfirmOpen(false);
         setDirty(false);
       }
       setSaveState('failed');
@@ -196,7 +206,7 @@ export default function EmployeeQuestionnaire() {
   return <AppLayout activePage={fromHr ? 'my-evaluations' : 'employee-home'} pageClassName="employee-home-page">
     <main className="main-content employee-home-main employee-questionnaire-page">
       <div className="employee-questionnaire-shell">
-        <Link className="campaign-details-link" to={backPath}>← Back to your tasks</Link>
+        <Link className="campaign-details-link" to={backPath} onClick={(event) => { void leave(event); }}>← Back to your tasks</Link>
          {!visibleQuestionnaire ? <p className="card card-padded employee-questionnaire-state" role={error ? 'alert' : 'status'}>{error || (questionnaire?.evaluation.id === evaluationId ? 'This questionnaire is not currently available.' : userId === undefined || !Number.isSafeInteger(evaluationId) || evaluationId <= 0 ? 'Questionnaire not found.' : 'Loading questionnaire...')}</p> : <>
           <header className="employee-questionnaire-header">
              <p className="employee-questionnaire-context">{visibleQuestionnaire.evaluation.campaignName} · {visibleQuestionnaire.evaluation.evaluatorId === visibleQuestionnaire.evaluation.evaluateeId ? 'Self-evaluation' : 'Evaluation'}</p>
@@ -208,9 +218,9 @@ export default function EmployeeQuestionnaire() {
              Results of this campaign may be summarized with AI assistance. The AI receives only aggregated scores, never names or
              written peer comments; every summary is reviewed by an authorized person and is not used on its own for employment decisions.
            </p>}
-           {visibleQuestionnaire.evaluation.finishDate !== null && <p className="card card-padded employee-questionnaire-state" role="status">This questionnaire has already been submitted.</p>}
-           {visibleQuestionnaire.evaluation.campaignStatus === 'review' && visibleQuestionnaire.evaluation.finishDate === null && <p className="card card-padded employee-questionnaire-state" role="status">This campaign is in review. You can still save and submit your issued evaluation{evaluationOverdue(visibleQuestionnaire.evaluation) ? ' after the deadline (overdue).' : '.'}</p>}
-           {visibleQuestionnaire.evaluation.campaignStatus === 'active' && evaluationOverdue(visibleQuestionnaire.evaluation) && <p className="card card-padded employee-questionnaire-state" role="status">Overdue: the deadline has passed, but you can still save and submit this evaluation.</p>}
+           {visibleQuestionnaire.evaluation.finishDate !== null && <InlineMessage tone="info" className="employee-questionnaire-inline">This questionnaire has already been submitted.</InlineMessage>}
+           {visibleQuestionnaire.evaluation.campaignStatus === 'review' && visibleQuestionnaire.evaluation.finishDate === null && <InlineMessage tone="info" className="employee-questionnaire-inline">This campaign is in review. You can still save and submit your issued evaluation{evaluationOverdue(visibleQuestionnaire.evaluation) ? ' after the deadline (overdue).' : '.'}</InlineMessage>}
+           {visibleQuestionnaire.evaluation.campaignStatus === 'active' && evaluationOverdue(visibleQuestionnaire.evaluation) && <InlineMessage tone="warning" className="employee-questionnaire-inline">Overdue: the deadline has passed, but you can still save and submit this evaluation.</InlineMessage>}
           <section className="card employee-questionnaire-progress" aria-label="Questionnaire completion progress">
             <div><strong>{answeredCount} of {questionCount} questions answered</strong><span>{progress}% complete</span></div>
             <div className="employee-questionnaire-progress-bar" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Questionnaire completion"><span style={{ width: `${progress}%` }} /></div>
@@ -226,13 +236,8 @@ export default function EmployeeQuestionnaire() {
               return <QuestionItem key={question.id} question={question} index={offset + 1} value={answers.find((answer) => answer.question_id === question.id)?.value} readOnly={readOnly} submitAttempted={submitAttempted} onChange={(value) => updateAnswer(question.id, value)} />;
             })}
           </section>
-           {error && !confirmOpen && <p className="employee-questionnaire-error global" role="alert">{error}</p>}
+           {error && <InlineMessage tone="error" className="employee-questionnaire-inline">{error}</InlineMessage>}
             {!readOnly && <div className="card employee-questionnaire-actions"><span className={saveState === 'failed' ? 'failed' : ''} role="status">{saveLabel}</span><div><button className="btn btn-secondary" type="button" disabled={saving || !dirty} onClick={() => save(false)}>{saving ? 'Saving...' : 'Save draft'}</button><button className="btn btn-primary" type="button" disabled={saving || !questions.length || questions.some((question) => question.required && question.type === 'File upload')} onClick={requestSubmit}>Submit evaluation</button></div></div>}
-            {confirmOpen && <dialog ref={confirmRef} className="employee-questionnaire-confirm" aria-labelledby="employee-submit-title" aria-describedby="employee-submit-description" onCancel={(event) => { event.preventDefault(); if (!saving) setConfirmOpen(false); }}>
-              <div className="employee-questionnaire-confirm-body"><h2 id="employee-submit-title">Submit evaluation?</h2><p id="employee-submit-description">You are about to submit your evaluation. Once submitted, your responses can no longer be edited.</p></div>
-              {error && <p className="employee-questionnaire-error global" role="alert">{error}</p>}
-              <div className="employee-questionnaire-confirm-actions"><button className="btn btn-secondary" type="button" autoFocus disabled={saving} onClick={() => setConfirmOpen(false)}>Cancel</button><button className="btn btn-primary" type="button" disabled={saving} onClick={() => save(true)}>{saving ? 'Submitting...' : 'Submit evaluation'}</button></div>
-            </dialog>}
         </>}
       </div>
     </main>
