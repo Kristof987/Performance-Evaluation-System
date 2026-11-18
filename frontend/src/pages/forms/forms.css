@@ -792,24 +792,6 @@ button.forms-editor-nav-item {
   padding: 10px 12px;
 }
 
-.forms-editor-message {
-  background: var(--color-warning-bg);
-  border: 1px solid var(--color-warning);
-  border-radius: 999px;
-  color: var(--color-warning);
-  display: inline-flex;
-  font: 700 12px var(--font-sans);
-  margin: 10px auto 0;
-  padding: 7px 11px;
-  text-align: center;
-}
-
-.forms-editor-message.success {
-  background: var(--color-success-bg);
-  border-color: var(--color-success);
-  color: var(--color-success);
-}
-
 .forms-editor-state {
   color: var(--color-text-secondary);
   font: 650 13px var(--font-sans);
@@ -1054,8 +1036,7 @@ button.forms-editor-nav-item {
 }
 .forms-sections-filters button.active { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary); }
 .forms-sections-filters button:disabled { cursor: not-allowed; }
-.forms-sections-content > .forms-option-error, .forms-sections-message { font-size: 12px; margin: 0 0 10px; }
-.forms-sections-message { color: var(--color-text-secondary); }
+.forms-sections-inline-message { margin: 0 0 10px; }
 .forms-sections-list { border-top: 1px solid var(--color-border); }
 .forms-sections-empty { color: var(--color-text-muted); font-size: 13px; margin: 0; padding: 18px 0; }
 .forms-section-row { align-items: center; border-bottom: 1px solid var(--color-border); display: flex; gap: 12px; justify-content: space-between; min-width: 0; padding: 9px 0; }
@@ -1092,7 +1073,7 @@ button.forms-editor-nav-item {
   padding: 12px;
 }
 .forms-builder-section-create label { flex: 1 1 190px; }
-.forms-builder-section-create .forms-option-error { flex-basis: 100%; margin: 0; }
+.forms-builder-section-create .inline-message { flex-basis: 100%; }
 
 .forms-page-tab {
   background: var(--color-surface);
@@ -1469,10 +1450,8 @@ button.forms-editor-nav-item {
   min-height: 52px;
 }
 
-.forms-editor-message {
-  border-radius: 10px;
-  justify-self: start;
-  margin: 2px 0 0;
+.forms-editor-inline-message {
+  margin: 12px 18px 0;
 }
 
 .forms-editor-section {
@@ -1693,10 +1672,6 @@ button.forms-editor-nav-item {
 }
 .forms-editor-panel > .forms-editor-field {
   margin: 14px 18px 0;
-}
-
-.forms-editor-panel > .forms-editor-message {
-  margin: 12px 18px;
 }
 
 .forms-editor-field {

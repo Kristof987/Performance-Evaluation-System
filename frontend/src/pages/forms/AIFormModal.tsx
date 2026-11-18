@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { generateAIForm, type AIGenerateRequest, type AIGeneratedForm, type AIGeneratedQuestion } from './forms.api';
 import type { Section } from './sections.api';
+import InlineMessage from '../../components/feedback/InlineMessage';
+import { useConfirm } from '../../components/feedback/feedback-context';
 
 type Mapping = number | 'create' | null;
 
@@ -12,6 +14,7 @@ export default function AIFormModal({ sections, canManageSections, getAccessToke
   onImport: (draft: AIGeneratedForm, mappings: Array<number | 'create'>) => Promise<void>;
   onClose: () => void;
 }) {
+  const confirm = useConfirm();
   const [request, setRequest] = useState<AIGenerateRequest>({ description: '', evaluation_type: 'peer', length: 'standard' });
   const [generated, setGenerated] = useState<AIGeneratedForm | null>(null);
   const [mappings, setMappings] = useState<Mapping[]>([]);
@@ -41,6 +44,11 @@ export default function AIFormModal({ sections, canManageSections, getAccessToke
 
   async function generate() {
     if (!request.description.trim() || pending || importing) { setError('Describe the questionnaire before generating.'); return; }
+    if (generated && !(await confirm({
+      title: 'Generate a new draft?',
+      message: 'The current draft is replaced, and a new request goes to the AI provider, which may incur API cost.',
+      confirmLabel: 'Generate new draft',
+    }))) return;
     const controller = new AbortController();
     activeRequest.current = controller;
     setPending(true); setError('');
@@ -75,7 +83,7 @@ export default function AIFormModal({ sections, canManageSections, getAccessToke
       <label className="form-field forms-editor-field"><span className="form-label">Description</span><textarea ref={descriptionInput} className="form-control" rows={4} maxLength={3000} value={request.description} disabled={disabled} placeholder="Describe the roles and skills this questionnaire should assess..." onChange={(event) => setRequest({ ...request, description: event.target.value })} /></label>
       <div className="forms-ai-options"><label className="form-field forms-editor-field"><span className="form-label">Evaluation type</span><select className="form-control" value={request.evaluation_type} disabled={disabled} onChange={(event) => setRequest({ ...request, evaluation_type: event.target.value as AIGenerateRequest['evaluation_type'] })}><option value="peer">Peer evaluation</option><option value="self">Self-evaluation</option><option value="manager">Manager evaluation</option></select></label>
         <label className="form-field forms-editor-field"><span className="form-label">Length</span><select className="form-control" value={request.length} disabled={disabled} onChange={(event) => setRequest({ ...request, length: event.target.value as AIGenerateRequest['length'] })}><option value="short">Short (5-8)</option><option value="standard">Standard (10-15)</option><option value="detailed">Detailed (18-25)</option></select></label></div>
-      {error && <p className="forms-option-error" role="alert">{error}</p>}
+      {error && <InlineMessage tone="error">{error}</InlineMessage>}
       {pending && <p role="status" className="forms-ai-status">Generating and checking your draft. Invalid results are corrected automatically...</p>}
       {generated && <div className="forms-ai-preview"><div className="forms-ai-preview-heading"><h4>{generated.name}</h4><span>{generated.sections.reduce((sum, item) => sum + item.questions.length, generated.standalone_questions.length)} questions</span></div>{generated.description && <p>{generated.description}</p>}
         {generated.sections.map((section, index) => <section key={index} className="forms-ai-section"><div className="forms-ai-section-heading"><strong>{section.name}</strong>{section.section_id !== null && <small>Existing section</small>}{section.section_id === null && <small>Proposed new section</small>}</div>
