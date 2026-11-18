@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertCircle, CheckCircle2, HelpCircle, Trash2, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, HelpCircle, Trash2, X } from 'lucide-react';
 import { FeedbackContext, type ConfirmOptions, type FeedbackApi, type ToastTone } from './feedback-context';
 import './feedback.css';
 
@@ -19,12 +19,20 @@ interface PendingConfirm { options: ConfirmOptions; resolve: (ok: boolean) => vo
 
 function ConfirmDialog({ options, onClose }: { options: ConfirmOptions; onClose: (ok: boolean) => void }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
   const danger = options.tone === 'danger';
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     cancelRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); onClose(false); } };
+    // Capture phase, so drawers and modals underneath don't react to these keys.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(false); }
+      if (event.key === 'Tab') {
+        event.preventDefault(); event.stopPropagation();
+        (document.activeElement === cancelRef.current ? confirmRef : cancelRef).current?.focus();
+      }
+    };
     document.addEventListener('keydown', onKey, true);
     return () => { document.removeEventListener('keydown', onKey, true); previous?.focus?.(); };
   }, [onClose]);
@@ -42,7 +50,7 @@ function ConfirmDialog({ options, onClose }: { options: ConfirmOptions; onClose:
         </div>
         <div className="confirm-dialog-actions">
           <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={() => onClose(false)}>{options.cancelLabel ?? 'Cancel'}</button>
-          <button type="button" className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} onClick={() => onClose(true)}>{options.confirmLabel}</button>
+          <button ref={confirmRef} type="button" className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} onClick={() => onClose(true)}>{options.confirmLabel}</button>
         </div>
       </div>
     </div>,
@@ -89,7 +97,11 @@ export default function FeedbackProvider({ children }: { children: ReactNode }) 
 
   const api = useMemo<FeedbackApi>(() => ({
     confirm,
-    toast: { success: (message) => show('success', message), error: (message) => show('error', message) },
+    toast: {
+      success: (message) => show('success', message),
+      warning: (message) => show('warning', message),
+      error: (message) => show('error', message),
+    },
   }), [confirm, show]);
 
   return (
@@ -99,9 +111,9 @@ export default function FeedbackProvider({ children }: { children: ReactNode }) 
       {createPortal(
         <div className="toast-region" aria-live="polite">
           {toasts.map((toast) => {
-            const Icon = toast.tone === 'success' ? CheckCircle2 : AlertCircle;
+            const Icon = toast.tone === 'success' ? CheckCircle2 : toast.tone === 'warning' ? AlertTriangle : AlertCircle;
             return (
-              <div key={toast.id} className={`toast toast-${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'}>
+              <div key={toast.id} className={`toast toast-${toast.tone}`} role={toast.tone === 'success' ? 'status' : 'alert'}>
                 <Icon size={18} aria-hidden="true" />
                 <span className="toast-message">{toast.message}</span>
                 <button type="button" className="feedback-dismiss toast-dismiss" aria-label="Dismiss notification" onClick={() => dismiss(toast.id)}><X size={14} aria-hidden="true" /></button>

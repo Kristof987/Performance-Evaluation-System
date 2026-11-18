@@ -17,6 +17,8 @@ import {
 import { createPortal } from 'react-dom';
 import { parsePositiveInt, parseText, useUrlState } from '../../app/useUrlState';
 import Avatar from '../../components/Avatar';
+import InlineMessage from '../../components/feedback/InlineMessage';
+import { useConfirm, useToast } from '../../components/feedback/feedback-context';
 import {
   addGroupMember,
   createEmployee,
@@ -77,13 +79,6 @@ type PeopleMetric = {
 };
 
 type EmployeeFormErrors = Partial<Record<keyof EmployeeFormValues, string>>;
-
-type PendingMemberRemoval = {
-  groupId: number;
-  groupName: string;
-  employeeId: number;
-  employeeName: string;
-} | null;
 
 const emptyEmployeeForm: EmployeeFormValues = {
   name: '',
@@ -229,14 +224,12 @@ function DetailDrawer({
   title,
   titleId,
   onClose,
-  suspendFocusTrap = false,
   children,
 }: {
   isOpen: boolean;
   title: string;
   titleId: string;
   onClose: () => void;
-  suspendFocusTrap?: boolean;
   children: ReactNode;
 }) {
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -248,7 +241,7 @@ function DetailDrawer({
   }, [onClose]);
 
   useEffect(() => {
-    if (!isOpen || suspendFocusTrap) return undefined;
+    if (!isOpen) return undefined;
 
     previousFocusRef.current = document.activeElement as HTMLElement | null;
     const drawer = drawerRef.current;
@@ -291,7 +284,7 @@ function DetailDrawer({
       document.body.classList.remove('people-drawer-lock');
       previousFocusRef.current?.focus();
     };
-  }, [isOpen, suspendFocusTrap]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -762,12 +755,12 @@ function ImportPanel({
           />
           <span>{file?.name ?? 'Choose Excel file'}</span>
         </label>
-        {file !== null && !isValidExcelFile(file) && (
-          <div className="people-form-message">Upload an .xlsx file.</div>
+        {file !== null && !isValidExcelFile(file) && message === '' && (
+          <InlineMessage tone="error">Upload an .xlsx file.</InlineMessage>
         )}
       </div>
       {(message !== '' || errors.length > 0) && (
-        <div className="people-form-message" aria-live="polite">
+        <InlineMessage tone="error">
           {message !== '' && <p>{message}</p>}
           {errors.length > 0 && (
             <ul>
@@ -776,7 +769,7 @@ function ImportPanel({
               ))}
             </ul>
           )}
-        </div>
+        </InlineMessage>
       )}
       <div className="modal-actions">
         <a
@@ -808,6 +801,8 @@ export default function People() {
   const canAssignRoles = permissions.includes('roles.assign');
   const canImportEmployees = canManageEmployees && canAssignRoles;
   const currentUser = auth0User;
+  const confirm = useConfirm();
+  const toast = useToast();
 
   function handleAccessError(error: unknown) {
     if (error instanceof ApiAccessError) retryAuth0();
@@ -818,11 +813,11 @@ export default function People() {
   const [systemRoles, setSystemRoles] = useState<NamedOption[]>([]);
   const [isNewCompanyRole, setIsNewCompanyRole] = useState(false);
   const [systemRoleDraft, setSystemRoleDraft] = useState<{ employeeId: number; roleId: number } | null>(null);
-  const [systemRoleMessage, setSystemRoleMessage] = useState<{ employeeId: number; tone: 'success' | 'error'; text: string } | null>(null);
+  const [systemRoleMessage, setSystemRoleMessage] = useState<{ employeeId: number; text: string } | null>(null);
   const [isSavingSystemRole, setIsSavingSystemRole] = useState(false);
   const [companyRoleUsage, setCompanyRoleUsage] = useState<CompanyRoleUsage[] | null>(null);
   const [isCompanyRolesOpen, setIsCompanyRolesOpen] = useState(false);
-  const [companyRoleMessage, setCompanyRoleMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [companyRoleMessage, setCompanyRoleMessage] = useState('');
   const [removingCompanyRoleId, setRemovingCompanyRoleId] = useState<number | null>(null);
   const [isPeopleLoading, setIsPeopleLoading] = useState(true);
   const [peopleError, setPeopleError] = useState('');
@@ -861,8 +856,6 @@ export default function People() {
   const [removingGroupMemberId, setRemovingGroupMemberId] = useState<number | null>(
     null,
   );
-  const [pendingMemberRemoval, setPendingMemberRemoval] =
-    useState<PendingMemberRemoval>(null);
   const [groupImportFile, setGroupImportFile] = useState<File | null>(null);
   const [groupImportMessage, setGroupImportMessage] = useState('');
   const [groupImportErrors, setGroupImportErrors] = useState<string[]>([]);
@@ -885,8 +878,7 @@ export default function People() {
     key: 'open_employee', defaultValue: null, parse: parsePositiveInt,
     serialize: (value) => (value === null ? '' : String(value)), push: true,
   });
-  const [employeeNotice, setEmployeeNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(null);
-  const [invitationMessage, setInvitationMessage] = useState<{ employeeId: number; tone: 'success' | 'error'; text: string } | null>(null);
+  const [invitationMessage, setInvitationMessage] = useState<{ employeeId: number; text: string } | null>(null);
   const [isSendingInvitation, setIsSendingInvitation] = useState(false);
   const editingEmployeeLinked = editingEmployeeId !== null
     && (employees.find((employee) => employee.id === editingEmployeeId)?.signInLinked ?? false);
@@ -905,6 +897,18 @@ export default function People() {
     (editingGroupId !== null
       ? groups.find((group) => group.id === editingGroupId) ?? null
       : null);
+
+  /** Reloads the lists after a change that already succeeded; a failed reload must not look like a failed change. */
+  async function refreshPeopleAfterChange(done: string) {
+    try {
+      applyPeopleData(await fetchPeople(getAccessTokenSilently, new AbortController().signal));
+      return true;
+    } catch (error) {
+      handleAccessError(error);
+      toast.warning(`${done}, but the list couldn’t refresh. Reload the page to see the latest data.`);
+      return false;
+    }
+  }
 
   function applyPeopleData(people: { employees: Employee[]; groups: Group[]; companyRoles: NamedOption[]; systemRoles: NamedOption[] }) {
     setEmployees(people.employees);
@@ -1160,8 +1164,8 @@ export default function People() {
       } else {
         await updateGroup(getAccessTokenSilently, editingGroupId, payload);
       }
-      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
-      applyPeopleData(people);
+      const done = `“${payload.name}” ${editingGroupId === null ? 'created' : 'saved'}`;
+      if (await refreshPeopleAfterChange(done)) toast.success(done);
       setGroupPage(1);
       setIsGroupsModalOpen(false);
       if (!shouldRestoreGroupDrawer) setSelectedGroupId(null);
@@ -1189,8 +1193,10 @@ export default function People() {
     setGroupMemberMessage('');
     try {
       await addGroupMember(getAccessTokenSilently, groupId, Number(employeeId));
-      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
-      applyPeopleData(people);
+      const employeeName = employees.find((item) => item.id === Number(employeeId))?.name ?? 'Employee';
+      const groupName = groups.find((item) => item.id === groupId)?.name ?? 'the group';
+      const done = `${employeeName} added to ${groupName}`;
+      if (await refreshPeopleAfterChange(done)) toast.success(done);
       setSidePanelEmployeeId('');
       setGroupMemberSearch('');
     } catch (error) {
@@ -1203,34 +1209,27 @@ export default function People() {
     }
   }
 
-  function requestRemoveGroupMember(groupId: number, employeeId: number) {
+  async function requestRemoveGroupMember(groupId: number, employeeId: number) {
+    if (removingGroupMemberId !== null || !canManageGroups) return;
     const group = groups.find((item) => item.id === groupId);
     const employee = employees.find((item) => item.id === employeeId);
     if (!group || !employee) return;
-    setPendingMemberRemoval({
-      groupId,
-      groupName: group.name,
-      employeeId,
-      employeeName: employee.name,
+    const confirmed = await confirm({
+      title: `Remove ${employee.name} from ${group.name}?`,
+      message: 'They will no longer belong to this group. Campaigns that were already issued are not affected.',
+      confirmLabel: 'Remove member',
+      tone: 'danger',
     });
-  }
+    if (!confirmed) return;
 
-  async function confirmRemoveGroupMember() {
-    if (removingGroupMemberId !== null || pendingMemberRemoval === null || !canManageGroups) return;
-
-    setRemovingGroupMemberId(pendingMemberRemoval.employeeId);
+    setRemovingGroupMemberId(employeeId);
     setGroupMemberMessage('');
     try {
-      await removeGroupMember(
-        getAccessTokenSilently,
-        pendingMemberRemoval.groupId,
-        pendingMemberRemoval.employeeId,
-      );
-      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
-      applyPeopleData(people);
+      await removeGroupMember(getAccessTokenSilently, groupId, employeeId);
+      const done = `${employee.name} removed from ${group.name}`;
+      if (await refreshPeopleAfterChange(done)) toast.success(done);
       setSidePanelEmployeeId('');
       setGroupMemberSearch('');
-      setPendingMemberRemoval(null);
     } catch (error) {
       handleAccessError(error);
       setGroupMemberMessage(
@@ -1266,13 +1265,14 @@ export default function People() {
         setGroupImportMessage('Groups were not imported. Fix the errors below and upload again.');
         return;
       }
-      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
-      applyPeopleData(people);
+      const done = `${result.createdCount} group${result.createdCount === 1 ? '' : 's'} imported`;
+      if (await refreshPeopleAfterChange(done)) toast.success(done);
       setGroupImportFile(null);
-      setGroupImportMessage(
-        `${result.createdCount} group${result.createdCount === 1 ? '' : 's'} imported successfully.`,
-      );
       setGroupPage(1);
+      setIsGroupsModalOpen(false);
+      if (!shouldRestoreGroupDrawer) setSelectedGroupId(null);
+      setShouldRestoreGroupDrawer(false);
+      setEditingGroupId(null);
     } catch (error) {
       handleAccessError(error);
       setGroupImportMessage(
@@ -1364,23 +1364,26 @@ export default function People() {
         role: employeeForm.role.trim(),
         email: employeeForm.email.trim(),
       };
+      let done = `${payload.name} saved`;
+      let warning = '';
       if (editingEmployeeId === null) {
         const created = await createEmployee(getAccessTokenSilently, payload);
-        setEmployeeNotice(created.signIn === 'Invited'
-          ? { tone: 'success', text: `${created.name} was created and a sign-in invitation was sent to ${created.email}.` }
-          : created.signIn === 'Invitation failed'
-            ? { tone: 'warning', text: `${created.name} was created, but the invitation was not sent: ${invitationErrorMessage(created.invitationError)}` }
-            : { tone: 'warning', text: `${created.name} was created. Sign-in invitations are not configured, so no email was sent.` });
+        done = `${created.name} created and invited to sign in`;
+        if (created.signIn === 'Invitation failed') {
+          warning = `${created.name} was created, but the invitation wasn’t sent: ${invitationErrorMessage(created.invitationError)} You can resend it from their details.`;
+        } else if (created.signIn !== 'Invited') {
+          warning = `${created.name} was created. Sign-in invitations aren’t configured, so no email was sent.`;
+        }
       } else {
         await updateEmployee(getAccessTokenSilently, editingEmployeeId, payload);
       }
-      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
-      applyPeopleData(people);
+      const refreshed = await refreshPeopleAfterChange(warning ? `${payload.name} created` : done);
+      if (warning) toast.warning(warning);
+      else if (refreshed) toast.success(done);
       setEmployeePage(1);
       setEditingEmployeeId(null);
       setEmployeeForm(emptyEmployeeForm);
       setIsNewCompanyRole(false);
-    setIsNewCompanyRole(false);
       setEmployeeFormErrors({});
       setIsEmployeeModalOpen(false);
     } catch (error) {
@@ -1400,28 +1403,38 @@ export default function People() {
 
   async function openCompanyRoles() {
     setIsCompanyRolesOpen(true);
-    setCompanyRoleMessage(null);
+    setCompanyRoleMessage('');
     setCompanyRoleUsage(null);
     try {
       applyCompanyRoleUsage(await fetchCompanyRoles(getAccessTokenSilently));
     } catch (error) {
       handleAccessError(error);
-      setCompanyRoleMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Company roles could not be loaded.' });
+      setCompanyRoleMessage(error instanceof Error ? error.message : 'Company roles could not be loaded.');
     }
   }
 
   async function handleRemoveCompanyRole(role: CompanyRoleUsage) {
     if (removingCompanyRoleId !== null) return;
+    const archive = role.used_in_campaigns;
+    const confirmed = await confirm(archive ? {
+      title: `Archive “${role.name}”?`,
+      message: 'Past campaigns refer to this role, so it is archived instead of deleted: it disappears from the role list, but earlier reports keep showing it.',
+      confirmLabel: 'Archive role',
+    } : {
+      title: `Delete “${role.name}”?`,
+      message: 'No employee or campaign uses this role. It will be deleted permanently.',
+      confirmLabel: 'Delete role',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setRemovingCompanyRoleId(role.id);
-    setCompanyRoleMessage(null);
+    setCompanyRoleMessage('');
     try {
       applyCompanyRoleUsage(await deleteCompanyRole(getAccessTokenSilently, role.id));
-      setCompanyRoleMessage({ tone: 'success', text: role.used_in_campaigns
-        ? `“${role.name}” archived. Past campaign reports keep showing it.`
-        : `“${role.name}” deleted.` });
+      toast.success(archive ? `“${role.name}” archived` : `“${role.name}” deleted`);
     } catch (error) {
       handleAccessError(error);
-      setCompanyRoleMessage({ tone: 'error', text: error instanceof Error ? error.message : 'The company role could not be removed.' });
+      setCompanyRoleMessage(error instanceof Error ? error.message : 'The company role could not be removed.');
     } finally {
       setRemovingCompanyRoleId(null);
     }
@@ -1429,6 +1442,13 @@ export default function People() {
 
   async function handleSaveSystemRole(employee: Employee, roleId: number) {
     if (isSavingSystemRole || !canAssignRoles) return;
+    const nextRole = systemRoles.find((role) => role.id === roleId)?.name ?? 'the selected role';
+    const confirmed = await confirm({
+      title: `Change ${employee.name}’s system role to ${nextRole}?`,
+      message: `This changes what ${employee.name} can see and do in PerfEval, from ${employee.systemRole ?? 'their current role'} to ${nextRole}. It applies the next time they load a page.`,
+      confirmLabel: 'Change role',
+    });
+    if (!confirmed) return;
     setIsSavingSystemRole(true);
     setSystemRoleMessage(null);
     try {
@@ -1436,10 +1456,10 @@ export default function People() {
       setEmployees((current) => current.map((item) => item.id === employee.id
         ? { ...item, systemRoleId: role.id, systemRole: role.name } : item));
       setSystemRoleDraft(null);
-      setSystemRoleMessage({ employeeId: employee.id, tone: 'success', text: `System role changed to ${role.name}.` });
+      toast.success(`${employee.name}’s system role changed to ${role.name}`);
     } catch (error) {
       handleAccessError(error);
-      setSystemRoleMessage({ employeeId: employee.id, tone: 'error',
+      setSystemRoleMessage({ employeeId: employee.id,
         text: error instanceof Error ? error.message : 'The system role could not be changed.' });
     } finally {
       setIsSavingSystemRole(false);
@@ -1453,12 +1473,11 @@ export default function People() {
     try {
       const updated = await resendInvitation(getAccessTokenSilently, employee.id);
       setEmployees((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setInvitationMessage(updated.signIn === 'Invited'
-        ? { employeeId: employee.id, tone: 'success', text: `Invitation sent to ${updated.email}.` }
-        : { employeeId: employee.id, tone: 'error', text: invitationErrorMessage(updated.invitationError) });
+      if (updated.signIn === 'Invited') toast.success(`Invitation sent to ${updated.email}`);
+      else setInvitationMessage({ employeeId: employee.id, text: invitationErrorMessage(updated.invitationError) });
     } catch (error) {
       handleAccessError(error);
-      setInvitationMessage({ employeeId: employee.id, tone: 'error',
+      setInvitationMessage({ employeeId: employee.id,
         text: error instanceof Error ? error.message : 'The invitation could not be sent.' });
     } finally {
       setIsSendingInvitation(false);
@@ -1488,17 +1507,18 @@ export default function People() {
         setEmployeeImportMessage('Employees were not imported. Fix the errors below and upload again.');
         return;
       }
-      const people = await fetchPeople(getAccessTokenSilently, new AbortController().signal);
-      applyPeopleData(people);
-      setEmployeeImportFile(null);
       const failed = result.invitationErrors.length;
-      setEmployeeImportMessage(
-        `${result.createdCount} employee${result.createdCount === 1 ? '' : 's'} imported. `
-        + `${result.invitationsSent} invitation${result.invitationsSent === 1 ? '' : 's'} sent`
-        + (failed ? `, ${failed} failed. You can resend them from each employee's details.` : '.'),
-      );
-      setEmployeeImportErrors(result.invitationErrors);
+      const done = `${result.createdCount} employee${result.createdCount === 1 ? '' : 's'} imported`;
+      const refreshed = await refreshPeopleAfterChange(done);
+      if (failed) {
+        toast.warning(`${done}, but ${failed} invitation${failed === 1 ? '' : 's'} couldn’t be sent. You can resend them from each employee’s details.`);
+      } else if (refreshed) {
+        toast.success(`${done}, ${result.invitationsSent} invitation${result.invitationsSent === 1 ? '' : 's'} sent`);
+      }
+      setEmployeeImportFile(null);
       setEmployeePage(1);
+      setIsEmployeeModalOpen(false);
+      setEditingEmployeeId(null);
     } catch (error) {
       handleAccessError(error);
       setEmployeeImportMessage(
@@ -1584,12 +1604,6 @@ export default function People() {
                 </button>
               </div>
 
-              {employeeNotice && (
-                <div className={`people-notice people-notice-${employeeNotice.tone}`} role="status">
-                  <span>{employeeNotice.text}</span>
-                  <button className="link people-link-button" type="button" onClick={() => setEmployeeNotice(null)}>Dismiss</button>
-                </div>
-              )}
               <div className="card table-card">
                 <table className="table people-employee-table">
                   <thead>
@@ -1921,8 +1935,7 @@ export default function People() {
                     selectedEmployee.systemRole ?? '—'
                   )}
                   {systemRoleMessage?.employeeId === selectedEmployee.id && (
-                    <small className={systemRoleMessage.tone === 'success' ? 'people-invite-success' : 'people-invite-error'}
-                      role={systemRoleMessage.tone === 'success' ? 'status' : 'alert'}>{systemRoleMessage.text}</small>
+                    <InlineMessage tone="error" className="people-inline-message" onDismiss={() => setSystemRoleMessage(null)}>{systemRoleMessage.text}</InlineMessage>
                   )}
                 </dd>
               </div>
@@ -1970,8 +1983,7 @@ export default function People() {
               {isSendingInvitation ? 'Sending...' : selectedEmployee.signIn === 'Not invited' ? 'Send invitation' : 'Resend invitation'}
             </button>}
             {invitationMessage?.employeeId === selectedEmployee.id && (
-              <p className={invitationMessage.tone === 'success' ? 'people-invite-success' : 'people-invite-error'}
-                role={invitationMessage.tone === 'success' ? 'status' : 'alert'}>{invitationMessage.text}</p>
+              <InlineMessage tone="error" className="people-inline-message" onDismiss={() => setInvitationMessage(null)}>{invitationMessage.text}</InlineMessage>
             )}
           </div>
         )}
@@ -1981,7 +1993,6 @@ export default function People() {
         isOpen={activePeopleTab === 'groups' && selectedGroup !== null}
         title={selectedGroup?.name ?? 'Group details'}
         titleId="groupDetailsTitle"
-        suspendFocusTrap={pendingMemberRemoval !== null}
         onClose={() => {
           setSelectedGroupId(null);
           setGroupMemberMessage('');
@@ -2084,9 +2095,7 @@ export default function People() {
                 {isAddingGroupMember ? 'Adding...' : 'Add to group'}
               </button>
               {groupMemberMessage !== '' && (
-                <div className="people-form-message" aria-live="polite">
-                  {groupMemberMessage}
-                </div>
+                <InlineMessage tone="error">{groupMemberMessage}</InlineMessage>
               )}
             </section>}
 
@@ -2113,9 +2122,8 @@ export default function People() {
               <button className="close" type="button" onClick={() => setIsCompanyRolesOpen(false)} aria-label="Close company roles">×</button>
             </div>
             <div className="modal-body">
-              {companyRoleMessage && <p className={companyRoleMessage.tone === 'success' ? 'people-invite-success' : 'people-invite-error'}
-                role={companyRoleMessage.tone === 'success' ? 'status' : 'alert'}>{companyRoleMessage.text}</p>}
-              {companyRoleUsage === null && !companyRoleMessage && <p className="people-empty-inline">Loading…</p>}
+              {companyRoleMessage !== '' && <InlineMessage tone="error" className="people-inline-message">{companyRoleMessage}</InlineMessage>}
+              {companyRoleUsage === null && companyRoleMessage === '' && <p className="people-empty-inline">Loading…</p>}
               {companyRoleUsage !== null && companyRoleUsage.filter((role) => !role.archived).length === 0 && <p className="people-empty-inline">No company roles yet.</p>}
               {companyRoleUsage !== null && <ul className="people-role-list">
                 {companyRoleUsage.filter((role) => !role.archived).map((role) => (
@@ -2133,56 +2141,6 @@ export default function People() {
                   </li>
                 ))}
               </ul>}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {pendingMemberRemoval !== null && (
-        <div className="modal-backdrop open" role="presentation">
-          <div
-            className="modal confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="removeMemberTitle"
-          >
-            <div className="modal-head">
-              <div>
-                <h2 id="removeMemberTitle">
-                  Remove {pendingMemberRemoval.employeeName} from {pendingMemberRemoval.groupName}?
-                </h2>
-                <p>This employee will no longer belong to this group.</p>
-              </div>
-              <button
-                className="close"
-                type="button"
-                onClick={() => setPendingMemberRemoval(null)}
-                disabled={removingGroupMemberId !== null}
-                aria-label="Cancel removal"
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="modal-actions">
-                <button
-                  className="btn btn-secondary people-button"
-                  type="button"
-                  onClick={() => setPendingMemberRemoval(null)}
-                  disabled={removingGroupMemberId !== null}
-                  autoFocus
-                >
-                  Cancel
-                </button>
-                <button
-                  className="btn btn-primary people-button danger-action"
-                  type="button"
-                  onClick={confirmRemoveGroupMember}
-                  disabled={removingGroupMemberId !== null}
-                >
-                  {removingGroupMemberId !== null ? 'Removing...' : 'Remove member'}
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -2327,7 +2285,7 @@ export default function People() {
                 </div>
               </div>
               {employeeFormMessage !== '' && (
-                <div className="people-form-message">{employeeFormMessage}</div>
+                <InlineMessage tone="error">{employeeFormMessage}</InlineMessage>
               )}
               <div className="modal-actions">
                 <button
@@ -2474,7 +2432,7 @@ export default function People() {
                   </div>
                 </div>
                 {groupFormMessage !== '' && (
-                  <div className="people-form-message" aria-live="polite">{groupFormMessage}</div>
+                  <InlineMessage tone="error">{groupFormMessage}</InlineMessage>
                 )}
                 <div className="modal-actions">
                   <button

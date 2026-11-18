@@ -11,11 +11,13 @@ export interface ConfirmOptions {
   tone?: ConfirmTone;
 }
 
-export type ToastTone = 'success' | 'error';
+export type ToastTone = 'success' | 'warning' | 'error';
 
 export interface ToastApi {
   /** Auto-hides after a few seconds. */
   success: (message: string) => void;
+  /** Partly done ("Saved, but the list couldn't refresh"). Stays until dismissed. */
+  warning: (message: string) => void;
   /** Stays until dismissed, so it isn't missed. */
   error: (message: string) => void;
 }

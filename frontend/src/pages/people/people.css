@@ -361,10 +361,9 @@
   font-weight: 550;
 }
 
-.people-form-message {
-  margin-top: 14px;
-  color: #9a3412;
-  font: 700 13px var(--font-sans);
+.people-page .modal .inline-message,
+.people-inline-message {
+  margin-top: 12px;
 }
 
 .people-member-add {
@@ -538,10 +537,6 @@
 
 .group-modal {
   width: min(540px, 100%);
-}
-
-.confirm-modal {
-  width: min(460px, 100%);
 }
 
 .modal-head {
@@ -1205,39 +1200,12 @@
   font: 500 14px var(--font-sans);
 }
 
-.people-notice {
-  align-items: center;
-  border-radius: var(--radius-md);
-  display: flex;
-  font-size: 13px;
-  gap: 12px;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  padding: 10px 14px;
-}
-
-.people-notice-success {
-  background: var(--color-success-bg);
-  color: var(--color-success);
-}
-
-.people-notice-warning {
-  background: var(--color-warning-bg);
-  color: var(--color-text);
-}
-
 .people-signin-detail,
 .people-field-note {
   color: var(--color-text-secondary);
   display: block;
   font-size: 12px;
   margin-top: 4px;
-}
-
-.people-invite-success,
-.people-invite-error {
-  font-size: 13px;
-  margin: 0;
 }
 
 .people-system-role {
@@ -1252,19 +1220,6 @@
 
 select + .people-new-role-input {
   margin-top: 8px;
-}
-
-.people-system-role + small {
-  display: block;
-  margin-top: 6px;
-}
-
-.people-invite-success {
-  color: var(--color-success);
-}
-
-.people-invite-error {
-  color: var(--color-danger);
 }
 
 .mini {
