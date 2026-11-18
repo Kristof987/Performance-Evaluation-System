@@ -29,6 +29,10 @@ export type ReviewForm = {
   name: string;
   description: string;
   questions: FormBlock[];
+  /** Forms only: set when a form that past campaigns use was "deleted". */
+  archivedAt: string | null;
+  /** Forms only: a campaign refers to it, so deleting it archives it instead. */
+  usedInCampaigns: boolean;
 };
 
 export type ReviewFormValues = {
@@ -70,6 +74,8 @@ type FormResponse = {
   name: string;
   description: string | null;
   questions: unknown;
+  archived_at?: string | null;
+  used_in_campaigns?: boolean;
 };
 
 function mapQuestion(question: unknown, index: number): FormQuestion {
@@ -115,6 +121,8 @@ function mapForm(form: FormResponse): ReviewForm {
     name: form.name,
     description: form.description || '',
     questions: questions.map(mapBlock),
+    archivedAt: form.archived_at ?? null,
+    usedInCampaigns: form.used_in_campaigns ?? false,
   };
 }
 
@@ -239,6 +247,11 @@ export async function updateForm(getAccessToken: AccessTokenGetter, id: number, 
   );
 }
 
-export async function deleteForm(getAccessToken: AccessTokenGetter, id: number): Promise<void> {
-  await requestApi(getAccessToken, `/forms/${id}`, { method: 'DELETE' }, 'Form could not be deleted.');
+/** Unused forms are deleted; forms that finished campaigns use are archived. */
+export async function deleteForm(getAccessToken: AccessTokenGetter, id: number): Promise<{ deleted: boolean; archived: boolean }> {
+  return requestApi(getAccessToken, `/forms/${id}`, { method: 'DELETE' }, 'Form could not be deleted.');
+}
+
+export async function restoreForm(getAccessToken: AccessTokenGetter, id: number): Promise<ReviewForm> {
+  return mapForm(await requestApi<FormResponse>(getAccessToken, `/forms/${id}/restore`, { method: 'POST' }, 'Form could not be restored.'));
 }

@@ -1097,10 +1097,18 @@ class FormResponse(BaseModel):
     name: str
     description: str | None
     questions: list[dict[str, Any]]
+    archived_at: datetime | None = None
+    # True when any campaign refers to the form; deleting it then archives it instead.
+    used_in_campaigns: bool = False
 
     model_config = {
         "from_attributes": True
     }
+
+
+class FormDeleteResponse(BaseModel):
+    deleted: bool
+    archived: bool
 
 
 class FormTemplateResponse(BaseModel):

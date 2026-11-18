@@ -2094,3 +2094,21 @@ button.forms-editor-nav-item {
 }
 
 .forms-ai-label { background: var(--color-warning-bg); border-left: 3px solid var(--color-warning); border-radius: 8px; font-size: 13px; line-height: 1.5; margin: 8px 0; padding: 10px 14px; }
+
+.forms-archived-toggle {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: 600 12px var(--font-sans);
+  cursor: pointer;
+}
+
+.forms-archived-toggle:hover { text-decoration: underline; }
+
+.forms-page .btn.forms-remove-button { color: var(--color-danger); }
+.forms-page .btn.forms-remove-button:hover { border-color: var(--color-danger); background: var(--color-danger-bg); }
+
+.forms-editor-empty .inline-message { margin: 12px 0; text-align: left; }

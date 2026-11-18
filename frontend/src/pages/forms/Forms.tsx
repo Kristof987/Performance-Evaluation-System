@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
-import { ArrowLeft, ChevronDown, ChevronRight, FilePlus2, FileText, GripVertical, Layers3, Plus, Sparkles, X } from 'lucide-react';
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, FilePlus2, FileText, GripVertical, Layers3, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import AppLayout from '../layout/AppLayout';
@@ -9,7 +9,7 @@ import InlineMessage from '../../components/feedback/InlineMessage';
 import '../hr-home/hr-home.css';
 import './forms.css';
 import './questionnaire-choices.css';
-import { createForm, createFormFromTemplate, createFormTemplate, fetchForms, fetchFormTemplates, updateForm, updateFormTemplate, type AIGeneratedForm, type AIGeneratedQuestion, type ChoiceOption, type FormBlock, type FormQuestion, type ReviewForm, type ReviewFormValues } from './forms.api';
+import { createForm, createFormFromTemplate, createFormTemplate, deleteForm, deleteFormTemplate, fetchForms, fetchFormTemplates, restoreForm, updateForm, updateFormTemplate, type AIGeneratedForm, type AIGeneratedQuestion, type ChoiceOption, type FormBlock, type FormQuestion, type ReviewForm, type ReviewFormValues } from './forms.api';
 import { fetchSections, saveSection as saveSectionRequest, setSectionArchived, type Section } from './sections.api';
 import AIFormModal from './AIFormModal';
 import { moveFormItem, type DropPosition, type MovingItem } from './form-order';
@@ -68,6 +68,8 @@ export default function Forms() {
   const [draft, setDraft] = useState<ReviewFormValues | null>(null);
   const [saved, setSaved] = useState<ReviewFormValues | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [formsLoading, setFormsLoading] = useState(true);
   const [formsError, setFormsError] = useState('');
   const [formLoadAttempt, setFormLoadAttempt] = useState(0);
@@ -100,7 +102,11 @@ export default function Forms() {
     return pointerWithin({ ...args, droppableContainers: containers });
   };
 
-  const currentItems = mode === 'forms' ? forms : templates;
+  const archivedCount = forms.filter((item) => item.archivedAt !== null).length;
+  const currentItems = mode === 'forms' ? forms.filter((item) => (item.archivedAt !== null) === showArchived) : templates;
+  const selectedItem = selectedId === null ? null : (mode === 'forms' ? forms : templates).find((item) => item.id === selectedId) ?? null;
+  // Archived forms open read-only until restored.
+  const selectedArchived = mode === 'forms' && selectedItem?.archivedAt != null;
   const dirty = draft !== null && saved !== null && JSON.stringify(draft) !== JSON.stringify(saved);
   // The editor's message line holds problems to fix, plus the reminder after an AI import. Successes go to toasts.
   const messageTone = message.startsWith('AI draft imported.') ? 'info' : 'error';
@@ -279,7 +285,7 @@ export default function Forms() {
   }
   function changeMode(nextMode: Mode) {
     if (nextMode === mode) return;
-    requestNavigation(() => { setAiDraftActive(false); setNewFormOpen(false); setBuilderSectionName(null); setMode(nextMode); setMessage(''); setSelectedId(null); setDraft(null); setSaved(null); setSelected(null); setPreviewOpen(false); setDragged(null); });
+    requestNavigation(() => { setAiDraftActive(false); setNewFormOpen(false); setBuilderSectionName(null); setShowArchived(false); setMode(nextMode); setMessage(''); setSelectedId(null); setDraft(null); setSaved(null); setSelected(null); setPreviewOpen(false); setDragged(null); });
   }
   function backToOverview() {
     requestNavigation(() => { setAiDraftActive(false); setSelectedId(null); setDraft(null); setSaved(null); setSelected(null); setPreviewOpen(false); setBuilderSectionName(null); setMessage(''); });
@@ -376,19 +382,78 @@ export default function Forms() {
     } catch (error) { handleAccessError(error); setSectionError(error instanceof Error ? error.message : 'Section update failed.'); }
     finally { sectionRequestPending.current = false; setSectionPending(false); }
   }
+  function closeEditor() {
+    setAiDraftActive(false); setSelectedId(null); setDraft(null); setSaved(null); setSelected(null); setPreviewOpen(false); setBuilderSectionName(null); setMessage('');
+  }
+  async function removeCurrent() {
+    if (!selectedItem || !canManageForms || removing || saving) return;
+    const item = selectedItem;
+    const isTemplate = mode === 'templates';
+    const archive = !isTemplate && item.usedInCampaigns;
+    const unsaved = dirty ? ' Your unsaved changes are discarded too.' : '';
+    const ok = await confirm(archive ? {
+      title: `Archive “${item.name}”?`,
+      message: `Campaigns use this form, so it’s archived instead of deleted: it leaves this list and the campaign pickers, but past campaigns and reports keep it. You can restore it any time.${unsaved}`,
+      confirmLabel: 'Archive form',
+    } : {
+      title: `Delete “${item.name}”?`,
+      message: isTemplate
+        ? `The template is deleted permanently. Forms already created from it aren’t affected.${unsaved}`
+        : `No campaign uses this form, so it’s deleted permanently.${unsaved}`,
+      confirmLabel: isTemplate ? 'Delete template' : 'Delete form',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setRemoving(true); setMessage('');
+    try {
+      if (isTemplate) {
+        await deleteFormTemplate(getAccessTokenSilently, item.id);
+        setTemplates((items) => items.filter((template) => template.id !== item.id));
+        toast.success(`Template “${item.name}” deleted`);
+      } else {
+        const result = await deleteForm(getAccessTokenSilently, item.id);
+        setForms((items) => result.archived
+          ? items.map((entry) => entry.id === item.id ? { ...entry, archivedAt: new Date().toISOString() } : entry)
+          : items.filter((entry) => entry.id !== item.id));
+        toast.success(result.archived ? `“${item.name}” archived` : `“${item.name}” deleted`);
+      }
+      closeEditor();
+    } catch (error) {
+      handleAccessError(error);
+      setMessage(error instanceof Error ? error.message : 'The item could not be removed.');
+    } finally {
+      setRemoving(false);
+    }
+  }
+  async function restoreCurrent() {
+    if (!selectedItem || !canManageForms || removing) return;
+    setRemoving(true); setMessage('');
+    try {
+      const restored = await restoreForm(getAccessTokenSilently, selectedItem.id);
+      setForms((items) => items.map((entry) => entry.id === restored.id ? restored : entry));
+      setShowArchived(false);
+      choose(restored);
+      toast.success(`“${restored.name}” restored`);
+    } catch (error) {
+      handleAccessError(error);
+      setMessage(error instanceof Error ? error.message : 'The form could not be restored.');
+    } finally {
+      setRemoving(false);
+    }
+  }
   return <AppLayout activePage="forms" pageClassName="forms-page"><div className="main-content forms-editor-main">
     <section className="forms-page-header"><div><h1>Forms</h1><p>Create questionnaires with reusable analytical sections.</p></div></section>
     <nav className="forms-page-tabs" aria-label="Forms navigation"><div className="forms-page-tab-list"><button type="button" aria-current={mode === 'forms' ? 'page' : undefined} className={mode === 'forms' ? 'forms-page-tab active' : 'forms-page-tab'} onClick={() => changeMode('forms')}>Forms</button><button type="button" aria-current={mode === 'templates' ? 'page' : undefined} className={mode === 'templates' ? 'forms-page-tab active' : 'forms-page-tab'} onClick={() => changeMode('templates')}>Templates</button></div><button className="btn btn-secondary forms-manage-trigger" type="button" ref={manageTrigger} onClick={() => { setEditingSection(null); setSectionName(''); setManageOpen(true); }}><Layers3 size={16} aria-hidden="true" /> Manage sections</button></nav>
-    <section className={`forms-editor-workspace${!draft ? ' forms-overview' : ''}`}><aside className="card forms-editor-card forms-list-panel"><div className="forms-editor-card-head"><div><h3>Your {mode}</h3><span>{currentItems.length} total</span></div>{canManageForms && (mode === 'templates' ? <button className="btn btn-primary forms-panel-create" type="button" onClick={startTemplate}><Plus size={14} aria-hidden="true" /> New</button> : <div className="forms-new-form" ref={newFormMenu}><button className="btn btn-primary forms-panel-create forms-new-form-trigger" type="button" ref={createTrigger} aria-haspopup="menu" aria-expanded={newFormOpen} aria-controls="forms-new-form-menu" onClick={() => setNewFormOpen((open) => !open)} onKeyDown={(event) => { if (['ArrowDown', 'ArrowUp'].includes(event.key) && !newFormOpen) { event.preventDefault(); setNewFormOpen(true); requestAnimationFrame(() => newFormMenu.current?.querySelector<HTMLButtonElement>(`[role="menuitem"]:${event.key === 'ArrowUp' ? 'last' : 'first'}-child`)?.focus()); } }}><Plus size={14} aria-hidden="true" /> New <ChevronDown size={13} aria-hidden="true" /></button>
+    <section className={`forms-editor-workspace${!draft ? ' forms-overview' : ''}`}><aside className="card forms-editor-card forms-list-panel"><div className="forms-editor-card-head"><div><h3>{showArchived ? 'Archived forms' : `Your ${mode}`}</h3><span>{currentItems.length} total</span>{mode === 'forms' && (archivedCount > 0 || showArchived) && <button type="button" className="forms-archived-toggle" onClick={() => requestNavigation(() => { closeEditor(); setShowArchived((value) => !value); })}>{showArchived ? 'Back to active forms' : `Archived (${archivedCount})`}</button>}</div>{canManageForms && !showArchived && (mode === 'templates' ? <button className="btn btn-primary forms-panel-create" type="button" onClick={startTemplate}><Plus size={14} aria-hidden="true" /> New</button> : <div className="forms-new-form" ref={newFormMenu}><button className="btn btn-primary forms-panel-create forms-new-form-trigger" type="button" ref={createTrigger} aria-haspopup="menu" aria-expanded={newFormOpen} aria-controls="forms-new-form-menu" onClick={() => setNewFormOpen((open) => !open)} onKeyDown={(event) => { if (['ArrowDown', 'ArrowUp'].includes(event.key) && !newFormOpen) { event.preventDefault(); setNewFormOpen(true); requestAnimationFrame(() => newFormMenu.current?.querySelector<HTMLButtonElement>(`[role="menuitem"]:${event.key === 'ArrowUp' ? 'last' : 'first'}-child`)?.focus()); } }}><Plus size={14} aria-hidden="true" /> New <ChevronDown size={13} aria-hidden="true" /></button>
       {newFormOpen && <div id="forms-new-form-menu" className="forms-new-form-menu" role="menu" aria-label="New form"><button type="button" role="menuitem" onClick={() => { setNewFormOpen(false); createTrigger.current?.focus(); openCreate(); }}><FilePlus2 size={18} aria-hidden="true" /><span><strong>Create manually</strong><small>Start with a blank questionnaire</small></span></button><button type="button" role="menuitem" onClick={() => { setNewFormOpen(false); createTrigger.current?.focus(); openAI(); }}><Sparkles size={18} aria-hidden="true" /><span><strong>Generate with AI</strong><small>Generate a draft to review and edit</small></span></button></div>}</div>)}</div>
       {mode === 'forms' && formsError && <div className="forms-editor-state"><InlineMessage tone="error">{formsError}</InlineMessage><button className="btn btn-secondary" disabled={formsLoading} onClick={() => { setFormsError(''); setFormsLoading(true); setFormLoadAttempt((attempt) => attempt + 1); }}>Retry loading forms</button></div>}
       {mode === 'forms' && formsLoading && <div className="forms-editor-state" role="status">Loading forms...</div>}
-      {mode === 'forms' && !formsLoading && !formsError && forms.length === 0 && <div className="forms-editor-state">No forms yet. Create a form to start building your questionnaire.</div>}
+      {mode === 'forms' && !formsLoading && !formsError && currentItems.length === 0 && <div className="forms-editor-state">{showArchived ? 'No archived forms.' : 'No forms yet. Create a form to start building your questionnaire.'}</div>}
       {mode === 'templates' && templatesError && <div className="forms-editor-state"><InlineMessage tone="error">{templatesError}</InlineMessage><button className="btn btn-secondary" disabled={templatesLoading} onClick={() => { setTemplatesError(''); setTemplatesLoading(true); setTemplateLoadAttempt((attempt) => attempt + 1); }}>Retry loading templates</button></div>}
       {mode === 'templates' && templatesLoading && <div className="forms-editor-state" role="status">Loading templates...</div>}
       {mode === 'templates' && !templatesLoading && !templatesError && templates.length === 0 && <div className="forms-editor-state">No templates yet. Create a template to reuse a questionnaire.</div>}
       <div className={`forms-editor-list${!draft ? ' forms-overview-list' : ''}`}>{currentItems.map((item) => <button key={item.id} className={`forms-editor-form-item${item.id === selectedId ? ' active' : ''}`} onClick={() => selectItem(item)}>{!draft ? <><FileText className="forms-overview-icon" size={18} aria-hidden="true" /><span className="forms-overview-details"><strong>{item.name}</strong></span><span className="forms-overview-count">{allQuestions(item.questions).length} questions</span><ChevronRight className="forms-overview-chevron" size={16} aria-hidden="true" /></> : <><strong>{item.name}</strong><span>{allQuestions(item.questions).length} questions</span></>}</button>)}</div></aside>
-      {draft && <><section className="card forms-editor-card forms-editor-panel"><button className="forms-editor-back" type="button" onClick={backToOverview}><ArrowLeft size={16} aria-hidden="true" /> Back to {mode}</button>{draft && !canManageForms ? <div className="forms-editor-empty"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions · Read-only access</p><button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview questionnaire</button></div> : draft ? <><div className="forms-editor-header"><div className="forms-editor-header-title"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions</p></div><div className="forms-editor-header-actions"><button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview</button><button className="btn btn-secondary" disabled={!dirty || saving} onClick={() => { if (saved) setDraft(copy(saved)); setSelected(null); }}>Discard</button><button className="btn btn-primary" disabled={!dirty || saving} onClick={() => { void save(); }}>{saving ? 'Saving...' : 'Save changes'}</button></div></div>
+      {draft && <><section className="card forms-editor-card forms-editor-panel"><button className="forms-editor-back" type="button" onClick={backToOverview}><ArrowLeft size={16} aria-hidden="true" /> Back to {mode}</button>{draft && (!canManageForms || selectedArchived) ? <div className="forms-editor-empty"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions · {selectedArchived ? 'Archived' : 'Read-only access'}</p>{selectedArchived && <InlineMessage tone="info">Past campaigns and reports still use this form. Restore it to edit it or use it in new campaigns.</InlineMessage>}{message && <InlineMessage tone={messageTone}>{message}</InlineMessage>}<div className="forms-editor-header-actions"><button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview questionnaire</button>{selectedArchived && canManageForms && <button className="btn btn-primary" type="button" disabled={removing} onClick={() => { void restoreCurrent(); }}>{removing ? 'Restoring...' : 'Restore form'}</button>}</div></div> : draft ? <><div className="forms-editor-header"><div className="forms-editor-header-title"><h2>{draft.name}</h2><p>{allQuestions(draft.questions).length} questions</p></div><div className="forms-editor-header-actions">{selectedItem && <button className="btn btn-secondary forms-remove-button" type="button" disabled={removing || saving} onClick={() => { void removeCurrent(); }}>{mode === 'forms' && selectedItem.usedInCampaigns ? <><Archive size={14} aria-hidden="true" /> Archive</> : <><Trash2 size={14} aria-hidden="true" /> Delete</>}</button>}<button className="btn btn-secondary" onClick={() => setPreviewOpen(true)}>Preview</button><button className="btn btn-secondary" disabled={!dirty || saving} onClick={() => { if (saved) setDraft(copy(saved)); setSelected(null); }}>Discard</button><button className="btn btn-primary" disabled={!dirty || saving} onClick={() => { void save(); }}>{saving ? 'Saving...' : 'Save changes'}</button></div></div>
         <label className="form-field forms-editor-field"><span className="form-label">Name</span><input className="form-control" aria-label="Name" ref={editorNameInput} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label className="form-field forms-editor-field"><span className="form-label">Description</span><textarea className="form-control" aria-label="Description" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>{aiDraftActive && selectedId === null && <p className="forms-ai-label" role="note"><strong>AI-generated draft.</strong> Check every question for accuracy, fairness and tone before saving; you are responsible for the final questionnaire.</p>}{message && <InlineMessage tone={messageTone} className="forms-editor-inline-message">{message}</InlineMessage>}
           <div className="forms-editor-section"><div className="forms-editor-section-head"><h3>Questionnaire structure</h3><div><button className="btn btn-secondary" onClick={() => appendQuestion()}>Add question</button><select className="form-control" aria-label="Add section" value="" onChange={(event) => { if (event.target.value === 'create') { setBuilderSectionName(''); setBuilderSectionError(''); } else if (event.target.value) appendSection(Number(event.target.value)); }}><option value="">Add section</option>{sections.filter((section) => !section.is_archived && !draft.questions.some((block) => block.type === 'section' && block.section_id === section.id)).map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}{canManageSections && <option value="create">Create new section...</option>}</select></div></div>
             {builderSectionName !== null && <form className="forms-builder-section-create" onSubmit={(event) => { event.preventDefault(); void saveSection(true); }}><label className="form-field forms-editor-field"><span className="form-label">New reusable section name</span><input className="form-control" autoFocus value={builderSectionName} disabled={sectionPending} onChange={(event) => { setBuilderSectionName(event.target.value); setBuilderSectionError(''); }} /></label><button className="btn btn-primary" type="submit" disabled={sectionPending || !builderSectionName.trim()}>{sectionPending ? 'Creating...' : 'Create and add'}</button><button className="btn btn-secondary" type="button" disabled={sectionPending} onClick={() => { setBuilderSectionName(null); setBuilderSectionError(''); }}>Cancel</button>{builderSectionError && <InlineMessage tone="error">{builderSectionError}</InlineMessage>}</form>}

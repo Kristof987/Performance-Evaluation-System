@@ -428,6 +428,8 @@ class Form(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     questions = Column(JSONB, nullable=False)
+    # Set when a form that past campaigns refer to is "deleted": hidden from lists and pickers, kept for history.
+    archived_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class FormTemplate(Base):

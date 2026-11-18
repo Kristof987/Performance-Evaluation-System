@@ -2816,6 +2816,25 @@ def campaigns_referencing_form(form_id: int, db: Session) -> list[models.Campaig
             for campaign_id in sorted(ids)]
 
 
+def forms_used_by_campaigns(db: Session, campaign_id: int | None = None) -> set[int]:
+    """Form ids referred to by campaign rules, self-evaluations or assignments (optionally of one campaign)."""
+    used: set[int] = set()
+    for model in (models.CampaignEvaluationRule, models.CampaignEmployeeSelfEvaluation, models.FilledForm):
+        query = db.query(model.form_id).filter(model.form_id.isnot(None))
+        if campaign_id is not None:
+            query = query.filter(model.campaign_id == campaign_id)
+        used.update(form_id for (form_id,) in query.distinct())
+    return used
+
+
+def selectable_forms(campaign_id: int, db: Session) -> list[models.Form]:
+    """Forms a campaign can pick from: active ones, plus any archived one it already uses (so its name still shows)."""
+    used = forms_used_by_campaigns(db, campaign_id)
+    return (db.query(models.Form)
+            .filter(or_(models.Form.archived_at.is_(None), models.Form.id.in_(used or {-1})))
+            .order_by(models.Form.name.asc()).all())
+
+
 def scheduled_campaigns_for_groups(group_ids: set[int], db: Session) -> list[models.Campaign]:
     if not group_ids:
         return []
@@ -3211,7 +3230,7 @@ def build_campaign_self_evaluations(campaign_id: int, db: Session, group_ids: li
     ).all():
         if assignment_is_immutable(row):
             issued.setdefault(row.evaluator_id, row.form_id)
-    forms = db.query(models.Form).order_by(models.Form.name.asc()).all()
+    forms = selectable_forms(campaign_id, db)
     return {
         "forms": [{"id": form.id, "name": form.name} for form in forms],
         "participants": [
@@ -3237,7 +3256,7 @@ def update_campaign_self_evaluations(campaign_id: int, payload: schemas.Campaign
         raise HTTPException(status_code=404, detail="Campaign not found")
     require_mutable_campaign_plan(campaign)
     participants = get_self_evaluation_participants(campaign_id, db)
-    form_ids = {form_id for (form_id,) in db.query(models.Form.id).all()}
+    form_ids = {form_id for (form_id,) in db.query(models.Form.id).filter(models.Form.archived_at.is_(None))}
     desired = {}
     for assignment in payload.assignments:
         if assignment.employee_id not in participants:
@@ -3245,7 +3264,7 @@ def update_campaign_self_evaluations(campaign_id: int, payload: schemas.Campaign
         if assignment.employee_id in desired:
             raise HTTPException(status_code=400, detail="Duplicate self-evaluation assignment")
         if assignment.form_id is not None and assignment.form_id not in form_ids:
-            raise HTTPException(status_code=400, detail="Self-evaluation form does not exist")
+            raise HTTPException(status_code=400, detail="Self-evaluation form does not exist or is archived")
         desired[assignment.employee_id] = assignment.form_id
 
     issued = db.query(models.FilledForm).filter(
@@ -3343,7 +3362,7 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session, group_ids: list[in
             "configured_required_count": sum(pair["required"] and pair["form_id"] is not None for pair in role_pairs),
         })
 
-    forms = db.query(models.Form).order_by(models.Form.name.asc()).all()
+    forms = selectable_forms(campaign_id, db)
     return {
         "forms": [{"id": form.id, "name": form.name} for form in forms],
         "groups": matrices,
@@ -3485,7 +3504,7 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
     require_mutable_campaign_plan(campaign)
 
     assigned_group_ids = set(get_campaign_assigned_group_ids(campaign_id, db))
-    form_ids = {form_id for (form_id,) in db.query(models.Form.id).all()}
+    form_ids = {form_id for (form_id,) in db.query(models.Form.id).filter(models.Form.archived_at.is_(None))}
     valid_role_pairs_by_group = {}
     for group_id in assigned_group_ids:
         role_ids = {role.id for role in get_group_roles(group_id, db)}
@@ -3500,7 +3519,7 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
         if rule.company_group_id not in assigned_group_ids:
             raise HTTPException(status_code=400, detail="Rule group is not assigned to this campaign")
         if rule.form_id not in form_ids:
-            raise HTTPException(status_code=400, detail="Rule form does not exist")
+            raise HTTPException(status_code=400, detail="Rule form does not exist or is archived")
         pair = (rule.evaluator_role_id, rule.evaluatee_role_id)
         if pair not in valid_role_pairs_by_group.get(rule.company_group_id, set()):
             raise HTTPException(status_code=400, detail="Rule role pair is not valid for the selected group")
@@ -3990,7 +4009,9 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
 @app.get("/forms", response_model=list[schemas.FormResponse])
 def get_forms(db: Session = Depends(get_db),
               _reader: models.User = Depends(require_permission("forms.read"))):
-    return db.query(models.Form).order_by(models.Form.id.desc()).all()
+    used = forms_used_by_campaigns(db)
+    return [schemas.FormResponse.model_validate(form).model_copy(update={"used_in_campaigns": form.id in used})
+            for form in db.query(models.Form).order_by(models.Form.id.desc()).all()]
 
 
 @app.post("/forms/ai/generate", response_model=schemas.FormAIGenerateResponse)
@@ -4317,6 +4338,8 @@ def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Dep
     form = db.query(models.Form).filter(models.Form.id == form_id).first()
     if form is None:
         raise HTTPException(status_code=404, detail="Form not found")
+    if form.archived_at is not None:
+        raise HTTPException(status_code=409, detail="Restore this form before editing it")
     values = validate_form_like_payload(form_update, models.Form, db, form_id)
     form.name = values["name"]
     form.description = values["description"]
@@ -4326,7 +4349,7 @@ def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Dep
         validate_scheduled_campaign(campaign, db)
     db.commit()
     db.refresh(form)
-    return form
+    return schemas.FormResponse.model_validate(form).model_copy(update={"used_in_campaigns": bool(campaigns)})
 
 
 @app.put("/form-templates/{template_id}", response_model=schemas.FormTemplateResponse)
@@ -4344,20 +4367,42 @@ def update_form_template(template_id: int, template_update: schemas.FormUpdate, 
     return template
 
 
-@app.delete("/forms/{form_id}")
+@app.delete("/forms/{form_id}", response_model=schemas.FormDeleteResponse)
 def delete_form(form_id: int, db: Session = Depends(get_db),
                   _manager: models.User = Depends(require_permission("forms.manage"))):
-    if any(campaign.is_archived or campaign.status in {models.CampaignStatus.SCHEDULED.value, models.CampaignStatus.PAUSED.value,
-                               models.CampaignStatus.REVIEW.value, models.CampaignStatus.CLOSED.value}
-           for campaign in campaigns_referencing_form(form_id, db)):
-        raise HTTPException(status_code=409, detail="A locked campaign still uses this form")
+    """Unused forms are deleted. Forms that only finished campaigns refer to are archived, so their history stays."""
+    form = db.query(models.Form).filter(models.Form.id == form_id).with_for_update().first()
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    campaigns = campaigns_referencing_form(form_id, db)
+    running = [campaign for campaign in campaigns
+               if not campaign.is_archived and campaign.status != models.CampaignStatus.CLOSED.value]
+    if running:
+        names = ", ".join(f"“{campaign.name}”" for campaign in running[:3]) + (" and others" if len(running) > 3 else "")
+        raise HTTPException(status_code=409, detail=f"This form is used by {names}. Remove it from "
+                            f"{'that campaign' if len(running) == 1 else 'those campaigns'} first, or wait until "
+                            f"{'it closes' if len(running) == 1 else 'they close'}.")
+    if campaigns:
+        if form.archived_at is None:
+            form.archived_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"deleted": False, "archived": True}
+    db.delete(form)
+    db.commit()
+    return {"deleted": True, "archived": False}
+
+
+@app.post("/forms/{form_id}/restore", response_model=schemas.FormResponse)
+def restore_form(form_id: int, db: Session = Depends(get_db),
+                 _manager: models.User = Depends(require_permission("forms.manage"))):
     form = db.query(models.Form).filter(models.Form.id == form_id).first()
     if form is None:
         raise HTTPException(status_code=404, detail="Form not found")
-
-    db.delete(form)
+    form.archived_at = None
     db.commit()
-    return {"deleted": True}
+    db.refresh(form)
+    return schemas.FormResponse.model_validate(form).model_copy(
+        update={"used_in_campaigns": form.id in forms_used_by_campaigns(db)})
 
 
 @app.delete("/form-templates/{template_id}")
