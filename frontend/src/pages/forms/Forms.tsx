@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, FilePlus2, FileText, GripVertical, Layers3, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, FilePlus2, FileSpreadsheet, FileText, GripVertical, Layers3, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { useAppAuth } from '../../auth/AppAuth';
 import { ApiAccessError } from '../../auth/authenticated-api';
 import AppLayout from '../layout/AppLayout';
@@ -9,9 +9,10 @@ import InlineMessage from '../../components/feedback/InlineMessage';
 import '../hr-home/hr-home.css';
 import './forms.css';
 import './questionnaire-choices.css';
-import { createForm, createFormFromTemplate, createFormTemplate, deleteForm, deleteFormTemplate, fetchForms, fetchFormTemplates, restoreForm, updateForm, updateFormTemplate, type AIGeneratedForm, type AIGeneratedQuestion, type ChoiceOption, type FormBlock, type FormQuestion, type ReviewForm, type ReviewFormValues } from './forms.api';
+import { createForm, createFormFromTemplate, createFormTemplate, deleteForm, deleteFormTemplate, fetchForms, fetchFormTemplates, restoreForm, updateForm, updateFormTemplate, type AIGeneratedForm, type ExcelFormDraft, type AIGeneratedQuestion, type ChoiceOption, type FormBlock, type FormQuestion, type ReviewForm, type ReviewFormValues } from './forms.api';
 import { fetchSections, saveSection as saveSectionRequest, setSectionArchived, type Section } from './sections.api';
 import AIFormModal from './AIFormModal';
+import ExcelFormImportModal from './ExcelFormImportModal';
 import { moveFormItem, type DropPosition, type MovingItem } from './form-order';
 import Pending from '../../components/feedback/Pending';
 import LoadingState from '../../components/feedback/LoadingState';
@@ -65,6 +66,7 @@ export default function Forms() {
   const newFormMenu = useRef<HTMLDivElement>(null);
   const [newFormOpen, setNewFormOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [excelOpen, setExcelOpen] = useState(false);
   const editorNameInput = useRef<HTMLInputElement>(null);
   const [sections, setSections] = useState<Section[]>([]);
   const [draft, setDraft] = useState<ReviewFormValues | null>(null);
@@ -262,6 +264,44 @@ export default function Forms() {
     setAiDraftActive(true);
     requestAnimationFrame(() => editorNameInput.current?.focus());
   }
+  function openExcel() {
+    if (!canManageForms) return;
+    requestNavigation(() => setExcelOpen(true));
+  }
+  /** Opens an Excel-imported questionnaire as an unsaved draft of the current tab (form or template). */
+  async function importExcelForm(imported: ExcelFormDraft) {
+    if (!canManageForms) throw new Error('Form import is unavailable.');
+    let catalog = await fetchSections(getAccessTokenSilently);
+    const blocks: FormBlock[] = [];
+    for (const block of imported.blocks) {
+      if (block.type === 'question') { blocks.push({ type: 'question', question: importedQuestion(block.question) }); continue; }
+      let target = block.section_id === null
+        ? catalog.find((item) => sectionKey(item.name) === sectionKey(block.name))
+        : catalog.find((item) => item.id === block.section_id);
+      if (target?.is_archived) throw new Error(`Section “${block.name}” is archived. Restore it or use another section.`);
+      if (!target) {
+        if (!canManageSections) throw new Error(`Section “${block.name}” does not exist, and you are not allowed to create sections.`);
+        try { target = await saveSectionRequest(getAccessTokenSilently, null, block.name); }
+        catch (cause) {
+          // Someone may have created it meanwhile; use theirs.
+          catalog = await fetchSections(getAccessTokenSilently);
+          target = catalog.find((item) => !item.is_archived && sectionKey(item.name) === sectionKey(block.name));
+          if (!target) throw cause;
+        }
+        const created = target;
+        catalog = [...catalog.filter((item) => item.id !== created.id), created];
+      }
+      blocks.push({ type: 'section', section_id: target.id, questions: block.questions.map(importedQuestion) });
+    }
+    setSections(catalog.sort((a, b) => a.name.localeCompare(b.name)));
+    setExcelOpen(false); setSelectedId(null); setSelected(null); setPreviewOpen(false); setShowArchived(false);
+    setDraft({ name: imported.name, description: imported.description, questions: blocks });
+    setSaved(initial());
+    setAiDraftActive(false);
+    setMessage('');
+    toast.success(`Imported from Excel. Review the ${mode === 'templates' ? 'template' : 'form'} and save it when ready.`);
+    requestAnimationFrame(() => editorNameInput.current?.focus());
+  }
   function startTemplate() {
     if (!canManageForms) return;
     requestNavigation(() => {
@@ -446,8 +486,8 @@ export default function Forms() {
   return <AppLayout activePage="forms" pageClassName="forms-page"><div className="main-content forms-editor-main">
     <section className="forms-page-header"><div><h1>Forms</h1><p>Create questionnaires with reusable analytical sections.</p></div></section>
     <nav className="forms-page-tabs" aria-label="Forms navigation"><div className="forms-page-tab-list"><button type="button" aria-current={mode === 'forms' ? 'page' : undefined} className={mode === 'forms' ? 'forms-page-tab active' : 'forms-page-tab'} onClick={() => changeMode('forms')}>Forms</button><button type="button" aria-current={mode === 'templates' ? 'page' : undefined} className={mode === 'templates' ? 'forms-page-tab active' : 'forms-page-tab'} onClick={() => changeMode('templates')}>Templates</button></div><button className="btn btn-secondary forms-manage-trigger" type="button" ref={manageTrigger} onClick={() => { setEditingSection(null); setSectionName(''); setManageOpen(true); }}><Layers3 size={16} aria-hidden="true" /> Manage sections</button></nav>
-    <section className={`forms-editor-workspace${!draft ? ' forms-overview' : ''}`}><aside className="card forms-editor-card forms-list-panel"><div className="forms-editor-card-head"><div><h3>{showArchived ? 'Archived forms' : `Your ${mode}`}</h3><span>{currentItems.length} total</span>{mode === 'forms' && (archivedCount > 0 || showArchived) && <button type="button" className="forms-archived-toggle" onClick={() => requestNavigation(() => { closeEditor(); setShowArchived((value) => !value); })}>{showArchived ? 'Back to active forms' : `Archived (${archivedCount})`}</button>}</div>{canManageForms && !showArchived && (mode === 'templates' ? <button className="btn btn-primary forms-panel-create" type="button" onClick={startTemplate}><Plus size={14} aria-hidden="true" /> New</button> : <div className="forms-new-form" ref={newFormMenu}><button className="btn btn-primary forms-panel-create forms-new-form-trigger" type="button" ref={createTrigger} aria-haspopup="menu" aria-expanded={newFormOpen} aria-controls="forms-new-form-menu" onClick={() => setNewFormOpen((open) => !open)} onKeyDown={(event) => { if (['ArrowDown', 'ArrowUp'].includes(event.key) && !newFormOpen) { event.preventDefault(); setNewFormOpen(true); requestAnimationFrame(() => newFormMenu.current?.querySelector<HTMLButtonElement>(`[role="menuitem"]:${event.key === 'ArrowUp' ? 'last' : 'first'}-child`)?.focus()); } }}><Plus size={14} aria-hidden="true" /> New <ChevronDown size={13} aria-hidden="true" /></button>
-      {newFormOpen && <div id="forms-new-form-menu" className="forms-new-form-menu" role="menu" aria-label="New form"><button type="button" role="menuitem" onClick={() => { setNewFormOpen(false); createTrigger.current?.focus(); openCreate(); }}><FilePlus2 size={18} aria-hidden="true" /><span><strong>Create manually</strong><small>Start with a blank questionnaire</small></span></button><button type="button" role="menuitem" onClick={() => { setNewFormOpen(false); createTrigger.current?.focus(); openAI(); }}><Sparkles size={18} aria-hidden="true" /><span><strong>Generate with AI</strong><small>Generate a draft to review and edit</small></span></button></div>}</div>)}</div>
+    <section className={`forms-editor-workspace${!draft ? ' forms-overview' : ''}`}><aside className="card forms-editor-card forms-list-panel"><div className="forms-editor-card-head"><div><h3>{showArchived ? 'Archived forms' : `Your ${mode}`}</h3><span>{currentItems.length} total</span>{mode === 'forms' && (archivedCount > 0 || showArchived) && <button type="button" className="forms-archived-toggle" onClick={() => requestNavigation(() => { closeEditor(); setShowArchived((value) => !value); })}>{showArchived ? 'Back to active forms' : `Archived (${archivedCount})`}</button>}</div>{canManageForms && !showArchived && (mode === 'templates' ? <div className="forms-panel-buttons"><button className="btn btn-secondary forms-panel-create" type="button" onClick={openExcel} title="Import a template from Excel"><FileSpreadsheet size={14} aria-hidden="true" /> Import</button><button className="btn btn-primary forms-panel-create" type="button" onClick={startTemplate}><Plus size={14} aria-hidden="true" /> New</button></div> : <div className="forms-new-form" ref={newFormMenu}><button className="btn btn-primary forms-panel-create forms-new-form-trigger" type="button" ref={createTrigger} aria-haspopup="menu" aria-expanded={newFormOpen} aria-controls="forms-new-form-menu" onClick={() => setNewFormOpen((open) => !open)} onKeyDown={(event) => { if (['ArrowDown', 'ArrowUp'].includes(event.key) && !newFormOpen) { event.preventDefault(); setNewFormOpen(true); requestAnimationFrame(() => newFormMenu.current?.querySelector<HTMLButtonElement>(`[role="menuitem"]:${event.key === 'ArrowUp' ? 'last' : 'first'}-child`)?.focus()); } }}><Plus size={14} aria-hidden="true" /> New <ChevronDown size={13} aria-hidden="true" /></button>
+      {newFormOpen && <div id="forms-new-form-menu" className="forms-new-form-menu" role="menu" aria-label="New form"><button type="button" role="menuitem" onClick={() => { setNewFormOpen(false); createTrigger.current?.focus(); openCreate(); }}><FilePlus2 size={18} aria-hidden="true" /><span><strong>Create manually</strong><small>Start with a blank questionnaire</small></span></button><button type="button" role="menuitem" onClick={() => { setNewFormOpen(false); createTrigger.current?.focus(); openAI(); }}><Sparkles size={18} aria-hidden="true" /><span><strong>Generate with AI</strong><small>Generate a draft to review and edit</small></span></button><button type="button" role="menuitem" onClick={() => { setNewFormOpen(false); createTrigger.current?.focus(); openExcel(); }}><FileSpreadsheet size={18} aria-hidden="true" /><span><strong>Import from Excel</strong><small>Upload a filled-in form template</small></span></button></div>}</div>)}</div>
       {mode === 'forms' && formsError && <div className="forms-editor-state"><InlineMessage tone="error">{formsError}</InlineMessage><button className="btn btn-secondary" disabled={formsLoading} onClick={() => { setFormsError(''); setFormsLoading(true); setFormLoadAttempt((attempt) => attempt + 1); }}>Retry loading forms</button></div>}
       {mode === 'forms' && formsLoading && <LoadingState variant="section" label="Loading forms" />}
       {mode === 'forms' && !formsLoading && !formsError && currentItems.length === 0 && <div className="forms-editor-state">{showArchived ? 'No archived forms.' : 'No forms yet. Create a form to start building your questionnaire.'}</div>}
@@ -497,6 +537,7 @@ export default function Forms() {
       </div>
       <div className="forms-editor-modal-actions"><button className="btn btn-secondary" type="button" disabled={createPending} onClick={closeCreate}>Cancel</button><button className="btn btn-primary" type="button" disabled={createPending || !createName.trim() || (createSource === 'template' && (!createTemplate || !!templatesError || templatesLoading))} onClick={confirmCreate}>{createPending ? <Pending label="Creating" /> : 'Create form'}</button></div>
     </div></div>}
+    {excelOpen && <ExcelFormImportModal kind={mode === 'templates' ? 'template' : 'form'} getAccessToken={getAccessTokenSilently} onImport={importExcelForm} onClose={() => setExcelOpen(false)} />}
     {aiOpen && <AIFormModal sections={sections} canManageSections={canManageSections} getAccessToken={getAccessTokenSilently} onImport={importAIForm} onClose={() => { setAiOpen(false); createTrigger.current?.focus(); }} />}
     {previewOpen && draft && <Preview draft={draft} name={sectionNameFor} onClose={() => setPreviewOpen(false)} />}
   </div></AppLayout>;

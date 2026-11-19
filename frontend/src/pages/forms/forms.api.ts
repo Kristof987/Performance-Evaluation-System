@@ -255,3 +255,19 @@ export async function deleteForm(getAccessToken: AccessTokenGetter, id: number):
 export async function restoreForm(getAccessToken: AccessTokenGetter, id: number): Promise<ReviewForm> {
   return mapForm(await requestApi<FormResponse>(getAccessToken, `/forms/${id}/restore`, { method: 'POST' }, 'Form could not be restored.'));
 }
+
+export type ExcelFormDraft = {
+  name: string;
+  description: string;
+  blocks: Array<
+    | { type: 'section'; name: string; section_id: number | null; questions: AIGeneratedQuestion[] }
+    | { type: 'question'; question: AIGeneratedQuestion }
+  >;
+};
+
+/** Reads a filled-in form template; nothing is saved until the draft is saved in the editor. */
+export function importFormFromExcel(getAccessToken: AccessTokenGetter, file: File): Promise<{ errors: string[]; form: ExcelFormDraft | null }> {
+  const body = new FormData();
+  body.append('file', file);
+  return requestApi(getAccessToken, '/forms/import', { method: 'POST', body }, 'The Excel file could not be imported.');
+}

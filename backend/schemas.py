@@ -1165,6 +1165,11 @@ class CampaignEvaluationMatrixUpdateResponse(CampaignEvaluationMatrixResponse):
     removed_count: int = 0
     kept_completed_count: int = 0
 
+class FormImportResponse(BaseModel):
+    errors: list[str]
+    form: dict[str, Any] | None = None
+
+
 class FormCreate(BaseModel):
     name: str
     description: str | None = None

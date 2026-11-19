@@ -2112,3 +2112,19 @@ button.forms-editor-nav-item {
 .forms-page .btn.forms-remove-button:hover { border-color: var(--color-danger); background: var(--color-danger-bg); }
 
 .forms-editor-empty .inline-message { margin: 12px 0; text-align: left; }
+
+/* Excel import */
+.forms-panel-buttons { display: inline-flex; flex-shrink: 0; gap: 6px; }
+.forms-excel-modal { width: min(560px, 100%); }
+.forms-excel-body { display: flex; flex-direction: column; gap: 12px; }
+.forms-excel-steps { display: flex; flex-direction: column; gap: 14px; list-style: none; margin: 0; padding: 0; }
+.forms-excel-steps li { display: flex; flex-direction: column; gap: 4px; }
+.forms-excel-steps small { color: var(--color-text-muted); font-size: 12px; }
+.forms-excel-template { align-items: center; align-self: flex-start; color: var(--color-primary); display: inline-flex; font-size: 13px; font-weight: 700; gap: 6px; text-decoration: none; }
+.forms-excel-template:hover { text-decoration: underline; }
+.forms-excel-picker { align-self: flex-start; }
+.forms-excel-picker input { height: 1px; opacity: 0; position: absolute; width: 1px; }
+.forms-excel-picker span { align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; color: var(--color-primary); cursor: pointer; display: inline-flex; font-size: 13px; font-weight: 700; max-width: 100%; overflow: hidden; padding: 10px 14px; text-overflow: ellipsis; white-space: nowrap; }
+.forms-excel-picker:focus-within span { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.forms-excel-errors { color: var(--color-danger); font-size: 12px; margin: 0; max-height: 220px; overflow-y: auto; padding-left: 18px; }
+.forms-excel-errors li + li { margin-top: 3px; }

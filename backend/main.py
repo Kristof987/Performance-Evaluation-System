@@ -27,6 +27,7 @@ import models
 import form_snapshot_service
 import reporting_service
 import people_import_service
+import form_import_service
 import report_dashboard_service
 import question_analytics_service
 import evaluation_quality_service
@@ -4275,6 +4276,13 @@ def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, 
         "description": payload.description.strip() if payload.description is not None else None,
         "questions": questions,
     }
+
+
+@app.post("/forms/import", response_model=schemas.FormImportResponse)
+def import_form_from_excel(file: UploadFile = File(...), db: Session = Depends(get_db),
+                           actor: models.User = Depends(require_permission("forms.manage"))):
+    """Read a filled-in form template into a draft; the editor saves it as a form or a template."""
+    return form_import_service.parse_form_workbook(file.file, file.filename, actor, db)
 
 
 @app.post("/forms", response_model=schemas.FormResponse)
