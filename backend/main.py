@@ -11,7 +11,6 @@ from jwt.exceptions import InvalidTokenError
 from fastapi import FastAPI, Depends, HTTPException, Query, Response, UploadFile, File
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from openpyxl import load_workbook
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import and_, asc, case, desc, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +26,7 @@ import email_service
 import models
 import form_snapshot_service
 import reporting_service
+import people_import_service
 import report_dashboard_service
 import question_analytics_service
 import evaluation_quality_service
@@ -1078,21 +1078,7 @@ def remove_people_group_member(
 @app.post("/people/groups/import", response_model=schemas.PeopleGroupImportResponse)
 def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get_db),
                          _group_manager: models.User = Depends(require_permission("groups.manage"))):
-    if not file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Please upload the provided .xlsx group template.")
-
-    try:
-        workbook = load_workbook(file.file, data_only=True)
-        worksheet = workbook.active
-    except Exception:
-        raise HTTPException(status_code=400, detail="The uploaded Excel file could not be read.")
-
-    headers = [worksheet.cell(1, column).value for column in range(1, len(GROUP_IMPORT_HEADERS) + 1)]
-    if headers != GROUP_IMPORT_HEADERS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid template columns. Expected: {', '.join(GROUP_IMPORT_HEADERS)}.",
-        )
+    import_rows = people_import_service.read_import_rows(file.file, file.filename, GROUP_IMPORT_HEADERS, "group")
 
     errors = []
     rows = []
@@ -1102,11 +1088,7 @@ def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get
         for (name,) in db.query(models.CompanyGroup.name).all()
     }
 
-    for row_number in range(2, worksheet.max_row + 1):
-        values = [worksheet.cell(row_number, column).value for column in range(1, 3)]
-        if all(value is None or str(value).strip() == "" for value in values):
-            continue
-
+    for row_number, values in import_rows:
         name = str(values[0]).strip() if values[0] is not None else ""
         description = str(values[1]).strip() if values[1] is not None else ""
 
@@ -1144,21 +1126,7 @@ def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get
 def import_people_employees(file: UploadFile = File(...), db: Session = Depends(get_db),
                             actor: models.User = Depends(require_permission("employees.manage")),
                             _role_assigner: models.User = Depends(require_permission("roles.assign"))):
-    if not file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Please upload the provided .xlsx employee template.")
-
-    try:
-        workbook = load_workbook(file.file, data_only=True)
-        worksheet = workbook.active
-    except Exception:
-        raise HTTPException(status_code=400, detail="The uploaded Excel file could not be read.")
-
-    headers = [worksheet.cell(1, column).value for column in range(1, len(EMPLOYEE_IMPORT_HEADERS) + 1)]
-    if headers != EMPLOYEE_IMPORT_HEADERS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid template columns. Expected: {', '.join(EMPLOYEE_IMPORT_HEADERS)}.",
-        )
+    import_rows = people_import_service.read_import_rows(file.file, file.filename, EMPLOYEE_IMPORT_HEADERS, "employee")
 
     errors = []
     rows = []
@@ -1173,11 +1141,7 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
     system_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()
                     if workspace_settings_service.role_permissions(db, role.id) <= actor_permissions}
 
-    for row_number in range(2, worksheet.max_row + 1):
-        values = [worksheet.cell(row_number, column).value for column in range(1, 5)]
-        if all(value is None or str(value).strip() == "" for value in values):
-            continue
-
+    for row_number, values in import_rows:
         name = str(values[0]).strip() if values[0] is not None else ""
         email = str(values[1]).strip() if values[1] is not None else ""
         company_role_name = str(values[2]).strip() if values[2] is not None else ""

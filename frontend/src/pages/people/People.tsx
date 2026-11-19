@@ -104,8 +104,13 @@ const groupTemplateUrl = new URL(
   import.meta.url,
 ).href;
 
-function isValidExcelFile(file: File) {
-  return file.name.toLowerCase().endsWith('.xlsx');
+/** Same limit as the server; checked here so a too large file fails before it is uploaded. */
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+
+function importFileProblem(file: File) {
+  if (!file.name.toLowerCase().endsWith('.xlsx')) return 'Upload an .xlsx file.';
+  if (file.size > MAX_IMPORT_BYTES) return 'The file is larger than 2 MB. Split it into smaller files.';
+  return '';
 }
 
 function validateEmployeeForm(form: EmployeeFormValues): EmployeeFormErrors {
@@ -743,7 +748,8 @@ function ImportPanel({
   onFileChange: (file: File | null) => void;
   onUpload: () => void;
 }) {
-  const hasValidFile = file !== null && isValidExcelFile(file);
+  const fileProblem = file === null ? '' : importFileProblem(file);
+  const hasValidFile = file !== null && fileProblem === '';
 
   return (
     <>
@@ -758,8 +764,8 @@ function ImportPanel({
           />
           <span>{file?.name ?? 'Choose Excel file'}</span>
         </label>
-        {file !== null && !isValidExcelFile(file) && message === '' && (
-          <InlineMessage tone="error">Upload an .xlsx file.</InlineMessage>
+        {fileProblem !== '' && message === '' && (
+          <InlineMessage tone="error">{fileProblem}</InlineMessage>
         )}
       </div>
       {(message !== '' || errors.length > 0) && (
@@ -1253,8 +1259,8 @@ export default function People() {
       setGroupImportErrors([]);
       return;
     }
-    if (!isValidExcelFile(groupImportFile)) {
-      setGroupImportMessage('Upload an .xlsx file.');
+    if (importFileProblem(groupImportFile) !== '') {
+      setGroupImportMessage(importFileProblem(groupImportFile));
       setGroupImportErrors([]);
       return;
     }
@@ -1495,8 +1501,8 @@ export default function People() {
       setEmployeeImportErrors([]);
       return;
     }
-    if (!isValidExcelFile(employeeImportFile)) {
-      setEmployeeImportMessage('Upload an .xlsx file.');
+    if (importFileProblem(employeeImportFile) !== '') {
+      setEmployeeImportMessage(importFileProblem(employeeImportFile));
       setEmployeeImportErrors([]);
       return;
     }
@@ -2321,7 +2327,7 @@ export default function People() {
             >
               <ImportPanel
                 title="Upload Excel file"
-                description="Use an .xlsx file with columns: name, role, email, groups."
+                description="Use the .xlsx template: name, email, company role and system role, one employee per row. Its Instructions sheet explains each column. Up to 1000 rows, 2 MB."
                 file={employeeImportFile}
                 message={employeeImportMessage}
                 errors={employeeImportErrors}
@@ -2468,7 +2474,7 @@ export default function People() {
             >
               <ImportPanel
                 title="Import groups from Excel"
-                description="Use the provided .xlsx template with Group Name and Group Description columns."
+                description="Use the .xlsx template: group name and an optional description, one group per row. Its Instructions sheet explains the rules. Up to 1000 rows, 2 MB."
                 file={groupImportFile}
                 message={groupImportMessage}
                 errors={groupImportErrors}
