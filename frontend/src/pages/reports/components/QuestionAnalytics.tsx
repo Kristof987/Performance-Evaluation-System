@@ -45,14 +45,16 @@ type AnalyticsProps = {
   getAccessToken: AccessTokenGetter | undefined;
   scope?: { group_id?: number; role_id?: number; employee_id?: number; perspective?: RolePerspective };
   feedbackStatus?: 'review' | 'closed' | 'draft' | 'scheduled' | 'active' | 'paused';
+  /** Opens and scrolls to one section; a new request value repeats it for the same section. */
+  focusSection?: { id: number; request: number } | null;
 };
 
 export default function QuestionAnalytics(props: AnalyticsProps) {
-  if (props.scope?.employee_id !== undefined) return <EmployeeQuestions campaignId={props.campaignId} getAccessToken={props.getAccessToken} employeeId={props.scope.employee_id} feedbackStatus={props.feedbackStatus} />;
+  if (props.scope?.employee_id !== undefined) return <EmployeeQuestions campaignId={props.campaignId} getAccessToken={props.getAccessToken} employeeId={props.scope.employee_id} feedbackStatus={props.feedbackStatus} focusSection={props.focusSection} />;
   return <StandardQuestions {...props} />;
 }
 
-function EmployeeQuestions({ campaignId, getAccessToken, employeeId, feedbackStatus }: { campaignId: number; getAccessToken: AccessTokenGetter | undefined; employeeId: number; feedbackStatus: AnalyticsProps['feedbackStatus'] }) {
+function EmployeeQuestions({ campaignId, getAccessToken, employeeId, feedbackStatus, focusSection }: { campaignId: number; getAccessToken: AccessTokenGetter | undefined; employeeId: number; feedbackStatus: AnalyticsProps['feedbackStatus']; focusSection?: AnalyticsProps['focusSection'] }) {
   const { state } = useAppAuth();
   const feedbackAuthorized = state.status === 'authenticated' && state.user.permissions.includes('reports.read') && state.user.permissions.includes('campaigns.manage') && !!feedbackStatus && !!getAccessToken;
   const [reports, setReports] = useState<{ peer: ReportQuestions; self: ReportQuestions } | null>(null);
@@ -62,6 +64,18 @@ function EmployeeQuestions({ campaignId, getAccessToken, employeeId, feedbackSta
   const [search, setSearch] = useState('');
   const [openSections, setOpenSections] = useState<string[] | null>(null);
   const [openQuestions, setOpenQuestions] = useState<string[]>([]);
+  const [handledFocus, setHandledFocus] = useState(focusSection?.request ?? 0);
+  // A section picked in the charts opens here; adjusting state while rendering avoids a second pass through an effect.
+  if (focusSection && focusSection.request !== handledFocus) {
+    setHandledFocus(focusSection.request);
+    setSearch('');
+    setOpenSections((current) => { const active = current ?? []; return active.includes(String(focusSection.id)) ? active : [...active, String(focusSection.id)]; });
+  }
+  useEffect(() => {
+    if (!focusSection) return undefined;
+    const timer = window.setTimeout(() => document.getElementById(`employee-question-section-${focusSection.id}`)?.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    return () => window.clearTimeout(timer);
+  }, [focusSection]);
 
   useEffect(() => {
     if (!getAccessToken) return undefined;

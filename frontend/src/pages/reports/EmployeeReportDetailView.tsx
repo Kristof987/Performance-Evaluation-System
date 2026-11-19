@@ -5,8 +5,10 @@ import QuestionAnalytics from './components/QuestionAnalytics';
 import type { EmployeeReportDetail } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { useDates } from '../../app/dates';
-import { ChartCard, Delta, GapBars, GroupedBars, ProfileRadar, TrendLines, type TrendSeries } from './charts/DashboardCharts';
+import { ChartCard, CsvButton, Delta, GapBars, GroupedBars, ProfileRadar, TrendLines, type TrendSeries } from './charts/DashboardCharts';
 import { scoreColor, useChartTheme } from './charts/chartTheme';
+import { csvScore } from './reportExport';
+import { useNavigate } from 'react-router';
 
 function formatScore(value: number | null) {
   if (value === null) return '—';
@@ -35,6 +37,9 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
   const theme = useChartTheme();
   const [historyKey, setHistoryKey] = useState<string | null>(null);
   const [benchmarkGroupId, setBenchmarkGroupId] = useState<number | null>(null);
+  const [focusSection, setFocusSection] = useState<{ id: number; request: number } | null>(null);
+  const navigate = useNavigate();
+  const openQuestions = (sectionId: number) => setFocusSection((current) => ({ id: sectionId, request: (current?.request ?? 0) + 1 }));
   const historyOptions = data.history.map((series) => ({ series, key: series.section_id === null ? 'overall' : `section-${series.section_id}` }));
   const overallHistory = historyOptions.find((option) => option.key === 'overall');
   const selectedHistory = historyOptions.find((option) => option.key === historyKey) ?? overallHistory ?? historyOptions[0];
@@ -68,6 +73,7 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
   const trendCampaigns = new Map<number, { label: string; fullName: string; start: string }>();
   for (const option of [overallHistory, selectedHistory]) for (const point of option?.series.points ?? []) trendCampaigns.set(point.campaign_id, { label: point.campaign_name.length > 14 ? `${point.campaign_name.slice(0, 13)}…` : point.campaign_name, fullName: point.campaign_name, start: point.campaign_start_date });
   const trendPoints = [...trendCampaigns.entries()].sort((a, b) => a[1].start.localeCompare(b[1].start)).map(([campaignId, campaign]) => ({
+    campaignId,
     label: campaign.label,
     fullName: `${campaign.fullName} · ${dates.day(campaign.start, undefined, '')}`,
     overall: overallHistory?.series.points.find((point) => point.campaign_id === campaignId)?.average_score ?? null,
@@ -90,21 +96,25 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
       <div className="reports-kpi-card"><span>Peer reviews completed</span><strong>{completed} / {assigned}</strong><small>{assigned === 0 ? 'None assigned' : percentage === 100 ? 'All assigned reviews submitted' : `${percentage}% of assigned reviews`}</small></div>
     </section>
     {scoredSections.length === 0 ? <section className="reports-card"><ReportsEmptyState title={emptyState.title} message={emptyState.message} /></section> : <div className="reports-viz-grid">
-      <ChartCard title="Section profile" subtitle={`Peer rating per section, 1–5${hiddenSections.length ? ` · ${hiddenSections.length} hidden for confidentiality` : ''}`}
-        actions={data.benchmarks.groups.length > 1 ? <label className="reports-q-order"><span>Group</span><select value={benchmarkGroup?.id} onChange={(event) => setBenchmarkGroupId(Number(event.target.value))}>{data.benchmarks.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label> : undefined}>
+      <ChartCard title="Section profile" subtitle={`Peer rating per section, 1–5 · click a section for its questions${hiddenSections.length ? ` · ${hiddenSections.length} hidden for confidentiality` : ''}`}
+        actions={<span className="reports-card-actions"><CsvButton name={`${data.employee.name} ${data.campaign.name} sections`} rows={() => [
+          ['Section', 'Peer rating', 'Self rating', data.previous_campaign ? `Previous (${data.previous_campaign.name})` : 'Previous', ...(benchmarkGroup ? [`${benchmarkGroup.name} average`] : []), ...(data.benchmarks.campaign ? ['Campaign average'] : [])],
+          ...data.sections.map((section) => [section.name, csvScore(section.peer_score, section.peer_availability), csvScore(section.self_score, section.self_availability), csvScore(data.previous?.sections[String(section.id)]),
+            ...(benchmarkGroup ? [csvScore(benchmarkGroup.sections[String(section.id)])] : []), ...(data.benchmarks.campaign ? [csvScore(data.benchmarks.campaign.sections[String(section.id)])] : [])]),
+        ]} />{data.benchmarks.groups.length > 1 && <label className="reports-q-order reports-no-print"><span>Group</span><select value={benchmarkGroup?.id} onChange={(event) => setBenchmarkGroupId(Number(event.target.value))}>{data.benchmarks.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}</span>}>
         {scoredSections.length >= 3
-          ? <ProfileRadar theme={theme} sections={scoredSections} series={profiles} />
+          ? <ProfileRadar theme={theme} sections={scoredSections} series={profiles} onSelect={openQuestions} />
           : <GroupedBars theme={theme} categories={scoredSections} series={profiles.map((profile, index) => ({ id: index, name: profile.name, color: profile.color, values: profile.values }))} />}
       </ChartCard>
       <ChartCard title="Self vs. peers" subtitle={gaps.length ? 'Self minus peer rating per section · right = rates themself higher, left = lower' : undefined}>
-        {gaps.length ? <GapBars theme={theme} rows={gaps} /> : <p className="reports-chart-notice">{data.kpis.overall_self_score === null ? 'No submitted self-evaluation to compare with.' : 'No section has both a self and a released peer rating.'}</p>}
+        {gaps.length ? <GapBars theme={theme} rows={gaps} onSelect={openQuestions} /> : <p className="reports-chart-notice">{data.kpis.overall_self_score === null ? 'No submitted self-evaluation to compare with.' : 'No section has both a self and a released peer rating.'}</p>}
       </ChartCard>
     </div>}
-    {trendPoints.length > 1 && trendSeries.length > 0 && <ChartCard title="Over time" subtitle="Peer rating in earlier reportable campaigns"
+    {trendPoints.length > 1 && trendSeries.length > 0 && <ChartCard title="Over time" subtitle="Peer rating in earlier reportable campaigns · click a point to open that campaign"
       actions={historyOptions.length > 1 ? <label className="reports-q-order"><span>Show</span><select value={selectedHistory?.key} onChange={(event) => setHistoryKey(event.target.value)}>{historyOptions.map(({ series, key }) => <option key={key} value={key}>{series.section_id === null ? 'Overall' : series.section_name}</option>)}</select></label> : undefined}>
-      <TrendLines theme={theme} points={trendPoints} series={trendSeries} />
+      <TrendLines theme={theme} points={trendPoints} series={trendSeries} onSelect={(point) => { if (typeof point.campaignId === 'number' && point.campaignId !== data.campaign.id) navigate(`/reports/campaigns/${point.campaignId}/employees/${data.employee.id}`); }} />
     </ChartCard>}
-    <div id="employee-question-analytics"><QuestionAnalytics campaignId={data.campaign.id} getAccessToken={getAccessToken} scope={{ employee_id: data.employee.id }} feedbackStatus={data.campaign.campaign_status} /></div>
+    <div id="employee-question-analytics"><QuestionAnalytics campaignId={data.campaign.id} getAccessToken={getAccessToken} scope={{ employee_id: data.employee.id }} feedbackStatus={data.campaign.campaign_status} focusSection={focusSection} /></div>
     <div id="employee-ai-analysis"><EmployeeAIAnalysisPanel scope={{ type: 'employee', campaignId: data.campaign.id, employeeId: data.employee.id }} getAccessToken={getAccessToken} /></div>
     <section className="reports-card reports-employee-coverage">
       <h2>Evaluation coverage</h2>

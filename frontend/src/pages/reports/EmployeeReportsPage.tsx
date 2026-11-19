@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { fetchEmployeeReportDetail, fetchEmployeeReportsOverview } from './api/reports.api';
 import EmployeeReportDetailView from './EmployeeReportDetailView';
 import EmployeeOverview from './components/EmployeeOverview';
@@ -12,7 +12,8 @@ import { usePageTitle } from '../../app/usePageTitle';
 import LoadError from '../../components/feedback/LoadError';
 import LoadingState from '../../components/feedback/LoadingState';
 import { GroupToggles } from './components/ReportFilterBar';
-import { ChartCard, Delta, SelfPeerScatter, type ScatterPoint } from './charts/DashboardCharts';
+import { ChartCard, CsvButton, Delta, SelfPeerScatter, type ScatterPoint } from './charts/DashboardCharts';
+import { csvScore } from './reportExport';
 import { scoreColor, seriesColor, useChartTheme, type ChartTheme } from './charts/chartTheme';
 
 function LoadingOrError({ error, retry }: { error: string; retry: () => void }) {
@@ -33,7 +34,7 @@ export function EmployeeReportsPage() {
   }}</ReportsLayout>;
 }
 
-type EmployeeSort = 'name' | 'score-high' | 'score-low' | 'change' | 'feedback' | 'gap';
+type EmployeeSort = 'name' | 'score-high' | 'score-low' | 'change' | 'feedback' | 'gap' | `section:${number}`;
 
 const SORTS: Array<{ value: EmployeeSort; label: string }> = [
   { value: 'name', label: 'Name' },
@@ -50,6 +51,7 @@ function sortValue(employee: EmployeeReportRow, sort: EmployeeSort) {
   const score = peerScore(employee);
   const previous = employee.performance_summary.previous_overall_peer_score;
   const self = employee.performance_summary.overall_self_score;
+  if (sort.startsWith('section:')) return employee.performance_summary.section_scores[sort.slice(8)] ?? Infinity;
   switch (sort) {
     case 'score-high': return score === null ? Infinity : -score;
     case 'score-low': return score ?? Infinity;
@@ -60,14 +62,30 @@ function sortValue(employee: EmployeeReportRow, sort: EmployeeSort) {
   }
 }
 
+function employeeRows(data: EmployeeReportsOverview, employees: EmployeeReportRow[]) {
+  return [
+    ['Employee', 'Email', 'Role', 'Groups', 'Peer rating', data.previous_campaign ? `Previous (${data.previous_campaign.name})` : 'Previous', 'Self rating', 'Peer reviews completed', 'Peer reviews assigned', ...data.sections.map((section) => section.name)],
+    ...employees.map((employee) => {
+      const summary = employee.performance_summary;
+      return [employee.employee_name, employee.email, employee.company_role, employee.groups.join('; '), csvScore(summary.overall_peer_score, summary.availability),
+        csvScore(summary.previous_overall_peer_score), csvScore(summary.overall_self_score), employee.peer_completed, employee.peer_assigned,
+        ...data.sections.map((section) => csvScore(summary.section_scores[String(section.id)]))];
+    }),
+  ];
+}
+
 function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccessToken, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; getAccessToken: AccessTokenGetter | undefined; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
   const [data, setData] = useState<EmployeeReportsOverview | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
   const [query, setQuery] = useState('');
   const [role, setRole] = useState('all');
-  const [groupIds, setGroupIds] = useState<number[]>([]);
-  const [sort, setSort] = useState<EmployeeSort>('name');
+  // The dashboard links here with ?groups=…&section=…, to see who is behind a group or section score.
+  const [params] = useSearchParams();
+  const linkedGroups = (params.get('groups') ?? '').split(',').map(Number).filter((id) => Number.isSafeInteger(id) && id > 0);
+  const linkedSection = Number(params.get('section'));
+  const [groupIds, setGroupIds] = useState<number[]>(linkedGroups);
+  const [sort, setSort] = useState<EmployeeSort>(linkedSection > 0 ? `section:${linkedSection}` : 'name');
   const theme = useChartTheme();
   const navigate = useNavigate();
 
@@ -76,9 +94,13 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccess
     const controller = new AbortController();
     setData(null);
     setError('');
-    setGroupIds([]);
     fetchEmployeeReportsOverview(getAccessToken, selectedCampaignId, controller.signal)
-      .then((result) => { if (!controller.signal.aborted) setData(result); })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setData(result);
+        setGroupIds((ids) => ids.filter((id) => result.groups.some((group) => group.id === id)));
+        setSort((value) => value.startsWith('section:') && !result.sections.some((section) => `section:${section.id}` === value) ? 'name' : value);
+      })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Employee reports could not be loaded.'); });
     return () => controller.abort();
   }, [getAccessToken, reload, selectedCampaignId, validCampaignId]);
@@ -121,16 +143,16 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccess
       <SelfPeerScatter theme={theme} points={scatter} onSelect={(id) => navigate(`/reports/campaigns/${selectedCampaignId}/employees/${id}`)} />
     </ChartCard>}
     <section className="reports-card reports-simple-table reports-employee-table">
-      <div className="reports-section-heading"><h2>Employees</h2><p>Peer rating with change since {data.previous_campaign?.name ?? 'the previous campaign'}, and each section’s score from red (low) to green (high).</p></div>
-      <div className="reports-detail-filters reports-employee-filters"><input type="search" placeholder="Search employees" aria-label="Search employees" value={query} onChange={(event) => setQuery(event.target.value)} /><select value={role} onChange={(event) => setRole(event.target.value)} aria-label="Filter by company role"><option value="all">All roles</option>{roleOptions.map((item) => <option value={item} key={item}>{item}</option>)}</select><select value={sort} onChange={(event) => setSort(event.target.value as EmployeeSort)} aria-label="Sort employees">{SORTS.filter((item) => item.value !== 'change' || data.previous_campaign).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
+      <div className="reports-section-heading reports-heading-with-action"><h2>Employees</h2><CsvButton name={`${data.campaign.name} employees`} rows={() => employeeRows(data, employees)} /><p>Peer rating with change since {data.previous_campaign?.name ?? 'the previous campaign'}, and each section’s score from red (low) to green (high).</p></div>
+      <div className="reports-detail-filters reports-employee-filters"><input type="search" placeholder="Search employees" aria-label="Search employees" value={query} onChange={(event) => setQuery(event.target.value)} /><select value={role} onChange={(event) => setRole(event.target.value)} aria-label="Filter by company role"><option value="all">All roles</option>{roleOptions.map((item) => <option value={item} key={item}>{item}</option>)}</select><select value={sort} onChange={(event) => setSort(event.target.value as EmployeeSort)} aria-label="Sort employees">{SORTS.filter((item) => item.value !== 'change' || data.previous_campaign).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}{data.sections.length > 0 && <optgroup label="Lowest first in section">{data.sections.map((section) => <option key={section.id} value={`section:${section.id}`}>{section.name}</option>)}</optgroup>}</select></div>
       {data.employees.length === 0 ? <ReportsEmptyState title="No employees in this campaign." message="Employee analytics will appear after people are assigned to campaign groups or evaluations." />
         : employees.length === 0 ? <ReportsEmptyState title="No employees match the filters." message="Adjust search, role or group filters to view employees." />
-          : <div className="reports-table-scroll"><table><thead><tr><th>Employee</th><th>Group(s)</th><th className="reports-number-cell">Peer rating</th><th>Sections</th><th className="reports-number-cell">Peer reviews</th><th className="reports-number-cell">Self</th><th>Details</th></tr></thead><tbody>{employees.map((employee) => <EmployeeRow theme={theme} employee={employee} sections={data.sections} campaignId={selectedCampaignId} previousName={data.previous_campaign?.name ?? null} key={employee.employee_id} />)}</tbody></table></div>}
+          : <div className="reports-table-scroll"><table><thead><tr><th>Employee</th><th>Group(s)</th><th className="reports-number-cell">Peer rating</th><th>Sections</th><th className="reports-number-cell">Peer reviews</th><th className="reports-number-cell">Self</th><th>Details</th></tr></thead><tbody>{employees.map((employee) => <EmployeeRow theme={theme} employee={employee} sections={data.sections} focusSection={sort.startsWith('section:') ? Number(sort.slice(8)) : null} campaignId={selectedCampaignId} previousName={data.previous_campaign?.name ?? null} key={employee.employee_id} />)}</tbody></table></div>}
     </section>
   </div>;
 }
 
-function EmployeeRow({ theme, employee, sections, campaignId, previousName }: { theme: ChartTheme; employee: EmployeeReportRow; sections: Array<{ id: number; name: string }>; campaignId: number; previousName: string | null }) {
+function EmployeeRow({ theme, employee, sections, focusSection, campaignId, previousName }: { focusSection: number | null; theme: ChartTheme; employee: EmployeeReportRow; sections: Array<{ id: number; name: string }>; campaignId: number; previousName: string | null }) {
   const { availability, reportable_sections, previous_overall_peer_score, overall_self_score, section_scores } = employee.performance_summary;
   const score = peerScore(employee);
   return <tr>
@@ -141,7 +163,7 @@ function EmployeeRow({ theme, employee, sections, campaignId, previousName }: { 
     </td>
     <td><span className="reports-section-strip" role="img" aria-label={sections.map((section) => `${section.name}: ${section_scores[String(section.id)]?.toFixed(2) ?? 'not available'}`).join(', ')}>{sections.map((section) => {
       const value = section_scores[String(section.id)];
-      return <span key={section.id} title={`${section.name}: ${value === undefined ? 'not rated' : value === null ? 'hidden or not enough ratings' : value.toFixed(2)}`} className={value === null || value === undefined ? 'is-empty' : undefined} style={value !== null && value !== undefined ? { background: scoreColor(theme, value) } : undefined} />;
+      return <span key={section.id} title={`${section.name}: ${value === undefined ? 'not rated' : value === null ? 'hidden or not enough ratings' : value.toFixed(2)}`} className={`${value === null || value === undefined ? 'is-empty' : ''}${section.id === focusSection ? ' is-focus' : ''}`.trim() || undefined} style={value !== null && value !== undefined ? { background: scoreColor(theme, value) } : undefined} />;
     })}</span></td>
     <td className="reports-number-cell" aria-label={`${employee.peer_completed} of ${employee.peer_assigned} incoming peer reviews completed`}>{employee.peer_completed} / {employee.peer_assigned}</td>
     <td className="reports-number-cell" title={score !== null && overall_self_score !== null ? `Self − peer: ${(overall_self_score - score).toFixed(2)}` : undefined}>{overall_self_score === null ? <span className="reports-muted">—</span> : overall_self_score.toFixed(2)}</td>

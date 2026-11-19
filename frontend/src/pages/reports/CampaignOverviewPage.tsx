@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { csvScore } from './reportExport';
 import { fetchCampaignDashboard, fetchCampaignRatingDistribution } from './api/reports.api';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import EvaluationQualitySummary from './components/EvaluationQualitySummary';
 import { GroupToggles, MAX_COMPARED_GROUPS, SectionTabs } from './components/ReportFilterBar';
 import { reportScopeTitle } from './reports.utils';
-import { ChartCard, CompletionDonut, Delta, DistributionBars, GroupedBars, Heatmap, MeterRows, ScoreBars, TrendLines, type HeatmapRow, type TrendSeries } from './charts/DashboardCharts';
+import { ChartCard, CompletionDonut, CsvButton, Delta, DistributionBars, GroupedBars, Heatmap, MeterRows, ScoreBars, TrendLines, type HeatmapRow, type TrendSeries } from './charts/DashboardCharts';
 import SectionQuestionList from './charts/SectionQuestionList';
 import { scoreColor, SERIES_COUNT, seriesColor, useChartTheme, type ChartTheme } from './charts/chartTheme';
 import ReportsLayout from './ReportsLayout';
@@ -88,6 +89,24 @@ function OverviewContent({ selectedCampaignId, validCampaignId, getAccessToken, 
   </div>;
 }
 
+function sectionRows(data: CampaignDashboard) {
+  return [
+    ['Section', 'Peer rating', data.previous_campaign ? `Previous (${data.previous_campaign.name})` : 'Previous', 'Change'],
+    ...data.sections.map((section) => [section.name, csvScore(section.score, section.availability), csvScore(section.previous_score),
+      section.availability === 'available' && section.score !== null && section.previous_score !== null ? (section.score - section.previous_score).toFixed(2) : '']),
+    ['All sections', csvScore(data.overall.score, data.overall.availability), csvScore(data.overall.previous_score), ''],
+  ];
+}
+
+function matrixRows(data: CampaignDashboard, groups: DashboardGroup[]) {
+  return [
+    ['Group', 'Overall', 'Completion %', ...data.sections.map((section) => section.name)],
+    ...groups.map((group) => [group.name, csvScore(group.overall.score, group.overall.availability), group.completion_rate,
+      ...data.sections.map((section) => csvScore(group.sections[String(section.id)]?.score, group.sections[String(section.id)]?.availability))]),
+    ['All groups', csvScore(data.overall.score, data.overall.availability), data.completion.rate, ...data.sections.map((section) => csvScore(section.score, section.availability))],
+  ];
+}
+
 function useReportScope(data: CampaignDashboard) {
   const [params, setParams] = useSearchParams();
   const sectionParam = Number(params.get('section'));
@@ -115,6 +134,18 @@ function Dashboard({ getAccessToken, data, distribution, distributionFailed, onR
   const selectedGroups = groupIds.map((id) => data.groups.find((group) => group.id === id)!);
   // A heatmap cell opens that section; a group's cell also brings the group into the comparison.
   const focusCell = (sectionId: number, groupId: number | null) => update({ section: sectionId, ...(groupId !== null && !groupIds.includes(groupId) && groupIds.length < MAX_COMPARED_GROUPS ? { groups: [...groupIds, groupId] } : {}) });
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // A trend point opens that campaign with the same section and groups; ones it lacks are dropped there.
+  const openCampaign = (point: Record<string, string | number | null>) => {
+    if (typeof point.campaignId === 'number' && point.campaignId !== data.campaign.id) navigate(`/reports/campaigns/${point.campaignId}${params.size ? `?${params}` : ''}`);
+  };
+  const employeesLink = (ids: number[], sectionId?: number) => {
+    const query = new URLSearchParams();
+    if (ids.length) query.set('groups', ids.join(','));
+    if (sectionId) query.set('section', String(sectionId));
+    return `/reports/campaigns/${data.campaign.id}/employees${query.size ? `?${query}` : ''}`;
+  };
   const compareGroup = (groupId: number) => { if (!groupIds.includes(groupId) && groupIds.length < MAX_COMPARED_GROUPS) update({ groups: [...groupIds, groupId] }); };
 
   return <>
@@ -127,10 +158,10 @@ function Dashboard({ getAccessToken, data, distribution, distributionFailed, onR
     </div>
     {data.completion.completed_evaluations === 0 && <p className="reports-dashboard-note">{data.completion.total_evaluations === 0 ? 'No evaluations have been assigned yet.' : 'No evaluations have been completed yet. Charts use submitted responses only.'}</p>}
     {section
-      ? <SectionView theme={theme} data={data} sectionId={section.id} groups={selectedGroups} colorOf={colorOf} distribution={distribution} onCompare={compareGroup} questions={<SectionQuestionList theme={theme} campaignId={data.campaign.id} sectionId={section.id} groupIds={groupIds} colorOf={colorOf} getAccessToken={getAccessToken} />} />
+      ? <SectionView theme={theme} data={data} onTrend={openCampaign} employeesLink={employeesLink} sectionId={section.id} groups={selectedGroups} colorOf={colorOf} distribution={distribution} onCompare={compareGroup} questions={<SectionQuestionList theme={theme} campaignId={data.campaign.id} sectionId={section.id} groupIds={groupIds} colorOf={colorOf} getAccessToken={getAccessToken} />} />
       : selectedGroups.length
-        ? <GroupsView theme={theme} data={data} groups={selectedGroups} colorOf={colorOf} onCell={focusCell} />
-        : <CampaignView theme={theme} data={data} colorOf={colorOf} distribution={distribution} onSection={(id) => update({ section: id })} onCell={focusCell} />}
+        ? <GroupsView theme={theme} data={data} onTrend={openCampaign} employeesLink={employeesLink} groups={selectedGroups} colorOf={colorOf} onCell={focusCell} />
+        : <CampaignView theme={theme} data={data} onTrend={openCampaign} colorOf={colorOf} distribution={distribution} onSection={(id) => update({ section: id })} onCell={focusCell} />}
     {distributionFailed && <LoadError message="The rating distribution couldn’t load." onRetry={onRetry} />}
     {data.previous_campaign && <p className="reports-chart-footnote">Changes compare with {data.previous_campaign.name}, the previous reportable campaign.</p>}
   </>;
@@ -142,7 +173,7 @@ function Kpi({ label, value, valueStyle, children }: { label: string; value: str
   return <div className="reports-kpi-card"><span>{label}</span><strong style={valueStyle} title={value}>{value}</strong><small>{children}</small></div>;
 }
 
-function CampaignView({ theme, data, colorOf, distribution, onSection, onCell }: { theme: ChartTheme; data: CampaignDashboard; colorOf: (id: number) => string; distribution: CampaignRatingDistribution | null; onSection: (id: number) => void; onCell: (sectionId: number, groupId: number | null) => void }) {
+function CampaignView({ theme, data, colorOf, distribution, onSection, onCell, onTrend }: { onTrend: (point: Record<string, string | number | null>) => void; theme: ChartTheme; data: CampaignDashboard; colorOf: (id: number) => string; distribution: CampaignRatingDistribution | null; onSection: (id: number) => void; onCell: (sectionId: number, groupId: number | null) => void }) {
   const reportable = data.sections.filter((item) => item.availability === 'available' && item.score !== null).sort((a, b) => b.score! - a.score!);
   const hiddenSections = data.sections.length - reportable.length;
   const overall = available(data.overall);
@@ -165,7 +196,7 @@ function CampaignView({ theme, data, colorOf, distribution, onSection, onCell }:
     </section>
 
     <div className="reports-viz-grid">
-      {reportable.length > 0 && <ChartCard title="Average rating by section" subtitle={`Peer ratings, 1–5 · colour follows the score · line = campaign average${hiddenSections ? ` · ${hiddenSections} hidden or without ratings` : ''}`}>
+      {reportable.length > 0 && <ChartCard actions={<CsvButton name={`${data.campaign.name} sections`} rows={() => sectionRows(data)} />} title="Average rating by section" subtitle={`Peer ratings, 1–5 · colour follows the score · line = campaign average${hiddenSections ? ` · ${hiddenSections} hidden or without ratings` : ''}`}>
         <ScoreBars theme={theme} rows={reportable.map((item) => ({ id: item.id, name: item.name, score: item.score, previous: item.previous_score }))} reference={overall} referenceLabel="Campaign average" onSelect={onSection} />
       </ChartCard>}
       {reportable.length > 0 && <ChartCard title="Strengths and development areas" subtitle={data.previous_campaign ? `Change since ${data.previous_campaign.name}` : 'Sections from highest to lowest'}>
@@ -177,7 +208,7 @@ function CampaignView({ theme, data, colorOf, distribution, onSection, onCell }:
       </ChartCard>}
     </div>
 
-    {data.groups.length > 0 && data.sections.length > 0 && <ChartCard title="Groups × sections" subtitle="Each cell is the group’s peer rating · hatched = hidden by the privacy threshold · click a cell for its questions">
+    {data.groups.length > 0 && data.sections.length > 0 && <ChartCard actions={<CsvButton name={`${data.campaign.name} groups by section`} rows={() => matrixRows(data, data.groups)} />} title="Groups × sections" subtitle="Each cell is the group’s peer rating · hatched = hidden by the privacy threshold · click a cell for its questions">
       <Heatmap theme={theme} sections={data.sections} rows={[...groupRows, campaignRow]} onCell={onCell} />
     </ChartCard>}
 
@@ -192,14 +223,14 @@ function CampaignView({ theme, data, colorOf, distribution, onSection, onCell }:
       </ChartCard>}
     </div>
 
-    {trend && <ChartCard title="Over time" subtitle={`Peer rating in recent reportable campaigns`}>
-      <TrendLines theme={theme} points={data.trend.map((point) => ({ label: shortCampaign(point.campaign), fullName: point.campaign.name, overall: point.overall }))} series={[{ key: 'overall', name: 'Average peer rating', color: theme.primary }]} />
+    {trend && <ChartCard title="Over time" subtitle="Peer rating in recent reportable campaigns · click a point to open that campaign">
+      <TrendLines theme={theme} points={data.trend.map((point) => ({ campaignId: point.campaign.id, label: shortCampaign(point.campaign), fullName: point.campaign.name, overall: point.overall }))} series={[{ key: 'overall', name: 'Average peer rating', color: theme.primary }]} onSelect={onTrend} />
     </ChartCard>}
     {reportable.length === 0 && !ratingBins && <p className="reports-dashboard-note">No privacy-cleared chart data is available for this campaign yet.</p>}
   </>;
 }
 
-function GroupsView({ theme, data, groups, colorOf, onCell }: { theme: ChartTheme; data: CampaignDashboard; groups: DashboardGroup[]; colorOf: (id: number) => string; onCell: (sectionId: number, groupId: number | null) => void }) {
+function GroupsView({ theme, data, groups, colorOf, onCell, onTrend, employeesLink }: { onTrend: (point: Record<string, string | number | null>) => void; employeesLink: (groupIds: number[], sectionId?: number) => string; theme: ChartTheme; data: CampaignDashboard; groups: DashboardGroup[]; colorOf: (id: number) => string; onCell: (sectionId: number, groupId: number | null) => void }) {
   const overall = available(data.overall);
   const series = groups.map((group) => ({ id: group.id, name: group.name, color: colorOf(group.id), values: Object.fromEntries(Object.entries(group.sections).map(([id, cell]) => [id, available(cell)])) }));
   const trendSeries: TrendSeries[] = [...groups.map((group) => ({ key: `g${group.id}`, name: group.name, color: colorOf(group.id) })), { key: 'overall', name: 'All groups', color: theme.textMuted, dashed: true }];
@@ -211,29 +242,29 @@ function GroupsView({ theme, data, groups, colorOf, onCell }: { theme: ChartThem
         <span>{group.name}</span>
         <strong style={score !== null ? { color: scoreColor(theme, score) } : undefined}>{score === null ? (group.overall.availability === 'suppressed' ? 'Hidden' : '–') : score.toFixed(2)}</strong>
         <small><Delta current={score} previous={overall} label="vs. all groups" /> vs. all groups {data.previous_campaign && <><Delta current={score} previous={group.overall.previous_score} label={`vs. ${data.previous_campaign.name}`} /> vs. previous</>}</small>
-        <small>{group.completion_rate === null ? 'No assignments' : `${group.completion_rate}% complete · ${group.employee_count} members`}</small>
+        <small>{group.completion_rate === null ? 'No assignments' : `${group.completion_rate}% complete · ${group.employee_count} members`} · <Link className="reports-no-print" to={employeesLink([group.id])}>Employees →</Link></small>
       </div>;
     })}</section>
     {hasScores ? <ChartCard title="Sections by group" subtitle={`Peer ratings, 1–5 · line = campaign average${overall !== null ? ` (${overall.toFixed(2)})` : ''}`}>
       <GroupedBars theme={theme} categories={data.sections} series={series} reference={overall} />
     </ChartCard> : <p className="reports-dashboard-note">The selected groups have no released section ratings. Small groups are hidden by the privacy threshold.</p>}
-    <ChartCard title="Groups × sections" subtitle="Selected groups and the campaign · hatched = hidden by the privacy threshold">
+    <ChartCard actions={<CsvButton name={`${data.campaign.name} groups by section`} rows={() => matrixRows(data, groups)} />} title="Groups × sections" subtitle="Selected groups and the campaign · hatched = hidden by the privacy threshold">
       <Heatmap theme={theme} sections={data.sections} rows={[...groups.map((group) => ({ id: group.id, name: group.name, color: colorOf(group.id), cells: group.sections })), { id: 0, name: 'All groups', emphasis: true, cells: Object.fromEntries(data.sections.map((item) => [String(item.id), item])) }]} onCell={onCell} />
     </ChartCard>
-    {data.trend.length > 1 && <ChartCard title="Over time" subtitle={`Group peer rating in recent reportable campaigns`}>
-      <TrendLines theme={theme} points={data.trend.map((point) => ({ label: shortCampaign(point.campaign), fullName: point.campaign.name, overall: point.overall, ...Object.fromEntries(groups.map((group) => [`g${group.id}`, point.groups[String(group.id)] ?? null])) }))} series={trendSeries} />
+    {data.trend.length > 1 && <ChartCard title="Over time" subtitle="Group peer rating in recent reportable campaigns · click a point to open that campaign">
+      <TrendLines theme={theme} points={data.trend.map((point) => ({ campaignId: point.campaign.id, label: shortCampaign(point.campaign), fullName: point.campaign.name, overall: point.overall, ...Object.fromEntries(groups.map((group) => [`g${group.id}`, point.groups[String(group.id)] ?? null])) }))} series={trendSeries} onSelect={onTrend} />
     </ChartCard>}
   </>;
 }
 
-function SectionView({ theme, data, sectionId, groups, colorOf, distribution, onCompare, questions }: { theme: ChartTheme; data: CampaignDashboard; sectionId: number; groups: DashboardGroup[]; colorOf: (id: number) => string; distribution: CampaignRatingDistribution | null; onCompare: (groupId: number) => void; questions: React.ReactNode }) {
+function SectionView({ theme, data, sectionId, groups, colorOf, distribution, onCompare, questions, onTrend, employeesLink }: { onTrend: (point: Record<string, string | number | null>) => void; employeesLink: (groupIds: number[], sectionId?: number) => string; theme: ChartTheme; data: CampaignDashboard; sectionId: number; groups: DashboardGroup[]; colorOf: (id: number) => string; distribution: CampaignRatingDistribution | null; onCompare: (groupId: number) => void; questions: React.ReactNode }) {
   const section = data.sections.find((item) => item.id === sectionId)!;
   const score = available(section);
   const selected = new Set(groups.map((group) => group.id));
   const ranked = data.groups.map((group) => ({ id: group.id, name: group.name, score: available(group.sections[String(sectionId)]), muted: selected.size > 0 && !selected.has(group.id) })).filter((row) => row.score !== null).sort((a, b) => b.score! - a.score!);
   const hiddenGroups = data.groups.filter((group) => group.sections[String(sectionId)]?.availability === 'suppressed').length;
   const sectionBins = distribution?.sections.find((item) => item.section_id === sectionId);
-  const trendPoints = data.trend.map((point) => ({ label: shortCampaign(point.campaign), fullName: point.campaign.name, section: point.sections[String(sectionId)] ?? null, overall: point.overall,
+  const trendPoints = data.trend.map((point) => ({ campaignId: point.campaign.id, label: shortCampaign(point.campaign), fullName: point.campaign.name, section: point.sections[String(sectionId)] ?? null, overall: point.overall,
     ...Object.fromEntries(groups.map((group) => [`g${group.id}`, point.group_sections[String(group.id)]?.[String(sectionId)] ?? null])) }));
   const trendSeries: TrendSeries[] = groups.length
     ? [...groups.map((group) => ({ key: `g${group.id}`, name: group.name, color: colorOf(group.id) })), { key: 'section', name: 'All groups', color: theme.textMuted, dashed: true }]
@@ -250,7 +281,7 @@ function SectionView({ theme, data, sectionId, groups, colorOf, distribution, on
     </section>
     <div className="reports-viz-grid">
       <ChartCard title={`All groups on ${section.name}`} subtitle={`${selected.size ? 'Selected groups highlighted · ' : ''}colour follows the score · line = all groups${hiddenGroups ? ` · ${hiddenGroups} hidden by the privacy threshold` : ''}`}
-        actions={<button type="button" className="reports-card-action" onClick={() => document.getElementById('section-questions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Questions ↓</button>}>
+        actions={<span className="reports-card-actions reports-no-print"><Link className="reports-card-action" to={employeesLink(groups.map((group) => group.id), sectionId)}>Employees →</Link><button type="button" className="reports-card-action" onClick={() => document.getElementById('section-questions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Questions ↓</button></span>}>
         {ranked.length ? <ScoreBars theme={theme} rows={ranked} reference={score} referenceLabel="All groups" onSelect={onCompare} /> : <p className="reports-chart-notice">No group has a released rating for this section.</p>}
       </ChartCard>
       <ChartCard title={`How ${section.name} answers are spread`} subtitle={sectionBins?.availability === 'available' ? `${sectionBins.response_count} peer ratings across all groups` : undefined}>
@@ -259,7 +290,7 @@ function SectionView({ theme, data, sectionId, groups, colorOf, distribution, on
     </div>
     {questions}
     {data.trend.length > 1 && <ChartCard title={`${section.name} over time`} subtitle={`Peer rating in recent reportable campaigns · dashed = ${groups.length ? 'all groups' : 'average of all sections'}`}>
-      <TrendLines theme={theme} points={trendPoints} series={trendSeries} />
+      <TrendLines theme={theme} points={trendPoints} series={trendSeries} onSelect={onTrend} />
     </ChartCard>}
   </>;
 }

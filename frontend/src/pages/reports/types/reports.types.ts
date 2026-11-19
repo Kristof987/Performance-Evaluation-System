@@ -347,7 +347,7 @@ export type CampaignDashboard = {
   groups: DashboardGroup[];
   trend: DashboardTrendPoint[];
 };
-export type SectionQuestionCell = { availability: ScoreAvailability; response_count: number | null; average: number | null };
+export type SectionQuestionCell = { availability: ScoreAvailability; response_count: number | null; average: number | null; distribution?: Array<{ label: string; count: number; percentage: number }> | null };
 export type SectionQuestion = SectionQuestionCell & {
   key: string;
   text: string;
@@ -357,7 +357,6 @@ export type SectionQuestion = SectionQuestionCell & {
   scale_max: number | null;
   previous_average: number | null;
   distribution_kind: 'original' | 'options' | null;
-  distribution: Array<{ label: string; count: number; percentage: number }> | null;
   self: SectionQuestionCell;
   groups: Record<string, SectionQuestionCell>;
 };

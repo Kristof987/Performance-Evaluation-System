@@ -127,8 +127,9 @@ def _section_questions(report: dict, section_id: int) -> dict[str, dict]:
 
 def _cell(item: dict | None) -> dict[str, Any]:
     if item is None:
-        return {"availability": "no_data", "response_count": 0, "average": None}
-    return {"availability": item["availability"], "response_count": item["response_count"], "average": item["average_normalized"]}
+        return {"availability": "no_data", "response_count": 0, "average": None, "distribution": None}
+    return {"availability": item["availability"], "response_count": item["response_count"], "average": item["average_normalized"],
+            "distribution": item["distribution"] if item["availability"] == "available" else None}
 
 
 def build_section_questions(campaign_id: int, section_id: int, group_ids: list[int], actor: models.User, db: Session) -> dict[str, Any]:

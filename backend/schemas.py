@@ -931,6 +931,7 @@ class SectionQuestionCell(BaseModel):
     availability: Literal["available", "no_data", "suppressed"]
     response_count: int | None
     average: float | None = None
+    distribution: list[ReportQuestionBucket] | None = None
 
 
 class SectionQuestion(SectionQuestionCell):
@@ -942,7 +943,6 @@ class SectionQuestion(SectionQuestionCell):
     scale_max: int | None = None
     previous_average: float | None = None
     distribution_kind: Literal["original", "options"] | None = None
-    distribution: list[ReportQuestionBucket] | None = None
     self: SectionQuestionCell
     groups: dict[int, SectionQuestionCell]
 

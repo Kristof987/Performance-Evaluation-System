@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Download, Minus } from 'lucide-react';
+import { downloadCsv, type CsvValue } from '../reportExport';
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart, Pie, PieChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatDelta, scoreColor, scoreInk, type ChartTheme } from './chartTheme';
 
@@ -51,7 +52,7 @@ export function ScoreBars({ theme, rows, reference, referenceLabel, onSelect }: 
       <YAxis type="category" dataKey="label" width={118} {...axisProps(theme)} />
       <Tooltip content={tip} cursor={{ fill: theme.surfaceMuted, opacity: 0.6 }} />
       {reference != null && <ReferenceLine x={reference} stroke={theme.textMuted} strokeDasharray="4 4" ifOverflow="extendDomain" />}
-      <Bar dataKey="score" name="Peer rating" radius={[0, 4, 4, 0]} cursor={onSelect ? 'pointer' : undefined} onClick={(entry) => onSelect?.((entry as unknown as ScoreBarRow).id)} isAnimationActive={false}>
+      <Bar dataKey="score" name="Peer rating" radius={[0, 4, 4, 0]} cursor={onSelect ? 'pointer' : undefined} onClick={(entry) => { const id = clickedId(entry); if (id !== null) onSelect?.(id); }} isAnimationActive={false}>
         {data.map((row) => <Cell key={row.id} fill={scoreColor(theme, row.score ?? 1)} fillOpacity={row.muted ? 0.35 : 1} />)}
         <LabelList dataKey="score" position="right" formatter={(value) => typeof value === 'number' ? value.toFixed(2) : ''} fill={theme.textSecondary} fontSize={11} />
       </Bar>
@@ -148,14 +149,29 @@ export function DistributionBars({ theme, bins: raw }: { theme: ChartTheme; bins
 
 export type TrendSeries = { key: string; name: string; color: string; dashed?: boolean };
 
-export function TrendLines({ theme, points: raw, series }: { theme: ChartTheme; points: Array<Record<string, string | number | null>>; series: TrendSeries[] }) {
+type ChartClick = { activeTooltipIndex?: number | string | null } | null | undefined;
+
+/** Recharts passes the bar's drawing props; the row we gave it is under payload. */
+const clickedId = (entry: unknown) => {
+  const item = entry as { id?: unknown; payload?: { id?: unknown } } | null;
+  const id = item?.payload?.id ?? item?.id;
+  return typeof id === 'number' ? id : null;
+};
+
+const clickedIndex = (state: ChartClick) => {
+  const index = Number(state?.activeTooltipIndex);
+  return Number.isInteger(index) && index >= 0 ? index : null;
+};
+
+export function TrendLines({ theme, points: raw, series, onSelect }: { theme: ChartTheme; points: Array<Record<string, string | number | null>>; series: TrendSeries[]; onSelect?: (point: Record<string, string | number | null>) => void }) {
   // Campaigns without any released score for these series add nothing but an empty slot.
   const points = raw.filter((point) => series.some((item) => typeof point[item.key] === 'number'));
   const values = points.flatMap((point) => series.map((item) => point[item.key])).filter((value): value is number => typeof value === 'number');
   const low = values.length ? Math.max(1, Math.floor((Math.min(...values) - 0.25) * 2) / 2) : 1;
   const high = values.length ? Math.min(5, Math.ceil((Math.max(...values) + 0.25) * 2) / 2) : 5;
   return <ResponsiveContainer width="100%" height={240}>
-    <LineChart data={points} margin={{ top: 10, right: 16, bottom: 4, left: -12 }}>
+    <LineChart data={points} margin={{ top: 10, right: 16, bottom: 4, left: -12 }} className={onSelect ? 'reports-chart-clickable' : undefined}
+      onClick={onSelect ? (state: ChartClick) => { const index = clickedIndex(state); if (index !== null && points[index]) onSelect(points[index]); } : undefined}>
       <CartesianGrid vertical={false} stroke={theme.grid} />
       <XAxis dataKey="label" interval="preserveStartEnd" minTickGap={12} padding={{ left: 36, right: 36 }} {...axisProps(theme)} />
       <YAxis domain={[low, high]} ticks={Array.from({ length: Math.round((high - low) * 2) + 1 }, (_, index) => low + index * 0.5)} width={44} tickFormatter={(value: number) => value.toFixed(1)} {...axisProps(theme)} />
@@ -164,6 +180,11 @@ export function TrendLines({ theme, points: raw, series }: { theme: ChartTheme; 
       {series.length > 1 && <Legend iconType="plainline" iconSize={14} itemSorter={null} formatter={(value) => <span style={{ color: theme.textSecondary }}>{value}</span>} wrapperStyle={{ fontSize: 12 }} />}
     </LineChart>
   </ResponsiveContainer>;
+}
+
+/** Downloads exactly what the card shows; rows are built only when clicked. */
+export function CsvButton({ name, rows }: { name: string; rows: () => CsvValue[][] }) {
+  return <button type="button" className="reports-card-action reports-csv-button reports-no-print" onClick={() => downloadCsv(name, rows())} title="Download as CSV"><Download size={13} aria-hidden="true" />CSV</button>;
 }
 
 export function ChartCard({ id, title, subtitle, actions, className = '', children }: { id?: string; title: string; subtitle?: string; actions?: ReactNode; className?: string; children: ReactNode }) {
@@ -194,7 +215,7 @@ export function SelfPeerScatter({ theme, points, onSelect }: { theme: ChartTheme
       <YAxis type="number" dataKey="self" name="Self rating" domain={[low, high]} ticks={ticks} width={48} label={{ value: 'Self rating', angle: -90, position: 'insideLeft', offset: 14, fill: theme.textMuted, fontSize: 11 }} {...axisProps(theme)} />
       <ReferenceLine segment={[{ x: low, y: low }, { x: high, y: high }]} stroke={theme.textMuted} strokeDasharray="4 4" />
       <Tooltip content={tip} cursor={{ strokeDasharray: '3 3', stroke: theme.axis }} />
-      <Scatter data={points} cursor={onSelect ? 'pointer' : undefined} onClick={(point) => onSelect?.((point as unknown as ScatterPoint).id)} isAnimationActive={false}>
+      <Scatter data={points} cursor={onSelect ? 'pointer' : undefined} onClick={(point) => { const id = clickedId(point); if (id !== null) onSelect?.(id); }} isAnimationActive={false}>
         {points.map((point) => <Cell key={point.id} fill={point.color} stroke={theme.surface} strokeWidth={2} r={7} />)}
       </Scatter>
     </ScatterChart>
@@ -202,10 +223,11 @@ export function SelfPeerScatter({ theme, points, onSelect }: { theme: ChartTheme
 }
 
 /** Up to three profiles on the same sections: the employee, their group and the campaign. */
-export function ProfileRadar({ theme, sections, series }: { theme: ChartTheme; sections: Array<{ id: number; name: string }>; series: Array<{ key: string; name: string; color: string; values: Record<string, number | null>; dashed?: boolean; filled?: boolean }> }) {
+export function ProfileRadar({ theme, sections, series, onSelect }: { theme: ChartTheme; sections: Array<{ id: number; name: string }>; onSelect?: (sectionId: number) => void; series: Array<{ key: string; name: string; color: string; values: Record<string, number | null>; dashed?: boolean; filled?: boolean }> }) {
   const data = sections.map((section) => ({ label: shorten(section.name, 16), fullName: section.name, ...Object.fromEntries(series.map((item) => [item.key, item.values[String(section.id)] ?? null])) }));
   return <ResponsiveContainer width="100%" height={340}>
-    <RadarChart data={data} outerRadius="78%" margin={{ top: 8, right: 24, bottom: 8, left: 24 }}>
+    <RadarChart data={data} outerRadius="78%" margin={{ top: 8, right: 24, bottom: 8, left: 24 }} className={onSelect ? 'reports-chart-clickable' : undefined}
+      onClick={onSelect ? (state: ChartClick) => { const index = clickedIndex(state); if (index !== null && sections[index]) onSelect(sections[index].id); } : undefined}>
       <PolarGrid stroke={theme.grid} />
       <PolarAngleAxis dataKey="label" tick={{ fill: theme.textSecondary, fontSize: 11 }} />
       <PolarRadiusAxis domain={SCORE_DOMAIN} tickCount={5} tick={false} axisLine={false} />
@@ -217,7 +239,7 @@ export function ProfileRadar({ theme, sections, series }: { theme: ChartTheme; s
 }
 
 /** Self minus peer per section: right of zero = rates themself higher than peers do. */
-export function GapBars({ theme, rows }: { theme: ChartTheme; rows: Array<{ id: number; name: string; peer: number; self: number }> }) {
+export function GapBars({ theme, rows, onSelect }: { theme: ChartTheme; rows: Array<{ id: number; name: string; peer: number; self: number }>; onSelect?: (sectionId: number) => void }) {
   const data = rows.map((row) => ({ ...row, gap: Number((row.self - row.peer).toFixed(2)), label: shorten(row.name), fullName: row.name }));
   const extent = Math.max(0.5, ...data.map((row) => Math.abs(row.gap)));
   const step = extent > 1.5 ? 1 : 0.5;
@@ -235,7 +257,7 @@ export function GapBars({ theme, rows }: { theme: ChartTheme; rows: Array<{ id: 
       <YAxis type="category" dataKey="label" width={118} {...axisProps(theme)} />
       <ReferenceLine x={0} stroke={theme.textMuted} />
       <Tooltip content={tip} cursor={{ fill: theme.surfaceMuted, opacity: 0.6 }} />
-      <Bar dataKey="gap" name="Self − peer" radius={4} isAnimationActive={false}>
+      <Bar dataKey="gap" name="Self − peer" radius={4} isAnimationActive={false} cursor={onSelect ? 'pointer' : undefined} onClick={(entry) => { const id = clickedId(entry); if (id !== null) onSelect?.(id); }}>
         {data.map((row) => <Cell key={row.id} fill={row.gap >= 0 ? theme.series[3] : theme.series[0]} />)}
         <LabelList dataKey="gap" position="right" formatter={(value) => typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}` : ''} fill={theme.textSecondary} fontSize={11} />
       </Bar>

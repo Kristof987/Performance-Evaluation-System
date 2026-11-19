@@ -152,8 +152,9 @@ def test_section_questions_compare_groups_self_and_previous_campaign(db, permiss
     assert result["groups"] == [{"id": world.groups[1].id, "name": world.groups[1].name}]
     (question,) = result["questions"]
     assert (question["average"], question["previous_average"], question["response_count"]) == (4.0, 2.5, 12)
-    assert question["self"] == {"availability": "available", "response_count": 1, "average": 4.0}
+    assert {key: question["self"][key] for key in ("availability", "response_count", "average")} == {"availability": "available", "response_count": 1, "average": 4.0}
     assert question["groups"][world.groups[1].id]["average"] == 3.0
+    assert [bucket["count"] for bucket in question["groups"][world.groups[1].id]["distribution"]] == [0, 0, 6, 0, 0]
     assert [bucket["count"] for bucket in question["distribution"]] == [0, 0, 6, 0, 6]
 
 
@@ -186,7 +187,7 @@ def test_section_questions_keep_group_privacy(db, permissions):
     result = report_dashboard_service.build_section_questions(current.id, world.section_a.id, [world.groups[1].id], world.actor, db)
 
     support = result["questions"][0]["groups"][world.groups[1].id]
-    assert support["availability"] == "suppressed" and support["average"] is None
+    assert support["availability"] == "suppressed" and support["average"] is None and support["distribution"] is None
 
 
 def test_employee_overview_adds_sections_previous_scores_and_groups(db, permissions):
