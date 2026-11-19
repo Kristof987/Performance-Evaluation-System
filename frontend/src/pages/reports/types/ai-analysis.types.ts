@@ -10,6 +10,17 @@ export type AnalysisFinding = {
   comparison_claims?: ComparisonClaim[];
   observation_claims?: ObservationClaim[];
   fact_ids?: string[] | null;
+  /** Distinct colleagues whose written comments the finding draws on; set by the server. */
+  comment_mentions?: number | null;
+};
+
+export type AnalysisTheme = {
+  label: string;
+  tone: 'positive' | 'negative' | 'mixed';
+  fact_ids: string[];
+  supporting_evidence_ids: string[];
+  /** Distinct colleagues whose comments raise the theme; set by the server. */
+  mentions?: number | null;
 };
 
 export type AIAnalysisScope =
@@ -32,6 +43,10 @@ export type AIAnalysis = {
   overall_assessment: AnalysisFinding;
   strengths: AnalysisFinding[];
   development_areas: AnalysisFinding[];
+  themes?: AnalysisTheme[];
+  /** Distinct colleagues who wrote comments the analysis could use. */
+  comment_authors?: number | null;
+  language?: 'en' | 'hu';
 };
 
 export type AnalysisEvidence = {
@@ -41,6 +56,8 @@ export type AnalysisEvidence = {
   original_value?: number | null;
   normalized_value?: number | null;
   response_text?: string;
+  /** A colleague's written comment; its text is never shown with the analysis. */
+  comment?: boolean;
   question_statistics: Array<{
     question_text: string;
     average_normalized: number | null;

@@ -8,6 +8,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 import ai_trace
+import ai_workflow_service
 import models
 import workspace_settings_service
 import reporting_service
@@ -168,7 +169,8 @@ def generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | Non
                 raise HTTPException(status_code=409, detail="Please wait before regenerating this analysis")
             fingerprint = context.source_fingerprint
             db.rollback()  # Never retain Reports' campaign lock during a paid provider call.
-            analysis, trace = generate_aggregate_ai_analysis_from_context(context, job_id=job_id)
+            analysis, trace = generate_aggregate_ai_analysis_from_context(
+                context, job_id=job_id, language=ai_workflow_service.preferred_language(db, actor))
             _lock_campaign(db, campaign_id)
             fresh = _context(db, campaign_id, scope_type, scope_id, actor)
             _writable(db, campaign_id, actor)

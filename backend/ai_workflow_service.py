@@ -24,6 +24,12 @@ GENERATE = "ai_analysis.generate"
 APPROVE = "ai_analysis.approve"
 
 
+def preferred_language(db: Session, actor: models.User) -> str:
+    """The analysis is written in the language of the person who generates it."""
+    preferences = db.get(models.UserPreferences, actor.id)
+    return preferences.language if preferences is not None else "en"
+
+
 def has_permission(actor: models.User, db: Session, permission: str) -> bool:
     return db.query(models.User.id).join(models.SystemRole, models.SystemRole.id == models.User.system_role_id).join(
         models.system_role_permissions, models.system_role_permissions.c.system_role_id == models.SystemRole.id,
@@ -132,15 +138,18 @@ def _analysis_json(analysis: EmployeeAIAnalysis, *, legacy: bool = False) -> dic
 
 
 def _evidence_summary(context: EmployeeAnalysisContext, analysis: EmployeeAIAnalysis) -> dict:
-    """Freeze only cited, reportable aggregates and self feedback; never raw peer answers."""
+    """Freeze only cited, reportable aggregates and self feedback; never colleagues' comment text."""
     written = {item.reference.evidence_id: item.response_text for item in context.qualitative_evidence
                if item.reference.category == "self"}
+    peer_comments = {item.reference.evidence_id for item in context.qualitative_evidence if item.reference.category == "peer"}
     result = {}
     for ref in context.evidence_references:
         if ref.evidence_id not in _citations(analysis):
             continue
         detail = {"question_text": ref.question_text, "section_name": ref.section_name, "category": ref.category,
                   "question_statistics": [], "section_statistics": []}
+        if ref.evidence_id in peer_comments:
+            detail["comment"] = True  # A colleague's comment: its text is never shown with the analysis.
         if ref.category == "self":
             detail.update({"original_value": ref.original_value, "normalized_value": ref.normalized_value})
             if ref.evidence_id in written:
@@ -244,7 +253,8 @@ def generate(db: Session, campaign_id: int, employee_id: int, *, actor: models.U
                 raise HTTPException(status_code=409, detail="Please wait before regenerating this analysis")
             fingerprint = _fingerprint(db, campaign_id, employee_id)
             db.rollback()
-            analysis, trace = generate_employee_ai_analysis_from_context(context, job_id=job_id)
+            analysis, trace = generate_employee_ai_analysis_from_context(context, job_id=job_id,
+                                                                         language=preferred_language(db, actor))
             _lock_campaign(db, campaign_id)
             fresh = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
             _writable(fresh, db, actor)

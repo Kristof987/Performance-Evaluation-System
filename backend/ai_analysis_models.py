@@ -40,6 +40,8 @@ class EvidenceReference(AnalysisModel):
 class QualitativeEvidence(AnalysisModel):
     reference: EvidenceReference
     response_text: str
+    # Opaque per-campaign key of the peer who wrote it; counts distinct authors, never sent to the model.
+    author_key: str | None = None
 
 
 class RatingDistributionBin(AnalysisModel):
@@ -140,10 +142,23 @@ class GeneratedFinding(AnalysisModel):
         return self
 
 
+class GeneratedTheme(AnalysisModel):
+    label: str = Field(min_length=1, max_length=120)
+    tone: Literal["positive", "negative", "mixed"]
+    fact_ids: list[str] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def unique_facts(self):
+        if len(set(self.fact_ids)) != len(self.fact_ids):
+            raise ValueError("Fact references must be unique")
+        return self
+
+
 class GeneratedAnalysis(AnalysisModel):
     overall_assessment: GeneratedFinding
-    strengths: list[GeneratedFinding] = Field(max_length=5)
-    development_areas: list[GeneratedFinding] = Field(max_length=5)
+    strengths: list[GeneratedFinding] = Field(max_length=3)
+    development_areas: list[GeneratedFinding] = Field(max_length=3)
+    themes: list[GeneratedTheme] = Field(default_factory=list, max_length=10)
 
 
 class AnalysisFinding(AnalysisModel):
@@ -158,6 +173,8 @@ class AnalysisFinding(AnalysisModel):
     observation_claims: list[ObservationClaim] = Field(default_factory=list, max_length=20)
     # Present on new resolved analyses; legacy Drafts have no unified fact list.
     fact_ids: list[str] | None = Field(default=None, max_length=20)
+    # How many distinct colleagues' written comments the finding draws on; set by the backend.
+    comment_mentions: int | None = None
 
     @field_validator("assessment", "reasoning")
     @classmethod
@@ -175,10 +192,32 @@ class AnalysisFinding(AnalysisModel):
         return self
 
 
+class AnalysisTheme(AnalysisModel):
+    """A recurring point in colleagues' written comments; never a quotation."""
+    label: str = Field(min_length=1, max_length=120)
+    tone: Literal["positive", "negative", "mixed"]
+    fact_ids: list[str] = Field(min_length=1, max_length=30)
+    supporting_evidence_ids: list[str] = Field(min_length=1, max_length=1000)
+    # Distinct colleagues whose comments raise the theme; set by the backend.
+    mentions: int | None = None
+
+    @field_validator("label")
+    @classmethod
+    def nonempty_label(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Theme label cannot be blank")
+        return value.strip()
+
+
 class EmployeeAIAnalysis(AnalysisModel):
     overall_assessment: AnalysisFinding
+    # Historical versions may hold up to five; new generations ask for three.
     strengths: list[AnalysisFinding] = Field(max_length=5)
     development_areas: list[AnalysisFinding] = Field(max_length=5)
+    themes: list[AnalysisTheme] = Field(default_factory=list, max_length=10)
+    # Distinct colleagues who wrote comments the analysis could use; set by the backend.
+    comment_authors: int | None = None
+    language: Literal["en", "hu"] = "en"
 
 
 class AggregateEvidence(AnalysisModel):
@@ -209,3 +248,16 @@ class AggregateAnalysisContext(AnalysisModel):
     statistics: list[AggregateStatistic]
     comparison_evidence: list[list[str]]
     source_fingerprint: str
+
+
+class TranslatedFinding(AnalysisModel):
+    assessment: str = Field(min_length=1, max_length=1200)
+    reasoning: str = Field(min_length=1, max_length=2000)
+
+
+class TranslatedAnalysis(AnalysisModel):
+    """The prose of a verified analysis in another language, item for item."""
+    overall_assessment: TranslatedFinding
+    strengths: list[TranslatedFinding] = Field(max_length=5)
+    development_areas: list[TranslatedFinding] = Field(max_length=5)
+    themes: list[str] = Field(max_length=10)

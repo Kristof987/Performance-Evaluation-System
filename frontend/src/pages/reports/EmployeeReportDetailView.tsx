@@ -81,7 +81,7 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
   }));
 
   return <div className="reports-overview reports-employee-detail">
-    <div className="reports-employee-navigation"><button className="campaign-details-link link-button" type="button" onClick={onBack}>← Back to Employees</button><div className="reports-employee-jump-links"><a href="#employee-question-analytics">Question Analytics ↓</a><a href="#employee-ai-analysis">AI Performance Analysis ↓</a></div></div>
+    <div className="reports-employee-navigation"><button className="campaign-details-link link-button" type="button" onClick={onBack}>← Back to Employees</button><div className="reports-employee-jump-links"><a href="#employee-question-analytics">Question Analytics ↓</a><a href="#employee-ai-analysis">AI summary ↓</a></div></div>
     <header className="reports-detail-heading reports-employee-heading">
       <h2>{data.employee.name}</h2>
       <p>{data.employee.company_role}{data.employee.groups.length > 0 ? ` · ${data.employee.groups.join(', ')}` : ''}</p>

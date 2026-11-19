@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { Check, Info, MessageSquare, Pencil, RefreshCw, Sparkles, Target, TrendingUp, X } from 'lucide-react';
 import type { AccessTokenGetter } from '../../../auth/authenticated-api';
 import { approveAIAnalysis, fetchAIAnalyses, fetchGenerationJob, fetchLatestGenerationJob, generateAIAnalysis, generationErrorMessage, saveAIAnalysis } from '../api/ai-analysis.api';
-import type { AIAnalysis, AIAnalysisGenerationJob, AIAnalysisHistory, AIAnalysisScope, AnalysisEvidence, AnalysisFinding, AnalysisVersion } from '../types/ai-analysis.types';
+import type { AIAnalysis, AIAnalysisGenerationJob, AIAnalysisHistory, AIAnalysisScope, AnalysisEvidence, AnalysisFinding, AnalysisTheme, AnalysisVersion } from '../types/ai-analysis.types';
 import { useConfirm, useToast } from '../../../components/feedback/feedback-context';
 import InlineMessage from '../../../components/feedback/InlineMessage';
 import LoadError from '../../../components/feedback/LoadError';
@@ -21,18 +22,23 @@ function scopeKey(scope: AIAnalysisScope) {
 }
 
 const scopeCopy = {
-  employee: { heading: 'AI Performance Analysis', description: 'Evidence-based summary of submitted evaluations. Drafts require explicit HR review and approval.', intro: 'Generate an analysis of eligible submitted evaluations.' },
-  group: { heading: 'AI Performance Analysis', description: 'Evidence-based summary of reportable group results, not individual employee feedback. Drafts require explicit HR review and approval.', intro: 'Generate an analysis of eligible group results.' },
-  role: { heading: 'AI Performance Analysis', description: 'Evidence-based summary of reportable feedback received by employees in this role, not evaluator performance. Drafts require explicit HR review and approval.', intro: 'Generate an analysis of eligible evaluated-role results.' },
-  campaign: { heading: 'AI Performance Analysis', description: 'Evidence-based summary of reportable campaign-wide results, not individual employee feedback. Drafts require explicit HR review and approval.', intro: 'Generate an analysis of eligible campaign results.' },
+  employee: { intro: 'Generate a summary of this employee’s submitted evaluations: scores, self-evaluation and colleagues’ written comments.' },
+  group: { intro: 'Generate a summary of this group’s reportable results.' },
+  role: { intro: 'Generate a summary of the reportable feedback received by employees in this role.' },
+  campaign: { intro: 'Generate a summary of the campaign’s reportable results.' },
 };
 
+/** New analyses carry at most three findings per side; older versions may hold more. */
+const MAX_FINDINGS = 3;
+
+const blankFinding = (evidenceId: string): AnalysisFinding => ({ assessment: '', reasoning: '', supporting_evidence_ids: [evidenceId], numeric_claims: [], comparison_claims: [], observation_claims: [] });
 
 type EvidenceGroup = { key: string; entries: Array<{ id: string; item: AnalysisEvidence | undefined }> };
 
 function groupedEvidence(ids: string[], evidence: Record<string, AnalysisEvidence>, employeeScope: boolean): EvidenceGroup[] {
   const groups = new Map<string, EvidenceGroup>();
   for (const id of ids) {
+    if (evidence[id]?.comment) continue;  // Colleagues' comments are summarized as themes, never listed.
     const source = employeeScope ? /^form:\d+:question:(.+):(rating|text)$/.exec(id) : null;
     const item = evidence[id];
     const key = source && item ? `${item.category}:${source[1]}:${source[2]}` : id;
@@ -69,57 +75,108 @@ function EvidenceDetail({ group, employeeScope }: { group: EvidenceGroup; employ
   </details>;
 }
 
-function FindingCard({ finding, evidence, employeeScope, edit, onChange, onRemove }: {
-  finding: AnalysisFinding; evidence: Record<string, AnalysisEvidence>;
-  employeeScope: boolean; edit: boolean; onChange?: (next: AnalysisFinding) => void; onRemove?: () => void;
+type Chip = { label: string; tone: 'good' | 'watch' | 'neutral' };
+
+/** What a finding rests on, in numbers taken from the reports, not from the AI text. */
+function findingChips(finding: AnalysisFinding, evidence: Record<string, AnalysisEvidence>, kind: 'strength' | 'development' | 'overall', authors: number | null | undefined): Chip[] {
+  const sections = new Map<string, { peer?: number; self?: number }>();
+  for (const id of finding.supporting_evidence_ids) {
+    const item = evidence[id];
+    if (!item || item.comment) continue;
+    for (const stat of item.section_statistics) {
+      if (stat.average_normalized == null) continue;
+      const entry = sections.get(stat.section_name) ?? {};
+      if (item.category === 'self') entry.self = stat.average_normalized; else entry.peer = stat.average_normalized;
+      sections.set(stat.section_name, entry);
+    }
+  }
+  const tone = kind === 'strength' ? 'good' : kind === 'development' ? 'watch' : 'neutral';
+  // A ranking cites every section it compares; show the one at the end the finding is about.
+  const peer = (value: { peer?: number; self?: number }) => value.peer ?? value.self ?? 0;
+  const ordered = [...sections.entries()].sort((a, b) => kind === 'development' ? peer(a[1]) - peer(b[1]) : peer(b[1]) - peer(a[1]));
+  const chips: Chip[] = ordered.slice(0, ordered.length > 2 ? 1 : 2).map(([name, value]) => ({
+    tone,
+    label: value.peer != null && value.self != null ? `${name} · self ${value.self.toFixed(1)} · peers ${value.peer.toFixed(1)}`
+      : value.peer != null ? `${name} ${value.peer.toFixed(1)}` : `${name} (self) ${value.self!.toFixed(1)}`,
+  }));
+  if (finding.comment_mentions) chips.push({ tone: 'neutral', label: authors ? `${finding.comment_mentions} of ${authors} colleagues’ comments` : `${finding.comment_mentions} colleagues’ comments` });
+  return chips;
+}
+
+function Chips({ chips }: { chips: Chip[] }) {
+  return chips.length ? <span className="reports-ai-chips">{chips.map((chip) => <span key={chip.label} className={`reports-ai-chip is-${chip.tone}`}>{chip.label}</span>)}</span> : null;
+}
+
+function FindingEditor({ finding, onChange, onRemove }: { finding: AnalysisFinding; onChange: (next: AnalysisFinding) => void; onRemove?: () => void }) {
+  return <div className="reports-ai-edit">
+    <label>Title<input className="form-control" value={finding.assessment} maxLength={1200} onChange={(event) => onChange({ ...finding, assessment: event.target.value })} /></label>
+    <label>Explanation<textarea className="form-control" value={finding.reasoning} maxLength={2000} onChange={(event) => onChange({ ...finding, reasoning: event.target.value })} /></label>
+    {onRemove && <button type="button" className="reports-ai-link is-danger" onClick={onRemove}><X size={13} aria-hidden="true" />Remove</button>}
+  </div>;
+}
+
+function FindingItem({ number, finding, evidence, kind, authors, employeeScope, edit, onChange, onRemove }: {
+  number: number; finding: AnalysisFinding; evidence: Record<string, AnalysisEvidence>; kind: 'strength' | 'development';
+  authors: number | null | undefined; employeeScope: boolean; edit: boolean; onChange: (next: AnalysisFinding) => void; onRemove: () => void;
 }) {
-  const available = Object.keys(evidence);
-  const [showAll, setShowAll] = useState(false);
+  const [open, setOpen] = useState(false);
   const groups = groupedEvidence(finding.supporting_evidence_ids, evidence, employeeScope);
-  return <article className="reports-ai-finding">
-    {edit && onChange ? <>
-      <label>Assessment<textarea className="form-control" value={finding.assessment} maxLength={1200} onChange={(event) => onChange({ ...finding, assessment: event.target.value })} /></label>
-      <label>Reasoning<textarea className="form-control" value={finding.reasoning} maxLength={2000} onChange={(event) => onChange({ ...finding, reasoning: event.target.value })} /></label>
-      {finding.fact_ids != null ? <small>Supporting evidence is determined by the selected facts and cannot be changed independently.</small>
-        : <fieldset className="reports-ai-citations"><legend>Supporting evidence (required)</legend>
-          {available.map((id) => <label key={id}><input type="checkbox" checked={finding.supporting_evidence_ids.includes(id)} onChange={(event) => onChange({ ...finding, supporting_evidence_ids: event.target.checked ? [...finding.supporting_evidence_ids, id] : finding.supporting_evidence_ids.filter((candidate) => candidate !== id) })} />{evidence[id].question_text} · {evidence[id].category}</label>)}
-        </fieldset>}
-      {finding.numeric_claims.length > 0 && <small>Keep verified numbers unchanged; their values and all associated citations are checked when saving.</small>}
-      {!!finding.comparison_claims?.length && <small>Keep comparisons aligned with the cited areas and direction; supporting facts are checked when saving.</small>}
-      {!!finding.observation_claims?.length && <small>Keep assessments aligned with their cited observations; fact references are checked when saving.</small>}
-      {!!finding.fact_ids?.length && <small>Keep assessments aligned with their cited facts; evidence is resolved and checked when saving.</small>}
-      {onRemove && <button type="button" className="btn btn-secondary btn-small" onClick={onRemove}>Remove finding</button>}
-    </> : <><h4>{finding.assessment}</h4><p>{finding.reasoning}</p></>}
-    <div className="reports-ai-citation-list"><strong>Supporting Evidence</strong>
-      {(showAll ? groups : groups.slice(0, 3)).map((group) => <EvidenceDetail key={group.key} group={group} employeeScope={employeeScope} />)}
-      {groups.length > 3 && <button type="button" className="reports-ai-show-evidence" aria-expanded={showAll} onClick={() => setShowAll((current) => !current)}>{showAll ? 'Show less' : `Show all evidence (${groups.length})`}</button>}
+  if (edit) return <li className="reports-ai-item"><FindingEditor finding={finding} onChange={onChange} onRemove={onRemove} /></li>;
+  return <li className="reports-ai-item">
+    <strong>{number}. {finding.assessment}</strong>
+    <p>{finding.reasoning}</p>
+    <div className="reports-ai-item-foot">
+      <Chips chips={findingChips(finding, evidence, kind, authors)} />
+      {groups.length > 0 && <button type="button" className="reports-ai-link" aria-expanded={open} onClick={() => setOpen((value) => !value)}>{open ? 'Hide details' : 'Details'}</button>}
     </div>
-  </article>;
+    {open && <div className="reports-ai-evidence-list">{groups.map((group) => <EvidenceDetail key={group.key} group={group} employeeScope={employeeScope} />)}</div>}
+  </li>;
 }
 
-const blankFinding = (evidenceId: string): AnalysisFinding => ({ assessment: '', reasoning: '', supporting_evidence_ids: [evidenceId], numeric_claims: [], comparison_claims: [], observation_claims: [] });
+function FindingColumn({ kind, findings, evidence, authors, employeeScope, edit, onChange, onRemove, onAdd }: {
+  kind: 'strength' | 'development'; findings: AnalysisFinding[]; evidence: Record<string, AnalysisEvidence>; authors: number | null | undefined;
+  employeeScope: boolean; edit: boolean; onChange: (index: number, next: AnalysisFinding) => void; onRemove: (index: number) => void; onAdd?: () => void;
+}) {
+  const Icon = kind === 'strength' ? TrendingUp : Target;
+  return <section className={`reports-ai-column is-${kind}`}>
+    <h3><Icon size={15} aria-hidden="true" />{kind === 'strength' ? 'Strengths' : 'Development areas'}</h3>
+    {findings.length === 0 ? <p className="reports-ai-empty">No finding the data supports.</p>
+      : <ol>{findings.map((finding, index) => <FindingItem key={index} number={index + 1} finding={finding} evidence={evidence} kind={kind} authors={authors} employeeScope={employeeScope} edit={edit}
+        onChange={(next) => onChange(index, next)} onRemove={() => onRemove(index)} />)}</ol>}
+    {edit && onAdd && findings.length < MAX_FINDINGS && <button type="button" className="reports-ai-link" onClick={onAdd}>Add {kind === 'strength' ? 'strength' : 'development area'}</button>}
+  </section>;
+}
 
-/** Every AI text is marked as such, with its review state, so nobody mistakes it for a human assessment. */
-function AIContentLabel({ approved, approvedAt, approvedBy }: { approved: boolean; approvedAt: string | null; approvedBy: number | null }) {
+/** Recurring points in colleagues' comments, with how many colleagues raise them; never quotations. */
+function ThemeList({ themes, authors, edit, onChange }: { themes: AnalysisTheme[]; authors: number | null | undefined; edit: boolean; onChange: (next: AnalysisTheme[]) => void }) {
+  if (themes.length === 0) return null;
+  return <section className="reports-ai-themes">
+    <h3><MessageSquare size={15} aria-hidden="true" />Themes in colleagues’ comments{authors ? <small> · {authors} colleagues wrote comments</small> : null}</h3>
+    <ul>{themes.map((theme, index) => {
+      const share = authors && theme.mentions ? Math.round((theme.mentions / authors) * 100) : 0;
+      return <li key={index} className={`is-${theme.tone}`}>
+        {edit ? <span className="reports-ai-theme-edit"><input className="form-control" aria-label={`Theme ${index + 1}`} value={theme.label} maxLength={120} onChange={(event) => onChange(themes.map((item, position) => position === index ? { ...item, label: event.target.value } : item))} />
+          <button type="button" className="reports-ai-link is-danger" aria-label={`Remove theme ${index + 1}`} onClick={() => onChange(themes.filter((_, position) => position !== index))}><X size={13} aria-hidden="true" /></button></span>
+          : <span className="reports-ai-theme-label">{theme.label}</span>}
+        <span className="reports-ai-theme-bar" aria-hidden="true"><span style={{ width: `${share}%` }} /></span>
+        <span className="reports-ai-theme-count">{theme.mentions ? authors ? `${theme.mentions} of ${authors}` : theme.mentions : '–'}</span>
+      </li>;
+    })}</ul>
+  </section>;
+}
+
+function AIExplanation({ employeeScope, version }: { employeeScope: boolean; version: AnalysisVersion | null }) {
   const dates = useDates();
-  return <p className={`reports-ai-label${approved ? ' approved' : ''}`} role="note">
-    <strong>AI-generated content.</strong>{' '}
-    {approved
-      ? `Reviewed and approved by user #${approvedBy ?? '?'}${approvedAt ? ` on ${dates.dateTime(approvedAt, 'Not recorded')}` : ''}. It summarizes the data below and is not a decision.`
-      : 'Draft awaiting human review. Do not rely on it or share it until an authorized reviewer approves it.'}
-  </p>;
-}
-
-function AIExplanation({ employeeScope }: { employeeScope: boolean }) {
   return <details className="reports-ai-explainer">
-    <summary>How is this analysis made?</summary>
+    <summary><Info size={13} aria-hidden="true" />How it’s made</summary>
     <ul>
-      <li><strong>What the AI receives:</strong> aggregated scores and statistics derived from submitted evaluations, plus question and Section wording{employeeScope ? '; for written self-feedback only the fact that it exists' : ''}.</li>
-      <li><strong>What it never receives:</strong> names or IDs of employees and evaluators, peers’ written comments, and any result hidden by the privacy thresholds.</li>
-      <li><strong>How it is checked:</strong> every statement must cite the facts it is based on; unsupported comparisons, rankings and trends are rejected automatically.</li>
-      <li><strong>Human review:</strong> a generated text stays a draft until a person with approval rights reviews and approves it.</li>
-      <li><strong>Not for employment decisions:</strong> it must not be used on its own for promotion, dismissal, pay or similar decisions. Use it as one input next to the reports and conversations.</li>
+      <li><strong>What the AI receives:</strong> released scores and statistics, question and section wording{employeeScope ? ', the self-evaluation’s written answers, and colleagues’ written comments when at least two colleagues wrote one, with names replaced and without saying who wrote what' : ''}.</li>
+      <li><strong>What it never receives:</strong> names or IDs of employees and evaluators, and any result hidden by the privacy thresholds.</li>
+      <li><strong>How it is checked:</strong> every statement must cite the data it is based on; unsupported comparisons, rankings, trends and recommendations are rejected{employeeScope ? ', and so is any text that repeats a colleague’s words' : ''}. The numbers next to the findings come from the reports, not from the AI.</li>
+      <li><strong>Human review:</strong> a generated text stays a draft until a person with approval rights approves it. It is never shown to the employee.</li>
+      <li><strong>Not for employment decisions:</strong> don’t use it on its own for promotion, dismissal, pay or similar decisions.</li>
     </ul>
+    {version && <p className="reports-ai-technical">Generated {dates.dateTime(version.generated_at, 'not recorded')} by user #{version.generated_by_user_id} · {version.model_identifier}{version.prompt_version ? ` · prompt ${version.prompt_version}` : ''}{version.token_usage ? ` · ${(version.token_usage.input_tokens + version.token_usage.output_tokens).toLocaleString()} tokens` : ''}{version.edited_at ? ` · edited ${dates.dateTime(version.edited_at, 'not recorded')} by user #${version.edited_by_user_id}` : ''}{version.approved_at ? ` · approved ${dates.dateTime(version.approved_at, 'not recorded')} by user #${version.approved_by_user_id}` : ''}</p>}
   </details>;
 }
 
@@ -284,7 +341,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     }
   }
 
-  function updateFinding(section: keyof AIAnalysis, index: number | null, next: AnalysisFinding) {
+  function updateFinding(section: 'overall_assessment' | 'strengths' | 'development_areas', index: number | null, next: AnalysisFinding) {
     setEditing((current) => {
       if (!current) return current;
       if (section === 'overall_assessment') return { ...current, overall_assessment: next };
@@ -312,49 +369,66 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
   const canApprove = history?.can_approve ?? history?.can_manage ?? false;
   const aiEnabled = history?.ai_enabled ?? true;
   const mayWrite = !selected?.outdated;
-  const copy = scopeCopy[scope.type];
-  return <section className="reports-card reports-ai-panel" aria-label={copy.heading}>
-    <div className="reports-section-heading"><h2>{copy.heading}</h2>{scope.type !== 'employee' && history?.scope_label && <strong>{history.scope_label}</strong>}<p>{copy.description}</p></div>
-    <AIExplanation employeeScope={scope.type === 'employee'} />
-    {!history && !error && <LoadingState variant="section" label="Loading saved analyses" />}
+  const employeeScope = scope.type === 'employee';
+  const content = editing ?? selected?.analysis ?? null;
+  const statusLabel = !selected ? null : selected.outdated ? 'Outdated' : selected.status === 'approved' ? (selected.is_current_approved ? 'Approved' : 'Approved · earlier version') : 'Draft · needs approval';
+  const statusTone = !selected ? '' : selected.outdated ? 'is-outdated' : selected.status === 'approved' ? 'is-approved' : 'is-draft';
+  const generateLabel = busy === 'generate' ? <Pending label="Starting" /> : jobActive ? 'Generating…' : job?.status === 'failed' ? 'Retry' : history?.versions.length ? 'Regenerate' : 'Generate summary';
+  const generateDisabled = !history || busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence;
+  async function regenerate() {
+    if (!history) return;
+    if (history.versions.length > 0 && !(await confirm({ title: 'Regenerate the summary?', message: 'This sends a new request to the AI provider and may incur API cost. A new draft is created; earlier versions stay available.', confirmLabel: 'Regenerate' }))) return;
+    void startGeneration();
+  }
+  return <section className="reports-card reports-ai-panel" aria-label="AI summary">
+    <header className="reports-ai-header">
+      <div className="reports-ai-title"><Sparkles size={18} aria-hidden="true" /><h2>AI summary</h2>{!employeeScope && history?.scope_label && <span className="reports-ai-scope">{history.scope_label}</span>}{statusLabel && <span className={`reports-ai-status ${statusTone}`}>{statusLabel}</span>}</div>
+      {history && selected && (canEdit || canApprove) && <div className="reports-ai-header-actions">
+        {editing ? <>
+          <button type="button" className="btn btn-secondary btn-small" disabled={busy !== null} onClick={async () => {
+            if (JSON.stringify(editing) !== JSON.stringify(selected.analysis) && !(await confirm({ title: 'Discard your edits?', message: 'Your changes to this draft haven’t been saved.', confirmLabel: 'Discard edits', tone: 'danger' }))) return;
+            setEditing(null);
+          }}>Cancel</button>
+          <button type="button" className="btn btn-primary btn-small" disabled={busy !== null} onClick={() => { void perform('save', () => saveAIAnalysis(getAccessToken, scope, selected.id, editing)); }}>{busy === 'save' ? <Pending label="Saving" /> : 'Save as new draft'}</button>
+        </> : selected.status === 'draft' && mayWrite && <>
+          {canEdit && <button type="button" className="btn btn-secondary btn-small" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}><Pencil size={13} aria-hidden="true" />Edit</button>}
+          {canApprove && <button type="button" className="btn btn-primary btn-small" disabled={busy !== null} onClick={async () => { if (await confirm({ title: `Approve version ${selected.version}?`, message: 'Approved content becomes read-only and replaces the currently approved version.', confirmLabel: 'Approve' })) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? <Pending label="Approving" /> : <><Check size={13} aria-hidden="true" />Approve</>}</button>}
+        </>}
+      </div>}
+    </header>
+    {!history && !error && <LoadingState variant="section" label="Loading saved summaries" />}
     {error && <LoadError message={error} onRetry={() => setReload((value) => value + 1)} />}
     {actionError && <InlineMessage tone="error" onDismiss={() => setActionError('')}>{actionError}</InlineMessage>}
     {jobError && <LoadError message={`Couldn’t confirm the generation status: ${jobError}`} retryLabel="Check status again" onRetry={() => setJobReload((value) => value + 1)} />}
-    {jobReady && !jobError && jobActive && <InlineMessage tone="info">AI analysis {job?.status === 'queued' ? 'queued' : 'running'}. You can leave this page; generation will continue.</InlineMessage>}
-    {jobReady && !jobError && job?.status === 'failed' && <InlineMessage tone="error">{generationErrorMessage(job.error_code)} Use Retry generation to start a new attempt.</InlineMessage>}
-    {history && <>
-      <div className="reports-ai-toolbar">
-        {history.versions.length > 0 && <label>Analysis version<select className="form-control" value={selected?.id ?? ''} onChange={(event) => { setEditing(null); setSelectedId(Number(event.target.value)); setActionError(''); }}>
-          {history.versions.map((version) => <option key={version.id} value={version.id}>Version {version.version} · {version.status === 'draft' ? 'Draft' : 'Approved'}{version.is_current_approved ? ' · Current approved' : ''}{version.outdated ? ' · Outdated' : ''}</option>)}
-        </select></label>}
-         {canGenerate && <button type="button" className="btn btn-primary" disabled={busy !== null || editing !== null || !jobReady || !!jobError || jobActive || !history.has_eligible_evidence} onClick={async () => {
-           if (history.versions.length > 0 && !(await confirm({ title: 'Regenerate the analysis?', message: 'This sends a new request to the AI provider and may incur API cost. A new draft is created; earlier versions stay available.', confirmLabel: 'Regenerate' }))) return;
-           void startGeneration();
-         }}>{busy === 'generate' ? <Pending label="Starting generation" /> : jobActive ? 'Generation in progress...' : job?.status === 'failed' ? 'Retry generation' : history.versions.length ? 'Regenerate Analysis' : 'Generate Analysis'}</button>}
+    {jobReady && !jobError && jobActive && <InlineMessage tone="info">The AI summary is {job?.status === 'queued' ? 'queued' : 'being written'}. You can leave this page; it continues in the background.</InlineMessage>}
+    {jobReady && !jobError && job?.status === 'failed' && <InlineMessage tone="error">{generationErrorMessage(job.error_code)}</InlineMessage>}
+    {history && !aiEnabled && <InlineMessage tone="info">AI features are turned off in workspace settings. Saved summaries stay available to read.</InlineMessage>}
+    {history && !history.has_eligible_evidence && <InlineMessage tone="info">No reportable submitted evaluations yet. Too little data says nothing about performance.</InlineMessage>}
+    {history && !selected && <div className="reports-ai-start"><p>{scopeCopy[scope.type].intro} It stays a draft until someone with approval rights reviews it.</p>{canGenerate && <button type="button" className="btn btn-primary" disabled={generateDisabled} onClick={() => void regenerate()}><Sparkles size={14} aria-hidden="true" />{generateLabel}</button>}</div>}
+    {selected && content && <>
+      {selected.status === 'draft' && !selected.outdated && <p className="reports-ai-note">AI-generated draft. Check it before approving; don’t share it until it’s approved.</p>}
+      {selected.outdated && <InlineMessage tone="warning">Submitted evaluations changed after this summary was written. Regenerate it before editing or approving.</InlineMessage>}
+      <div className="reports-ai-summary">
+        {editing ? <FindingEditor finding={editing.overall_assessment} onChange={(next) => updateFinding('overall_assessment', null, next)} />
+          : <><strong>{content.overall_assessment.assessment}</strong><p>{content.overall_assessment.reasoning}</p></>}
       </div>
-      {!aiEnabled && <InlineMessage tone="info">AI features are turned off in workspace settings. Saved analyses stay available to read.</InlineMessage>}
-      {!history.has_eligible_evidence && <InlineMessage tone="info">No reportable submitted evidence is available. Insufficient data is not an indication of low performance.</InlineMessage>}
-       {!selected && <p className="reports-ai-intro">{copy.intro} AI conclusions are not shown until explicitly generated, reviewed and approved by an authorized manager.</p>}
-      {selected && <>
-        <AIContentLabel approved={selected.status === 'approved'} approvedAt={selected.approved_at} approvedBy={selected.approved_by_user_id} />
-        {selected.outdated && <InlineMessage tone="warning">Outdated analysis: submitted evaluation data has changed. This version remains historical; regenerate before editing or approval.</InlineMessage>}
-        <div className="reports-ai-meta"><span>{selected.status === 'approved' ? 'Approved' : 'Draft'}{selected.is_current_approved ? ' · Current approved' : ''}</span><span>Generated {dates.dateTime(selected.generated_at, 'Not recorded')} by user #{selected.generated_by_user_id} · {selected.model_identifier}{selected.prompt_version ? ` · prompt ${selected.prompt_version}` : ''}{selected.token_usage ? ` · ${(selected.token_usage.input_tokens + selected.token_usage.output_tokens).toLocaleString()} tokens` : ''}</span>{selected.edited_at && <span>Edited {dates.dateTime(selected.edited_at, 'Not recorded')} by user #{selected.edited_by_user_id}</span>}{selected.approved_at && <span>Approved {dates.dateTime(selected.approved_at, 'Not recorded')} by user #{selected.approved_by_user_id}</span>}</div>
-        <div className="reports-ai-sections">
-            <div><h3>Overall Assessment</h3><FindingCard key={selected.id} finding={editing?.overall_assessment ?? selected.analysis.overall_assessment} evidence={selected.evidence} employeeScope={scope.type === 'employee'} edit={editing !== null} onChange={(next) => updateFinding('overall_assessment', null, next)} /></div>
-          {(['strengths', 'development_areas'] as const).map((section) => <div key={section}><h3>{section === 'strengths' ? 'Strengths' : 'Development Areas'}</h3>
-            {(editing?.[section] ?? selected.analysis[section]).length === 0 && <p>No evidence-backed findings in this section.</p>}
-              {(editing?.[section] ?? selected.analysis[section]).map((finding, index) => <FindingCard key={`${selected.id}-${section}-${index}`} finding={finding} evidence={selected.evidence} employeeScope={scope.type === 'employee'} edit={editing !== null} onChange={(next) => updateFinding(section, index, next)} onRemove={editing ? () => removeFinding(section, index) : undefined} />)}
-            {editing && (editing[section].length < 5) && Object.keys(selected.evidence).length > 0 && <button type="button" className="btn btn-secondary btn-small" onClick={() => addFinding(section)}>Add finding</button>}
-          </div>)}
-        </div>
-        {(canEdit || canApprove) && <div className="reports-ai-actions">
-           {editing ? <><button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => { if (editing) void perform('save', () => saveAIAnalysis(getAccessToken, scope, selected.id, editing)); }}>{busy === 'save' ? <Pending label="Saving" /> : 'Save as new Draft'}</button><button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={async () => {
-               if (editing && JSON.stringify(editing) !== JSON.stringify(selected.analysis) && !(await confirm({ title: 'Discard your edits?', message: 'Your changes to this draft haven’t been saved.', confirmLabel: 'Discard edits', tone: 'danger' }))) return;
-               setEditing(null);
-             }}>Cancel editing</button></>
-             : selected.status === 'draft' && mayWrite && <>{canEdit && <button type="button" className="btn btn-secondary" disabled={busy !== null || selected.id !== history.versions[0]?.id} onClick={() => setEditing(structuredClone(selected.analysis))}>Edit Draft</button>}{canApprove && <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={async () => { if (await confirm({ title: `Approve version ${selected.version}?`, message: 'Approved content becomes read-only and replaces the currently approved version.', confirmLabel: 'Approve analysis' })) void perform('approve', () => approveAIAnalysis(getAccessToken, scope, selected.id)); }}>{busy === 'approve' ? <Pending label="Approving" /> : 'Approve Analysis'}</button>}</>}
-        </div>}
-      </>}
+      <div className="reports-ai-columns">
+        {(['strengths', 'development_areas'] as const).map((section) => <FindingColumn key={section} kind={section === 'strengths' ? 'strength' : 'development'} findings={content[section]} evidence={selected.evidence}
+          authors={content.comment_authors} employeeScope={employeeScope} edit={editing !== null}
+          onChange={(index, next) => updateFinding(section, index, next)} onRemove={(index) => removeFinding(section, index)}
+          onAdd={Object.keys(selected.evidence).length > 0 ? () => addFinding(section) : undefined} />)}
+      </div>
+      <ThemeList themes={content.themes ?? []} authors={content.comment_authors} edit={editing !== null} onChange={(themes) => setEditing((current) => current && { ...current, themes })} />
+      <footer className="reports-ai-footer">
+        <span>Version {selected.version} of {history?.versions[0]?.version ?? selected.version} · {selected.edited_at ? 'edited' : 'generated'} {dates.dateTime(selected.edited_at ?? selected.generated_at, 'not recorded')}</span>
+        <span className="reports-ai-footer-actions">
+          {history && history.versions.length > 1 && <label className="reports-ai-versions"><span>Versions</span><select value={selected.id} disabled={editing !== null} onChange={(event) => { setEditing(null); setSelectedId(Number(event.target.value)); setActionError(''); }}>
+            {history.versions.map((version) => <option key={version.id} value={version.id}>Version {version.version} · {version.status === 'draft' ? 'draft' : 'approved'}{version.is_current_approved ? ' (current)' : ''}{version.outdated ? ' · outdated' : ''}</option>)}
+          </select></label>}
+          {canGenerate && <button type="button" className="reports-ai-link" disabled={generateDisabled} onClick={() => void regenerate()}><RefreshCw size={13} aria-hidden="true" />{generateLabel}</button>}
+        </span>
+      </footer>
     </>}
+    <AIExplanation employeeScope={employeeScope} version={selected} />
   </section>;
 }

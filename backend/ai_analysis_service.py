@@ -1,10 +1,14 @@
 """Prepare snapshot-based evidence for authorized internal analysis; never expose directly as a route.
 
-Peer text and per-reviewer ratings are deliberately absent from the serialized contract.
+Per-reviewer ratings are deliberately absent from the serialized contract. Peer written
+comments are included only once enough distinct colleagues wrote them, without reviewer
+identity, in a fixed shuffled order and with people's names replaced.
 Evidence IDs are locators, not authorization tokens: resolve them only after rechecking
 reports access, campaign/evaluatee scope, and the same suppression rules.
 """
 
+import hashlib
+import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from statistics import mean
@@ -72,6 +76,33 @@ def _answers(answers: object) -> tuple[dict[str, object], set[str]]:
     return values, duplicates
 
 
+MAX_COMMENT_CHARACTERS = 1500
+LENGTHENED = {"a": "[aá]", "e": "[eé]"}
+
+
+def redact_names(text: str, employee: str | None, colleagues: list[str]) -> str:
+    """Replace people's names in a written comment, so the model cannot tie it to anyone.
+
+    Full names and their parts (three letters or more) are matched case-sensitively, longest
+    first, with any word ending attached (Hungarian suffixes: "Annával"). A part shared by the
+    employee and a colleague (a common surname) counts as a colleague.
+    """
+    placeholders: dict[str, str] = {}
+    for name, placeholder in [*((name, "[colleague]") for name in colleagues if name != employee),
+                              *([(employee, "[the employee]")] if employee else [])]:
+        full = " ".join(name.split())
+        for part in [full, *full.split()]:
+            if len(part) >= 3:
+                placeholders.setdefault(part, placeholder)
+    if not placeholders:
+        return text
+    ordered = sorted(placeholders, key=len, reverse=True)
+    # Hungarian lengthens a final a/e before a suffix: Anna -> Annával, Gergely -> Gergelyé.
+    alternatives = [f"({re.escape(part[:-1])}{LENGTHENED.get(part[-1], re.escape(part[-1]))})" for part in ordered]
+    pattern = re.compile(rf"(?<!\w)(?:{'|'.join(alternatives)})\w*")
+    return pattern.sub(lambda match: placeholders[ordered[match.lastindex - 1]], text)
+
+
 def _statistics(observations: list[tuple[int, float, str]], *, minimum: int = 1) -> QuantitativeStatistics:
     if not observations:
         return QuantitativeStatistics(availability="no_data", answer_count=0)
@@ -128,7 +159,7 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
     evaluator_by_form: dict[int, int] = {}
     latest_section_form: dict[tuple[int, str, int], tuple[object, int]] = {}
     structures: set[tuple[str, ...]] = set()
-    withheld_peer_text = False
+    peer_text: list[tuple[EvidenceReference, str, int]] = []
     for assignment, status in rows:
         # Unlike status_key, a finish date alone does not prove submission.
         if (status.strip().lower() not in reporting_service.COMPLETED_STATUSES
@@ -198,7 +229,7 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
                 references[evidence_id] = reference
                 text_evidence.append(QualitativeEvidence(reference=reference, response_text=value))
             elif metadata["category"] == "text" and isinstance(value, str) and value.strip() and category == "peer":
-                withheld_peer_text = True
+                peer_text.append((reference, value.strip(), assignment.evaluator_id))
         structures.add(tuple(sorted(structure)))
         scored.append(section_scoring_service.EvaluationSections(
             assignment.id, campaign_id, assignment.evaluator_id, employee_id, assignment.company_group_id,
@@ -211,6 +242,19 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
             candidate = (assignment.finish_date, assignment.id)
             if key not in latest_section_form or candidate > latest_section_form[key]:
                 latest_section_form[key] = candidate
+
+    # Colleagues' comments count only when enough different people wrote them, like peer scores.
+    peer_authors = {author for _, _, author in peer_text}
+    peer_text_released = len(peer_authors) >= reporting_service.min_individual_peer_reviewers()
+    if peer_text_released:
+        people = db.query(models.Employee.id, models.Employee.full_name).all()
+        employee_name = next((name for person_id, name in people if person_id == employee_id), None)
+        colleagues = [name for _, name in people if name]
+        for reference, text, author in sorted(peer_text, key=lambda item: hashlib.sha256(item[0].evidence_id.encode()).hexdigest()):
+            references[reference.evidence_id] = reference
+            text_evidence.append(QualitativeEvidence(
+                reference=reference, response_text=redact_names(text[:MAX_COMMENT_CHARACTERS], employee_name, colleagues),
+                author_key=hashlib.sha256(f"{campaign_id}:{author}".encode()).hexdigest()[:16]))
 
     if len(structures) > 1:
         warnings.append(DataQualityWarning(code="different_questionnaires", message="Issued questionnaires contain different question structures; only matching questions are aggregated."))
@@ -266,9 +310,9 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
     if not any(question.peer.availability == "available" or question.self_evaluation.availability == "available" for question in questions):
         warnings.append(DataQualityWarning(code="missing_quantitative_data", message="No reportable quantitative responses are available."))
     if not text_evidence:
-        warnings.append(DataQualityWarning(code="no_qualitative_feedback", message="No releasable written feedback is available; peer raw text is withheld by Reports policy."))
-    if withheld_peer_text:
-        warnings.append(DataQualityWarning(code="peer_text_withheld", message="Raw peer written feedback is withheld by Reports policy."))
+        warnings.append(DataQualityWarning(code="no_qualitative_feedback", message="No written feedback is available."))
+    if peer_text and not peer_text_released:
+        warnings.append(DataQualityWarning(code="peer_text_withheld", message="Colleagues' written comments are left out: fewer than two colleagues wrote one."))
     if any(question.peer.availability == "suppressed" for question in questions) or any(section.peer.availability == "suppressed" for section in sections):
         warnings.append(DataQualityWarning(code="insufficient_peer_reviewers", message="Peer results with fewer than two distinct reviewers are suppressed."))
     visible_evidence = released_ids | {item.reference.evidence_id for item in text_evidence}
