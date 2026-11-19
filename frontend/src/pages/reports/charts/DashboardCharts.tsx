@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart, Pie, PieChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatDelta, scoreColor, scoreInk, type ChartTheme } from './chartTheme';
 
 const SCORE_DOMAIN: [number, number] = [1, 5];
@@ -171,4 +171,74 @@ export function ChartCard({ id, title, subtitle, actions, className = '', childr
     <header className="reports-viz-heading"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{actions}</header>
     {children}
   </section>;
+}
+
+export type ScatterPoint = { id: number; name: string; peer: number; self: number; color: string };
+
+/** Each employee's self rating against their peer rating; above the diagonal = rates themself higher. */
+export function SelfPeerScatter({ theme, points, onSelect }: { theme: ChartTheme; points: ScatterPoint[]; onSelect?: (id: number) => void }) {
+  const values = points.flatMap((point) => [point.peer, point.self]);
+  const low = Math.max(1, Math.floor(Math.min(...values) * 2) / 2 - 0.5);
+  const high = Math.min(5, Math.ceil(Math.max(...values) * 2) / 2 + 0.5);
+  const ticks = Array.from({ length: Math.round((high - low) * 2) + 1 }, (_, index) => low + index * 0.5);
+  const tip = ({ active, payload }: TooltipProps) => {
+    const point = payload?.[0]?.payload as ScatterPoint | undefined;
+    if (!active || !point) return null;
+    const gap = point.self - point.peer;
+    return <TooltipCard title={point.name} rows={[{ name: 'Peer rating', value: point.peer.toFixed(2), color: point.color }, { name: 'Self rating', value: point.self.toFixed(2) }, { name: 'Gap', value: `${gap > 0 ? '+' : gap < 0 ? '−' : '±'}${Math.abs(gap).toFixed(2)}` }]} />;
+  };
+  return <ResponsiveContainer width="100%" height={300}>
+    <ScatterChart margin={{ top: 10, right: 16, bottom: 18, left: -6 }}>
+      <CartesianGrid stroke={theme.grid} />
+      <XAxis type="number" dataKey="peer" name="Peer rating" domain={[low, high]} ticks={ticks} label={{ value: 'Peer rating', position: 'insideBottom', offset: -10, fill: theme.textMuted, fontSize: 11 }} {...axisProps(theme)} />
+      <YAxis type="number" dataKey="self" name="Self rating" domain={[low, high]} ticks={ticks} width={48} label={{ value: 'Self rating', angle: -90, position: 'insideLeft', offset: 14, fill: theme.textMuted, fontSize: 11 }} {...axisProps(theme)} />
+      <ReferenceLine segment={[{ x: low, y: low }, { x: high, y: high }]} stroke={theme.textMuted} strokeDasharray="4 4" />
+      <Tooltip content={tip} cursor={{ strokeDasharray: '3 3', stroke: theme.axis }} />
+      <Scatter data={points} cursor={onSelect ? 'pointer' : undefined} onClick={(point) => onSelect?.((point as unknown as ScatterPoint).id)} isAnimationActive={false}>
+        {points.map((point) => <Cell key={point.id} fill={point.color} stroke={theme.surface} strokeWidth={2} r={7} />)}
+      </Scatter>
+    </ScatterChart>
+  </ResponsiveContainer>;
+}
+
+/** Up to three profiles on the same sections: the employee, their group and the campaign. */
+export function ProfileRadar({ theme, sections, series }: { theme: ChartTheme; sections: Array<{ id: number; name: string }>; series: Array<{ key: string; name: string; color: string; values: Record<string, number | null>; dashed?: boolean; filled?: boolean }> }) {
+  const data = sections.map((section) => ({ label: shorten(section.name, 16), fullName: section.name, ...Object.fromEntries(series.map((item) => [item.key, item.values[String(section.id)] ?? null])) }));
+  return <ResponsiveContainer width="100%" height={340}>
+    <RadarChart data={data} outerRadius="78%" margin={{ top: 8, right: 24, bottom: 8, left: 24 }}>
+      <PolarGrid stroke={theme.grid} />
+      <PolarAngleAxis dataKey="label" tick={{ fill: theme.textSecondary, fontSize: 11 }} />
+      <PolarRadiusAxis domain={SCORE_DOMAIN} tickCount={5} tick={false} axisLine={false} />
+      <Tooltip content={seriesTooltip} />
+      {series.map((item) => <Radar key={item.key} dataKey={item.key} name={item.name} stroke={item.color} strokeWidth={2} strokeDasharray={item.dashed ? '5 4' : undefined} fill={item.color} fillOpacity={item.filled ? 0.22 : 0} dot={{ r: 3, fill: item.color }} isAnimationActive={false} />)}
+      <Legend iconType="plainline" iconSize={14} itemSorter={null} formatter={(value) => <span style={{ color: theme.textSecondary }}>{value}</span>} wrapperStyle={{ fontSize: 12 }} />
+    </RadarChart>
+  </ResponsiveContainer>;
+}
+
+/** Self minus peer per section: right of zero = rates themself higher than peers do. */
+export function GapBars({ theme, rows }: { theme: ChartTheme; rows: Array<{ id: number; name: string; peer: number; self: number }> }) {
+  const data = rows.map((row) => ({ ...row, gap: Number((row.self - row.peer).toFixed(2)), label: shorten(row.name), fullName: row.name }));
+  const extent = Math.max(0.5, ...data.map((row) => Math.abs(row.gap)));
+  const step = extent > 1.5 ? 1 : 0.5;
+  const limit = Math.ceil(extent / step) * step;
+  const ticks = Array.from({ length: Math.round((2 * limit) / step) + 1 }, (_, index) => -limit + index * step);
+  const tip = ({ active, payload }: TooltipProps) => {
+    const row = payload?.[0]?.payload as (typeof data)[number] | undefined;
+    if (!active || !row) return null;
+    return <TooltipCard title={row.fullName} rows={[{ name: 'Self rating', value: row.self.toFixed(2) }, { name: 'Peer rating', value: row.peer.toFixed(2) }, { name: 'Gap', value: `${row.gap > 0 ? '+' : row.gap < 0 ? '−' : '±'}${Math.abs(row.gap).toFixed(2)}` }]} />;
+  };
+  return <ResponsiveContainer width="100%" height={Math.max(150, data.length * 38 + 44)}>
+    <BarChart data={data} layout="vertical" margin={{ top: 6, right: 40, bottom: 4, left: 4 }} barCategoryGap="30%">
+      <CartesianGrid horizontal={false} stroke={theme.grid} />
+      <XAxis type="number" domain={[-limit, limit]} ticks={ticks} tickFormatter={(value: number) => (value > 0 ? `+${value}` : `${value}`)} {...axisProps(theme)} />
+      <YAxis type="category" dataKey="label" width={118} {...axisProps(theme)} />
+      <ReferenceLine x={0} stroke={theme.textMuted} />
+      <Tooltip content={tip} cursor={{ fill: theme.surfaceMuted, opacity: 0.6 }} />
+      <Bar dataKey="gap" name="Self − peer" radius={4} isAnimationActive={false}>
+        {data.map((row) => <Cell key={row.id} fill={row.gap >= 0 ? theme.series[3] : theme.series[0]} />)}
+        <LabelList dataKey="gap" position="right" formatter={(value) => typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}` : ''} fill={theme.textSecondary} fontSize={11} />
+      </Bar>
+    </BarChart>
+  </ResponsiveContainer>;
 }

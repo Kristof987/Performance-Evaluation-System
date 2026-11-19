@@ -785,7 +785,15 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
         peer_assigned_by_employee[filled_form.evaluatee_id].append(row)
         if status_key(row[2], filled_form.finish_date) == "completed":
             peer_completed_by_employee[filled_form.evaluatee_id].append(row)
-    scored, _names = _section_report_data(rows, db)
+    import report_dashboard_service
+
+    scored, section_names = _section_report_data(rows, db)
+    previous_campaign, previous_scores = report_dashboard_service.previous_employee_scores(campaign, actor, db, set(participant_ids))
+    _members, groups_by_employee = membership_maps(db)
+    campaign_groups = assigned_campaign_groups(campaign.id, db)
+    if team_groups is not None:
+        campaign_groups = [group for group in campaign_groups if group.id in team_groups]
+    campaign_group_ids = {group.id for group in campaign_groups}
     employees = []
     for employee_id in sorted(participant_ids, key=lambda item: employees_by_id.get(item)[0].full_name.lower() if employees_by_id.get(item) else ""):
         employee_role = employees_by_id.get(employee_id)
@@ -808,7 +816,13 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
                 "overall_peer_score": employee_result.overall_peer.score,
                 "availability": employee_result.overall_peer.availability,
                 "reportable_sections": sum(result.availability == "available" for result in employee_result.peer_sections.values()),
+                "overall_self_score": employee_result.overall_self.score,
+                "previous_overall_peer_score": previous.overall_peer.score
+                if (previous := previous_scores.get(employee_id)) and previous.overall_peer.availability == "available" else None,
+                "section_scores": {section_id: result.score if result.availability == "available" else None
+                                   for section_id, result in employee_result.peer_sections.items()},
             },
+            "group_ids": sorted(groups_by_employee.get(employee_id, set()) & campaign_group_ids),
         })
     configured_self = sum(item["self_evaluation"]["assigned"] for item in employees)
     completed_self = sum(item["self_evaluation"]["completed"] for item in employees)
@@ -826,6 +840,11 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
             "assigned_self_evaluations": configured_self,
         },
         "employees": employees,
+        "previous_campaign": _report_campaign_option(previous_campaign) if previous_campaign else None,
+        "sections": sorted(({"id": section_id, "name": section_names.get(section_id) or UNNAMED_SECTION}
+                            for section_id in {section_id for item in employees for section_id in item["performance_summary"]["section_scores"]}),
+                           key=lambda item: (item["name"].casefold(), item["id"])),
+        "groups": [{"id": group.id, "name": group.name} for group in campaign_groups],
         "notes": {"employee_participation": "Employees include assigned campaign evaluatees and campaign group members, deduplicated by employee ID.", "scoring": "Submitted schema-v2 snapshot ratings are normalized to 1-5 and aggregated by Section, peer evaluator and employee.", "individual_privacy": "Authorized campaign managers may view aggregate employee scores; raw peer feedback remains protected." if aggregate_access else f"Individual peer Section scores require at least {min_individual_peer_reviewers()} distinct peer evaluators."},
     }
 
@@ -931,6 +950,10 @@ def build_employee_report_detail(campaign_id: int, employee_id: int, actor: mode
         availability = "suppressed"
     else:
         availability = "available"
+    import report_dashboard_service
+
+    previous_campaign, previous_scores = report_dashboard_service.previous_employee_scores(campaign, actor, db, {employee_id})
+    previous = previous_scores.get(employee_id)
     self_status = self_evaluation_status(rows, employee_id)
     distinct_peer_evaluators = len({row[0].evaluator_id for row in peer_completed_rows})
     return {
@@ -950,5 +973,11 @@ def build_employee_report_detail(campaign_id: int, employee_id: int, actor: mode
         "self_peer_comparison": build_section_self_peer_comparison(employee_result, names),
         "coverage": {"peer_assigned": len({row[0].id for row in peer_rows}), "peer_completed": len({row[0].id for row in peer_completed_rows}), "peer_outstanding": max(0, len({row[0].id for row in peer_rows}) - len({row[0].id for row in peer_completed_rows})), "self_evaluation": self_status, "campaign_end_date": business_date(campaign.end_date), "distinct_peer_evaluators": distinct_peer_evaluators if aggregate_access or distinct_peer_evaluators >= min_individual_peer_reviewers() else None},
         "history": build_employee_history(employee_id, actor, db),
+        "previous_campaign": _report_campaign_option(previous_campaign) if previous_campaign else None,
+        "previous": {
+            "overall_peer_score": previous.overall_peer.score if previous.overall_peer.availability == "available" else None,
+            "sections": {section_id: result.score if result.availability == "available" else None for section_id, result in previous.peer_sections.items()},
+        } if previous else None,
+        "benchmarks": report_dashboard_service.employee_benchmarks(campaign, employee_id, rows, actor, db, aggregate_access),
         "notes": {"scoring": "Peer and self Section scores use submitted schema-v2 snapshots and normalized 1-5 ratings; Overall equally weights reportable Sections.", "individual_privacy": "Authorized campaign managers may view employee aggregate scores regardless of reviewer count." if aggregate_access else f"Individual peer Section scores require at least {min_individual_peer_reviewers()} distinct peer evaluators; suppressed results never enter Overall or Self comparisons.", "raw_feedback": "Raw written feedback and reviewer identities are not returned by Employee Reports."},
     }

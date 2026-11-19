@@ -187,3 +187,54 @@ def test_section_questions_keep_group_privacy(db, permissions):
 
     support = result["questions"][0]["groups"][world.groups[1].id]
     assert support["availability"] == "suppressed" and support["average"] is None
+
+
+def test_employee_overview_adds_sections_previous_scores_and_groups(db, permissions):
+    world = World(db)
+    old = world.campaign(2098)
+    world.rate_everyone(old, alpha=(3, 2), beta=(3, 2))
+    current = world.campaign(2099)
+    world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
+    world.review(current, world.groups[0], world.people[0], world.people[0], 2, 2)
+
+    result = reporting_service.build_employee_reports_overview(current.id, world.actor, db)
+
+    assert result["previous_campaign"]["id"] == old.id
+    assert [section["id"] for section in result["sections"]] == [world.section_a.id, world.section_b.id]
+    assert result["groups"] == [{"id": group.id, "name": group.name} for group in world.groups]
+    first = next(item for item in result["employees"] if item["employee_id"] == world.people[0].id)
+    summary = first["performance_summary"]
+    assert summary["overall_peer_score"] == 4.5 and summary["previous_overall_peer_score"] == 3.0
+    assert summary["overall_self_score"] == 2.0
+    assert summary["section_scores"] == {world.section_a.id: 5.0, world.section_b.id: 4.0}
+    assert first["group_ids"] == [world.groups[0].id]
+
+
+def test_employee_detail_compares_with_groups_campaign_and_previous(db, permissions):
+    world = World(db)
+    old = world.campaign(2100)
+    world.rate_everyone(old, alpha=(3, 2), beta=(3, 2))
+    current = world.campaign(2101)
+    world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
+
+    result = reporting_service.build_employee_report_detail(current.id, world.people[3].id, world.actor, db)
+
+    assert result["previous"] == {"overall_peer_score": 2.0, "sections": {world.section_a.id: 2.0, world.section_b.id: 2.0}}
+    assert result["benchmarks"]["campaign"]["sections"][world.section_a.id] == 4.0
+    (group,) = result["benchmarks"]["groups"]
+    assert (group["id"], group["overall"], group["sections"][world.section_b.id]) == (world.groups[1].id, 2.5, 2.0)
+
+
+def test_team_lead_employee_benchmarks_stay_inside_led_groups(db, permissions):
+    world = World(db)
+    current = world.campaign(2102)
+    world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
+    db.execute(models.employee_company_groups.insert().values(employee_id=world.people[0].id, company_group_id=world.groups[1].id))
+    token = reporting_service._team_groups.set(frozenset({world.groups[0].id}))
+    try:
+        result = reporting_service.build_employee_report_detail(current.id, world.people[0].id, world.actor, db)
+    finally:
+        reporting_service._team_groups.reset(token)
+
+    assert result["benchmarks"]["campaign"] is None
+    assert [group["id"] for group in result["benchmarks"]["groups"]] == [world.groups[0].id]

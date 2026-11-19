@@ -11,11 +11,9 @@ import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { usePageTitle } from '../../app/usePageTitle';
 import LoadError from '../../components/feedback/LoadError';
 import LoadingState from '../../components/feedback/LoadingState';
-
-function formatScore(value: number | null) {
-  if (value === null) return '—';
-  return `${value.toFixed(2)} / 5`;
-}
+import { GroupToggles } from './components/ReportFilterBar';
+import { ChartCard, Delta, SelfPeerScatter, type ScatterPoint } from './charts/DashboardCharts';
+import { scoreColor, seriesColor, useChartTheme, type ChartTheme } from './charts/chartTheme';
 
 function LoadingOrError({ error, retry }: { error: string; retry: () => void }) {
   if (error) return <LoadError message={error} onRetry={retry} />;
@@ -35,20 +33,50 @@ export function EmployeeReportsPage() {
   }}</ReportsLayout>;
 }
 
+type EmployeeSort = 'name' | 'score-high' | 'score-low' | 'change' | 'feedback' | 'gap';
+
+const SORTS: Array<{ value: EmployeeSort; label: string }> = [
+  { value: 'name', label: 'Name' },
+  { value: 'score-high', label: 'Highest peer rating' },
+  { value: 'score-low', label: 'Lowest peer rating' },
+  { value: 'change', label: 'Biggest drop first' },
+  { value: 'gap', label: 'Largest self − peer gap' },
+  { value: 'feedback', label: 'Feedback completion' },
+];
+
+const peerScore = (employee: EmployeeReportRow) => employee.performance_summary.availability === 'available' ? employee.performance_summary.overall_peer_score : null;
+
+function sortValue(employee: EmployeeReportRow, sort: EmployeeSort) {
+  const score = peerScore(employee);
+  const previous = employee.performance_summary.previous_overall_peer_score;
+  const self = employee.performance_summary.overall_self_score;
+  switch (sort) {
+    case 'score-high': return score === null ? Infinity : -score;
+    case 'score-low': return score ?? Infinity;
+    case 'change': return score === null || previous === null ? Infinity : score - previous;
+    case 'gap': return score === null || self === null ? Infinity : -Math.abs(self - score);
+    case 'feedback': return -(employee.peer_completed / Math.max(1, employee.peer_assigned));
+    default: return 0;
+  }
+}
+
 function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccessToken, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; getAccessToken: AccessTokenGetter | undefined; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
   const [data, setData] = useState<EmployeeReportsOverview | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
   const [query, setQuery] = useState('');
   const [role, setRole] = useState('all');
-  const [group, setGroup] = useState('all');
-  const [sort, setSort] = useState('name');
+  const [groupIds, setGroupIds] = useState<number[]>([]);
+  const [sort, setSort] = useState<EmployeeSort>('name');
+  const theme = useChartTheme();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!validCampaignId || !getAccessToken) return undefined;
     const controller = new AbortController();
     setData(null);
     setError('');
+    setGroupIds([]);
     fetchEmployeeReportsOverview(getAccessToken, selectedCampaignId, controller.signal)
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Employee reports could not be loaded.'); });
@@ -56,20 +84,19 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccess
   }, [getAccessToken, reload, selectedCampaignId, validCampaignId]);
 
   const roleOptions = useMemo(() => Array.from(new Set((data?.employees ?? []).map((employee) => employee.company_role))).sort(), [data]);
-  const groupOptions = useMemo(() => Array.from(new Set((data?.employees ?? []).flatMap((employee) => employee.groups))).sort(), [data]);
+  const colorOf = useMemo(() => {
+    const index = new Map((data?.groups ?? []).map((group, position) => [group.id, position]));
+    return (id: number) => seriesColor(theme, index.get(id) ?? 0);
+  }, [data, theme]);
   const employees = useMemo(() => {
     const filtered = (data?.employees ?? []).filter((employee) => {
       const matchesQuery = `${employee.employee_name} ${employee.email ?? ''}`.toLowerCase().includes(query.toLowerCase());
       const matchesRole = role === 'all' || employee.company_role === role;
-      const matchesGroup = group === 'all' || employee.groups.includes(group);
+      const matchesGroup = groupIds.length === 0 || employee.group_ids.some((id) => groupIds.includes(id));
       return matchesQuery && matchesRole && matchesGroup;
     });
-    return filtered.sort((a, b) => sort === 'feedback'
-      ? (b.peer_completed / Math.max(1, b.peer_assigned)) - (a.peer_completed / Math.max(1, a.peer_assigned)) || a.employee_name.localeCompare(b.employee_name)
-      : sort === 'score'
-        ? (b.performance_summary.overall_peer_score ?? -1) - (a.performance_summary.overall_peer_score ?? -1) || a.employee_name.localeCompare(b.employee_name)
-        : a.employee_name.localeCompare(b.employee_name));
-  }, [data, group, query, role, sort]);
+    return filtered.sort((a, b) => sortValue(a, sort) - sortValue(b, sort) || a.employee_name.localeCompare(b.employee_name));
+  }, [data, groupIds, query, role, sort]);
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <LoadingState variant="page" label="Loading campaigns" />;
@@ -77,22 +104,49 @@ function EmployeeReportsContent({ selectedCampaignId, validCampaignId, getAccess
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
   if (data === null || data.campaign.id !== selectedCampaignId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
 
+  const scatter: ScatterPoint[] = employees.flatMap((employee) => {
+    const peer = peerScore(employee);
+    const self = employee.performance_summary.overall_self_score;
+    return peer !== null && self !== null ? [{ id: employee.employee_id, name: employee.employee_name, peer, self, color: employee.group_ids.length ? colorOf(employee.group_ids[0]) : theme.textMuted }] : [];
+  });
+  const higherSelf = scatter.filter((point) => point.self - point.peer > 0.05).length;
+  const lowerSelf = scatter.filter((point) => point.peer - point.self > 0.05).length;
+
   return <div className="reports-overview reports-employees-page">
     <EmployeeOverview report={data} />
+    <div className="reports-scope-row reports-employee-scope">
+      <GroupToggles groups={data.groups} selected={groupIds} colorOf={colorOf} onChange={setGroupIds} />
+    </div>
+    {scatter.length >= 3 && <ChartCard title="Self rating vs. peer rating" subtitle={`One dot per employee, coloured by group · above the line = rates themself higher (${higherSelf}) · below = lower (${lowerSelf}) · click a dot to open`}>
+      <SelfPeerScatter theme={theme} points={scatter} onSelect={(id) => navigate(`/reports/campaigns/${selectedCampaignId}/employees/${id}`)} />
+    </ChartCard>}
     <section className="reports-card reports-simple-table reports-employee-table">
-      <div className="reports-section-heading"><h2>Employees</h2><p>Peer feedback and section scores for this campaign.</p></div>
-      <div className="reports-detail-filters reports-employee-filters"><input type="search" placeholder="Search employees" aria-label="Search employees" value={query} onChange={(event) => setQuery(event.target.value)} /><select value={role} onChange={(event) => setRole(event.target.value)} aria-label="Filter by company role"><option value="all">All roles</option>{roleOptions.map((item) => <option value={item} key={item}>{item}</option>)}</select><select value={group} onChange={(event) => setGroup(event.target.value)} aria-label="Filter by group"><option value="all">All groups</option>{groupOptions.map((item) => <option value={item} key={item}>{item}</option>)}</select><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort employees"><option value="name">Sort by name</option><option value="feedback">Sort by feedback completion</option><option value="score">Sort by peer score</option></select></div>
+      <div className="reports-section-heading"><h2>Employees</h2><p>Peer rating with change since {data.previous_campaign?.name ?? 'the previous campaign'}, and each section’s score from red (low) to green (high).</p></div>
+      <div className="reports-detail-filters reports-employee-filters"><input type="search" placeholder="Search employees" aria-label="Search employees" value={query} onChange={(event) => setQuery(event.target.value)} /><select value={role} onChange={(event) => setRole(event.target.value)} aria-label="Filter by company role"><option value="all">All roles</option>{roleOptions.map((item) => <option value={item} key={item}>{item}</option>)}</select><select value={sort} onChange={(event) => setSort(event.target.value as EmployeeSort)} aria-label="Sort employees">{SORTS.filter((item) => item.value !== 'change' || data.previous_campaign).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
       {data.employees.length === 0 ? <ReportsEmptyState title="No employees in this campaign." message="Employee analytics will appear after people are assigned to campaign groups or evaluations." />
         : employees.length === 0 ? <ReportsEmptyState title="No employees match the filters." message="Adjust search, role or group filters to view employees." />
-          : <div className="reports-table-scroll"><table><thead><tr><th>Employee</th><th>Group(s)</th><th>Role</th><th className="reports-number-cell">Peer reviews</th><th className="reports-number-cell">Peer rating</th><th>Details</th></tr></thead><tbody>{employees.map((employee) => <EmployeeRow employee={employee} campaignId={selectedCampaignId} key={employee.employee_id} />)}</tbody></table></div>}
+          : <div className="reports-table-scroll"><table><thead><tr><th>Employee</th><th>Group(s)</th><th className="reports-number-cell">Peer rating</th><th>Sections</th><th className="reports-number-cell">Peer reviews</th><th className="reports-number-cell">Self</th><th>Details</th></tr></thead><tbody>{employees.map((employee) => <EmployeeRow theme={theme} employee={employee} sections={data.sections} campaignId={selectedCampaignId} previousName={data.previous_campaign?.name ?? null} key={employee.employee_id} />)}</tbody></table></div>}
     </section>
   </div>;
 }
 
-function EmployeeRow({ employee, campaignId }: { employee: EmployeeReportRow; campaignId: number }) {
-  const { availability, overall_peer_score, reportable_sections } = employee.performance_summary;
-  const summary = availability === 'suppressed' ? 'Insufficient feedback' : availability === 'available' && overall_peer_score !== null ? formatScore(overall_peer_score) : 'Not yet available';
-  return <tr><td><div className="reports-person-cell"><strong title={employee.employee_name}>{employee.employee_name}</strong>{employee.email && <small title={employee.email}>{employee.email}</small>}</div></td><td className="reports-groups-cell" title={employee.groups.join(', ')}>{employee.groups.length > 0 ? employee.groups.join(', ') : '—'}</td><td className="reports-role-cell" title={employee.company_role}>{employee.company_role}</td><td className="reports-number-cell" aria-label={`${employee.peer_completed} of ${employee.peer_assigned} incoming peer reviews completed`}>{employee.peer_completed} / {employee.peer_assigned}</td><td className="reports-number-cell reports-peer-score" title={availability === 'suppressed' ? 'Individual score is withheld to protect confidentiality.' : undefined}><strong>{summary}</strong>{availability === 'available' && <small>{reportable_sections} {reportable_sections === 1 ? 'section' : 'sections'}</small>}</td><td><div className="reports-action-cell"><Link className="btn btn-secondary btn-small" to={`/reports/campaigns/${campaignId}/employees/${employee.employee_id}`}>View details</Link></div></td></tr>;
+function EmployeeRow({ theme, employee, sections, campaignId, previousName }: { theme: ChartTheme; employee: EmployeeReportRow; sections: Array<{ id: number; name: string }>; campaignId: number; previousName: string | null }) {
+  const { availability, reportable_sections, previous_overall_peer_score, overall_self_score, section_scores } = employee.performance_summary;
+  const score = peerScore(employee);
+  return <tr>
+    <td><div className="reports-person-cell"><strong title={employee.employee_name}>{employee.employee_name}</strong><small title={`${employee.company_role}${employee.email ? ` · ${employee.email}` : ''}`}>{employee.company_role}</small></div></td>
+    <td className="reports-groups-cell" title={employee.groups.join(', ')}>{employee.groups.length > 0 ? employee.groups.join(', ') : '—'}</td>
+    <td className="reports-number-cell reports-peer-score" title={availability === 'suppressed' ? 'Individual score is withheld to protect confidentiality.' : `${reportable_sections} scored ${reportable_sections === 1 ? 'section' : 'sections'}`}>
+      {score !== null ? <><strong>{score.toFixed(2)}</strong><Delta current={score} previous={previous_overall_peer_score} label={previousName ? `vs. ${previousName}` : undefined} /></> : <span className="reports-muted">{availability === 'suppressed' ? 'Hidden' : 'Not yet'}</span>}
+    </td>
+    <td><span className="reports-section-strip" role="img" aria-label={sections.map((section) => `${section.name}: ${section_scores[String(section.id)]?.toFixed(2) ?? 'not available'}`).join(', ')}>{sections.map((section) => {
+      const value = section_scores[String(section.id)];
+      return <span key={section.id} title={`${section.name}: ${value === undefined ? 'not rated' : value === null ? 'hidden or not enough ratings' : value.toFixed(2)}`} className={value === null || value === undefined ? 'is-empty' : undefined} style={value !== null && value !== undefined ? { background: scoreColor(theme, value) } : undefined} />;
+    })}</span></td>
+    <td className="reports-number-cell" aria-label={`${employee.peer_completed} of ${employee.peer_assigned} incoming peer reviews completed`}>{employee.peer_completed} / {employee.peer_assigned}</td>
+    <td className="reports-number-cell" title={score !== null && overall_self_score !== null ? `Self − peer: ${(overall_self_score - score).toFixed(2)}` : undefined}>{overall_self_score === null ? <span className="reports-muted">—</span> : overall_self_score.toFixed(2)}</td>
+    <td><div className="reports-action-cell"><Link className="btn btn-secondary btn-small" to={`/reports/campaigns/${campaignId}/employees/${employee.employee_id}`}>View details</Link></div></td>
+  </tr>;
 }
 
 export function EmployeeReportDetailPage() {

@@ -609,12 +609,13 @@
 .reports-employee-table th, .reports-employee-table td { font-size: 12px; padding: 9px 7px; }
 .reports-employee-table th { font-size: 10px; white-space: nowrap; }
 .reports-employee-table .reports-number-cell { text-align: right; }
-.reports-employee-table th:first-child { width: 24%; }
-.reports-employee-table th:nth-child(2) { width: 16%; }
-.reports-employee-table th:nth-child(3) { width: 14%; }
-.reports-employee-table th:nth-child(4) { width: 13%; }
-.reports-employee-table th:nth-child(5) { width: 17%; }
-.reports-employee-table th:last-child { text-align: right; width: 16%; }
+.reports-employee-table th:first-child { width: 20%; }
+.reports-employee-table th:nth-child(2) { width: 14%; }
+.reports-employee-table th:nth-child(3) { width: 11%; }
+.reports-employee-table th:nth-child(4) { width: 22%; }
+.reports-employee-table th:nth-child(5) { width: 11%; }
+.reports-employee-table th:nth-child(6) { width: 8%; }
+.reports-employee-table th:last-child { text-align: right; width: 14%; }
 .reports-employee-table tbody tr:hover { background: var(--color-primary-soft); }
 .reports-employee-table td.reports-groups-cell, .reports-employee-table td.reports-role-cell { display: table-cell; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reports-employee-table .reports-peer-score strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -966,3 +967,12 @@
   .reports-q-group { justify-content: flex-start; }
   .reports-q-group::before { color: var(--color-text-muted); content: attr(data-label); font-size: 11px; font-weight: 500; margin-right: 2px; }
 }
+
+/* Employees */
+.reports-employee-scope { margin-top: -2px; }
+.reports-muted { color: var(--color-text-muted); }
+.reports-employee-table .reports-peer-score { white-space: nowrap; }
+.reports-employee-table .reports-peer-score strong { display: block; }
+.reports-section-strip { display: flex; gap: 3px; max-width: 220px; }
+.reports-section-strip > span { border-radius: 4px; flex: 1 1 0; height: 18px; min-width: 8px; }
+.reports-section-strip > span.is-empty { background: repeating-linear-gradient(135deg, var(--color-surface-muted) 0 4px, var(--color-surface) 4px 8px); box-shadow: inset 0 0 0 1px var(--color-border); }

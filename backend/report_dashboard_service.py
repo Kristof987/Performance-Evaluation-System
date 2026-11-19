@@ -181,3 +181,45 @@ def build_section_questions(campaign_id: int, section_id: int, group_ids: list[i
             "groups": {group_id: _cell(by_group[group_id].get(key)) for group_id in group_ids},
         } for key, item in peer.items()],
     }
+
+
+def previous_employee_scores(campaign: models.Campaign, actor: models.User, db: Session,
+                             employee_ids: set[int]) -> tuple[models.Campaign | None, dict[int, Any]]:
+    """Employee scores from the previous reportable campaign, limited to what the actor may see there."""
+    history = _history(campaign, db)
+    if not history:
+        return None, {}
+    previous = history[-1]
+    aggregate_access = reporting_service.aggregate_reporting_access(previous.id, actor, db)
+    team_groups = reporting_service._team_groups.get()
+    if team_groups is not None:
+        employee_ids = employee_ids & reporting_service.team_employee_ids(previous.id, team_groups, actor, db)
+    scored, _names = reporting_service._section_report_data(reporting_service.campaign_report_rows(previous.id, db), db)
+    return previous, {employee_id: section_scoring_service.employee_scores(scored, previous.id, employee_id, aggregate_access=aggregate_access)
+                      for employee_id in employee_ids}
+
+
+def employee_benchmarks(campaign: models.Campaign, employee_id: int, rows: list[Any], actor: models.User, db: Session,
+                        aggregate_access: bool) -> dict[str, Any]:
+    """Campaign and group averages to compare one employee with.
+
+    Team leads see only their own groups, the same as on the Groups report; the campaign-wide
+    average needs full report access.
+    """
+    team_groups = reporting_service._team_groups.get()
+    _members, groups_by_employee = reporting_service.membership_maps(db)
+    groups = [group for group in reporting_service.assigned_campaign_groups(campaign.id, db)
+              if group.id in groups_by_employee.get(employee_id, set()) and (team_groups is None or group.id in team_groups)]
+    group_rows = rows if team_groups is None else [row for row in rows if row[0].company_group_id in team_groups]
+    scored, _names = reporting_service._section_report_data(group_rows, db)
+    roles = {person_id: role.id for person_id, (_employee, role) in reporting_service.users_by_id(db).items()}
+    results = section_scoring_service.group_scores(scored, campaign.id, roles, aggregate_access=aggregate_access)
+
+    def profile(result) -> dict[str, Any]:
+        return {"overall": _released(result.overall) if result else None,
+                "sections": {section_id: _released(score) for section_id, score in result.sections.items()} if result else {}}
+
+    return {
+        "campaign": profile(section_scoring_service.campaign_scores(scored, campaign.id, aggregate_access=aggregate_access)) if team_groups is None else None,
+        "groups": [{"id": group.id, "name": group.name, **profile(results.get(group.id))} for group in groups],
+    }

@@ -207,6 +207,9 @@ export type EmployeePerformanceSummary = {
   overall_peer_score: number | null;
   availability: 'available' | 'suppressed' | 'no_data';
   reportable_sections: number;
+  overall_self_score: number | null;
+  previous_overall_peer_score: number | null;
+  section_scores: Record<string, number | null>;
 };
 
 export type EmployeeReportRow = {
@@ -219,6 +222,7 @@ export type EmployeeReportRow = {
   peer_completed: number;
   self_evaluation: EmployeeSelfEvaluationSummary;
   performance_summary: EmployeePerformanceSummary;
+  group_ids: number[];
 };
 
 export type EmployeeReportsOverview = {
@@ -233,6 +237,9 @@ export type EmployeeReportsOverview = {
     assigned_self_evaluations: number;
   };
   employees: EmployeeReportRow[];
+  previous_campaign: ReportCampaignOption | null;
+  sections: Array<{ id: number; name: string }>;
+  groups: Array<{ id: number; name: string }>;
   notes: Record<string, string>;
 };
 
@@ -270,8 +277,15 @@ export type EmployeeReportDetail = {
   self_peer_comparison: EmployeeSelfPeerComparison[];
   coverage: { peer_assigned: number; peer_completed: number; peer_outstanding: number; distinct_peer_evaluators: number | null; self_evaluation: EmployeeSelfEvaluationSummary; campaign_end_date: string | null };
   history: EmployeeHistorySeries[];
+  previous_campaign: ReportCampaignOption | null;
+  previous: { overall_peer_score: number | null; sections: Record<string, number | null> } | null;
+  benchmarks: {
+    campaign: EmployeeBenchmark | null;
+    groups: Array<EmployeeBenchmark & { id: number; name: string }>;
+  };
   notes: Record<string, string>;
 };
+export type EmployeeBenchmark = { overall: number | null; sections: Record<string, number | null> };
 
 export type ReportEmployeeOverview = {
   participating_employees: number;
