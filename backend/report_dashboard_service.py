@@ -5,10 +5,12 @@ endpoints; this module only combines them across campaigns.
 """
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import campaign_lifecycle
 import models
+import question_analytics_service
 import reporting_service
 import section_scoring_service
 
@@ -113,4 +115,69 @@ def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) 
             "group_sections": {group.id: {section_id: _released(item["groups"][group.id].sections.get(section_id)) if group.id in item["groups"] else None
                                           for section_id in section_ids} for group in groups},
         } for item in summaries],
+    }
+
+
+MAX_SECTION_GROUPS = 5
+
+
+def _section_questions(report: dict, section_id: int) -> dict[str, dict]:
+    return {item["key"]: item for item in report["questions"] if item["section_id"] == section_id}
+
+
+def _cell(item: dict | None) -> dict[str, Any]:
+    if item is None:
+        return {"availability": "no_data", "response_count": 0, "average": None}
+    return {"availability": item["availability"], "response_count": item["response_count"], "average": item["average_normalized"]}
+
+
+def build_section_questions(campaign_id: int, section_id: int, group_ids: list[int], actor: models.User, db: Session) -> dict[str, Any]:
+    """One section's questions for the campaign, the compared groups, self ratings and the previous campaign.
+
+    Every slice comes from the question report, so each keeps its own privacy release decision.
+    Questions are matched across campaigns by their content key, which only changes when the question does.
+    """
+    campaign = reporting_service.require_reports_access(campaign_id, actor, db)
+    assert campaign is not None
+    if len(group_ids) > MAX_SECTION_GROUPS:
+        raise HTTPException(status_code=400, detail=f"Compare at most {MAX_SECTION_GROUPS} groups at a time")
+    groups = {group.id: group for group in reporting_service.assigned_campaign_groups(campaign_id, db)}
+    if any(group_id not in groups for group_id in group_ids):
+        raise HTTPException(status_code=404, detail="Group report not found")
+
+    peer = _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db), section_id)
+    if not peer:
+        raise HTTPException(status_code=404, detail="Section is not part of this campaign report")
+    self_rated = _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, evaluation_type="self"), section_id)
+    by_group = {group_id: _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, group_id=group_id), section_id)
+                for group_id in group_ids}
+    history = _history(campaign, db)
+    previous_campaign = history[-1] if history else None
+    previous = (_section_questions(question_analytics_service.build_question_report(previous_campaign.id, actor, db), section_id)
+                if previous_campaign is not None else {})
+    section_name = next(iter(peer.values()))["section_name"]
+
+    def previous_average(key: str) -> float | None:
+        item = previous.get(key)
+        return item["average_normalized"] if item and item["availability"] == "available" else None
+
+    return {
+        "campaign": reporting_service._report_campaign_option(campaign),
+        "previous_campaign": reporting_service._report_campaign_option(previous_campaign) if previous_campaign else None,
+        "section": {"id": section_id, "name": section_name},
+        "groups": [{"id": group_id, "name": groups[group_id].name} for group_id in group_ids],
+        "questions": [{
+            "key": key,
+            "text": item["text"],
+            "type": item["type"],
+            "category": item["category"],
+            "scale_min": item["scale_min"],
+            "scale_max": item["scale_max"],
+            **_cell(item),
+            "previous_average": previous_average(key),
+            "distribution_kind": item["distribution_kind"],
+            "distribution": item["distribution"],
+            "self": _cell(self_rated.get(key)),
+            "groups": {group_id: _cell(by_group[group_id].get(key)) for group_id in group_ids},
+        } for key, item in peer.items()],
     }

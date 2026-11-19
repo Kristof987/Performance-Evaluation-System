@@ -2242,6 +2242,20 @@ def get_campaign_report_dashboard(
     return report_dashboard_service.build_campaign_dashboard(campaign_id, actor, db)
 
 
+@app.get("/reports/campaigns/{campaign_id}/sections/{section_id}/questions", response_model=schemas.SectionQuestionsResponse)
+def get_campaign_section_questions(
+    campaign_id: int,
+    section_id: int,
+    group_ids: str = Query(default="", pattern=r"^(\d+(,\d+)*)?$"),
+    requester_user_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    reject_conflicting_requester(requester_user_id, actor)
+    selected = list(dict.fromkeys(int(value) for value in group_ids.split(",") if value))
+    return report_dashboard_service.build_section_questions(campaign_id, section_id, selected, actor, db)
+
+
 @app.get("/reports/campaigns/{campaign_id}/evaluation-quality", response_model=schemas.EvaluationQualityResponse)
 def get_campaign_evaluation_quality(
     campaign_id: int,

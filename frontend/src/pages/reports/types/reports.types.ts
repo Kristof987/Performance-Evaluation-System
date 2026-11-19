@@ -333,3 +333,24 @@ export type CampaignDashboard = {
   groups: DashboardGroup[];
   trend: DashboardTrendPoint[];
 };
+export type SectionQuestionCell = { availability: ScoreAvailability; response_count: number | null; average: number | null };
+export type SectionQuestion = SectionQuestionCell & {
+  key: string;
+  text: string;
+  type: string;
+  category: 'rating' | 'choice' | 'text';
+  scale_min: number | null;
+  scale_max: number | null;
+  previous_average: number | null;
+  distribution_kind: 'original' | 'options' | null;
+  distribution: Array<{ label: string; count: number; percentage: number }> | null;
+  self: SectionQuestionCell;
+  groups: Record<string, SectionQuestionCell>;
+};
+export type SectionQuestions = {
+  campaign: ReportCampaignOption;
+  previous_campaign: ReportCampaignOption | null;
+  section: { id: number; name: string };
+  groups: Array<{ id: number; name: string }>;
+  questions: SectionQuestion[];
+};

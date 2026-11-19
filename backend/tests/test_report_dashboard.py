@@ -135,3 +135,55 @@ def test_dashboard_applies_privacy_suppression(db, permissions):
     assert result["trend"][-1]["groups"][world.groups[1].id] is None
     assert set(result["trend"][-1]["group_sections"][world.groups[1].id].values()) == {None}
     assert result["previous_campaign"] is None and result["overall"]["previous_score"] is None
+
+
+def test_section_questions_compare_groups_self_and_previous_campaign(db, permissions):
+    world = World(db)
+    old = world.campaign(2094)
+    world.rate_everyone(old, alpha=(3, 2), beta=(3, 2))
+    current = world.campaign(2095)
+    world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
+    world.review(current, world.groups[0], world.people[0], world.people[0], 4, 4)
+
+    result = report_dashboard_service.build_section_questions(current.id, world.section_a.id, [world.groups[1].id], world.actor, db)
+
+    assert result["section"] == {"id": world.section_a.id, "name": world.section_a.name}
+    assert result["previous_campaign"]["id"] == old.id
+    assert result["groups"] == [{"id": world.groups[1].id, "name": world.groups[1].name}]
+    (question,) = result["questions"]
+    assert (question["average"], question["previous_average"], question["response_count"]) == (4.0, 2.5, 12)
+    assert question["self"] == {"availability": "available", "response_count": 1, "average": 4.0}
+    assert question["groups"][world.groups[1].id]["average"] == 3.0
+    assert [bucket["count"] for bucket in question["distribution"]] == [0, 0, 6, 0, 6]
+
+
+def test_section_questions_validate_scope(db, permissions):
+    from fastapi import HTTPException
+
+    world = World(db)
+    current = world.campaign(2096)
+    world.rate_everyone(current, alpha=(4, 4), beta=(4, 4))
+    with pytest.raises(HTTPException) as missing_group:
+        report_dashboard_service.build_section_questions(current.id, world.section_a.id, [10**9], world.actor, db)
+    with pytest.raises(HTTPException) as missing_section:
+        report_dashboard_service.build_section_questions(current.id, 10**9, [], world.actor, db)
+    with pytest.raises(HTTPException) as too_many:
+        report_dashboard_service.build_section_questions(current.id, world.section_a.id, [1, 2, 3, 4, 5, 6], world.actor, db)
+    assert (missing_group.value.status_code, missing_section.value.status_code, too_many.value.status_code) == (404, 404, 400)
+
+
+def test_section_questions_keep_group_privacy(db, permissions):
+    permissions.discard("campaigns.manage")
+    world = World(db)
+    current = world.campaign(2097)
+    for evaluator in world.people[:3]:
+        for evaluatee in world.people[:3]:
+            if evaluator is not evaluatee:
+                world.review(current, world.groups[0], evaluator, evaluatee, 4, 4)
+    world.review(current, world.groups[1], world.people[4], world.people[3], 2, 2)
+    world.review(current, world.groups[1], world.people[5], world.people[3], 2, 2)
+
+    result = report_dashboard_service.build_section_questions(current.id, world.section_a.id, [world.groups[1].id], world.actor, db)
+
+    support = result["questions"][0]["groups"][world.groups[1].id]
+    assert support["availability"] == "suppressed" and support["average"] is None

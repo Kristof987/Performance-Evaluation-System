@@ -1,5 +1,5 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { CampaignDashboard, CampaignRatingDistribution, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, ReportSectionComparison, RolePerspective, RoleReportDetail, RolesReport, WrittenFeedbackIndex, WrittenFeedbackResponse } from '../types/reports.types';
+import type { CampaignDashboard, CampaignRatingDistribution, SectionQuestions, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, ReportSectionComparison, RolePerspective, RoleReportDetail, RolesReport, WrittenFeedbackIndex, WrittenFeedbackResponse } from '../types/reports.types';
 
 async function requestReports<T>(getAccessToken: AccessTokenGetter, path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, `/reports${path}`, { signal });
@@ -31,6 +31,11 @@ export function fetchCampaignReportOverview(getAccessToken: AccessTokenGetter, c
 
 export function fetchCampaignDashboard(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {
   return requestReports<CampaignDashboard>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/dashboard`, signal, 'Campaign dashboard could not be loaded.');
+}
+
+export function fetchSectionQuestions(getAccessToken: AccessTokenGetter, campaignId: number, sectionId: number, groupIds: number[], signal: AbortSignal) {
+  const query = groupIds.length ? `?group_ids=${groupIds.join(',')}` : '';
+  return requestReports<SectionQuestions>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/sections/${encodeURIComponent(sectionId)}/questions${query}`, signal, 'Section questions could not be loaded.');
 }
 
 export function fetchCampaignRatingDistribution(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {

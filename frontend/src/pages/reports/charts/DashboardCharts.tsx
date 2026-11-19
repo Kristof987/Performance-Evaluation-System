@@ -80,7 +80,7 @@ export function GroupedBars({ theme, categories, series, reference }: { theme: C
 export type HeatmapRow = { id: number; name: string; color?: string; cells: Record<string, { score: number | null; availability: string }>; emphasis?: boolean };
 
 /** Groups × sections; hatched cells were withheld by the privacy threshold. */
-export function Heatmap({ theme, sections, rows, onCell }: { theme: ChartTheme; sections: Array<{ id: number; name: string }>; rows: HeatmapRow[]; onCell?: (sectionId: number) => void }) {
+export function Heatmap({ theme, sections, rows, onCell }: { theme: ChartTheme; sections: Array<{ id: number; name: string }>; rows: HeatmapRow[]; onCell?: (sectionId: number, groupId: number | null) => void }) {
   const ink = scoreInk(theme);
   return <div className="reports-heatmap-wrap"><table className="reports-heatmap">
     <thead><tr><th scope="col"><span className="reports-sr-only">Group</span></th>{sections.map((section) => <th key={section.id} scope="col" title={section.name}>{shorten(section.name, 16)}</th>)}</tr></thead>
@@ -92,7 +92,7 @@ export function Heatmap({ theme, sections, rows, onCell }: { theme: ChartTheme; 
         const label = value !== null ? value.toFixed(1) : cell?.availability === 'suppressed' ? 'Hidden' : '–';
         const title = `${row.name} · ${section.name}: ${value !== null ? value.toFixed(2) : cell?.availability === 'suppressed' ? 'hidden by the privacy threshold' : 'no ratings'}`;
         const content = <span className={value === null ? `reports-heat-empty${cell?.availability === 'suppressed' ? ' is-hidden' : ''}` : 'reports-heat-value'} style={value !== null ? { background: scoreColor(theme, value), color: ink } : undefined}>{label}</span>;
-        return <td key={section.id} title={title}>{onCell && value !== null ? <button type="button" aria-label={title} onClick={() => onCell(section.id)}>{content}</button> : content}</td>;
+        return <td key={section.id} title={title}>{onCell && value !== null ? <button type="button" aria-label={title} onClick={() => onCell(section.id, row.id || null)}>{content}</button> : content}</td>;
       })}
     </tr>)}</tbody>
   </table>
@@ -166,8 +166,8 @@ export function TrendLines({ theme, points: raw, series }: { theme: ChartTheme; 
   </ResponsiveContainer>;
 }
 
-export function ChartCard({ title, subtitle, actions, className = '', children }: { title: string; subtitle?: string; actions?: ReactNode; className?: string; children: ReactNode }) {
-  return <section className={`reports-card reports-viz-card ${className}`}>
+export function ChartCard({ id, title, subtitle, actions, className = '', children }: { id?: string; title: string; subtitle?: string; actions?: ReactNode; className?: string; children: ReactNode }) {
+  return <section id={id} className={`reports-card reports-viz-card ${className}`}>
     <header className="reports-viz-heading"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{actions}</header>
     {children}
   </section>;
