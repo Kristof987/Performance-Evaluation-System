@@ -1,6 +1,6 @@
 import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router'
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router'
 import { Auth0Provider } from '@auth0/auth0-react'
 import './styles/index.css'
 import Login from './pages/login/Login'
@@ -13,7 +13,7 @@ import Forms from './pages/forms/Forms'
 import { CampaignDetails, Campaigns } from './pages/campaigns/Campaigns'
 import CompletionStatus from './pages/completion-status/CompletionStatus'
 import CampaignOverviewPage, { ReportsIndexPage } from './pages/reports/CampaignOverviewPage'
-import DetailedResultsPage from './pages/reports/DetailedResultsPage'
+import AllAnswersPage from './pages/reports/AllAnswersPage'
 import AIAnalysisPage from './pages/reports/AIAnalysisPage'
 import QuestionAnalyticsPage from './pages/reports/QuestionAnalyticsPage'
 import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/reports/GroupsRolesPage'
@@ -35,6 +35,16 @@ import LoadingState from './components/feedback/LoadingState'
 function EvaluationQualityRedirect() {
   const { campaignId } = useParams()
   return <Navigate to={`/reports/campaigns/${campaignId}`} replace />
+}
+
+/** Detailed Results was retired: employee-scoped links open All Answers, the rest the Overview section. */
+function DetailedResultsRedirect() {
+  const { campaignId } = useParams()
+  const [params] = useSearchParams()
+  const employee = params.get('employee_id')
+  const section = params.get('section')
+  if (employee) return <Navigate to={`/reports/campaigns/${campaignId}/answers?employee=${encodeURIComponent(employee)}`} replace />
+  return <Navigate to={`/reports/campaigns/${campaignId}${section ? `?section=${encodeURIComponent(section)}` : ''}`} replace />
 }
 
 /** Old questionnaire links (e.g. in bookmarks) keep working. */
@@ -118,7 +128,8 @@ export default function AppRoutes() {
         <Route path="/campaigns/:id/completion" element={page(['Completion status', 'Campaigns'], <CompletionStatus />, ACCESS.completion)} />
         <Route path="/reports" element={page(['Reports'], <ReportsIndexPage />, ACCESS.reports)} />
         <Route path="/reports/campaigns/:campaignId" element={page(['Overview', 'Reports'], <CampaignOverviewRoute />, ACCESS.reports)} />
-        <Route path="/reports/campaigns/:campaignId/detailed" element={page(['Detailed results', 'Reports'], <DetailedResultsPage />, ACCESS.campaignReports)} />
+        <Route path="/reports/campaigns/:campaignId/answers" element={page(['All answers', 'Reports'], <AllAnswersPage />, ACCESS.campaignReports)} />
+        <Route path="/reports/campaigns/:campaignId/detailed" element={<DetailedResultsRedirect />} />
         <Route path="/reports/campaigns/:campaignId/ai-analysis" element={page(['AI analysis', 'Reports'], <AIAnalysisPage />, ACCESS.campaignReports)} />
         <Route path="/reports/campaigns/:campaignId/evaluation-quality" element={<EvaluationQualityRedirect />} />
         <Route path="/reports/campaigns/:campaignId/questions" element={page(['Question analytics', 'Reports'], <QuestionAnalyticsPage />, ACCESS.campaignReports)} />

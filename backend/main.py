@@ -26,6 +26,7 @@ import email_service
 import models
 import form_snapshot_service
 import reporting_service
+import answers_service
 import people_import_service
 import form_import_service
 import report_dashboard_service
@@ -2303,6 +2304,25 @@ def get_campaign_written_feedback(
         campaign_id, question_key, evaluation_type, actor, db,
         employee_id=employee_id, section_id=section_id,
     )
+
+
+@app.get("/reports/campaigns/{campaign_id}/answers", response_model=schemas.AnswersIndexResponse)
+def get_campaign_answers_index(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    return answers_service.build_answers_index(campaign_id, actor, db)
+
+
+@app.get("/reports/campaigns/{campaign_id}/answers/{employee_id}", response_model=schemas.EmployeeAnswersResponse)
+def get_employee_answers(
+    campaign_id: int,
+    employee_id: int,
+    db: Session = Depends(get_db),
+    actor: models.User = Depends(require_permission("reports.read")),
+):
+    return answers_service.build_employee_answers(campaign_id, employee_id, actor, db)
 
 
 @app.get("/reports/campaigns/{campaign_id}/groups")

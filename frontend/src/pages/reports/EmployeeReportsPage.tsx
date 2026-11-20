@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { fetchEmployeeReportDetail, fetchEmployeeReportsOverview } from './api/reports.api';
 import EmployeeReportDetailView from './EmployeeReportDetailView';
 import EmployeeOverview from './components/EmployeeOverview';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import ReportsLayout from './ReportsLayout';
-import WrittenFeedbackPreview from './components/WrittenFeedbackPreview';
 import type { EmployeeReportDetail, EmployeeReportRow, EmployeeReportsOverview } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { usePageTitle } from '../../app/usePageTitle';
@@ -28,7 +27,7 @@ export function EmployeeReportsPage() {
   return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null} allowWrittenFeedbackPreview>{(layout) => {
     const campaign = layout.campaigns.find((item) => item.id === selectedCampaignId);
     if (layout.getAccessToken && (campaign?.campaign_status === 'active' || campaign?.campaign_status === 'paused')) {
-      return <WrittenFeedbackPreview key={selectedCampaignId} campaignId={selectedCampaignId} targetList getAccessToken={layout.getAccessToken} />;
+      return <Navigate to={`/reports/campaigns/${selectedCampaignId}/answers`} replace />;
     }
     return <EmployeeReportsContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layout} />;
   }}</ReportsLayout>;
@@ -178,7 +177,7 @@ export function EmployeeReportDetailPage() {
   return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null} allowWrittenFeedbackPreview>{({ getAccessToken, campaigns }) => {
     const campaign = campaigns.find((item) => item.id === selectedCampaignId);
     if (getAccessToken && Number.isSafeInteger(selectedEmployeeId) && selectedEmployeeId > 0 && (campaign?.campaign_status === 'active' || campaign?.campaign_status === 'paused')) {
-      return <div className="reports-overview"><p className="reports-dashboard-note">Employee performance statistics become available in Review. Submitted feedback received by this employee can be read now.</p><WrittenFeedbackPreview key={`${selectedCampaignId}-${selectedEmployeeId}`} campaignId={selectedCampaignId} employeeId={selectedEmployeeId} getAccessToken={getAccessToken} /></div>;
+      return <Navigate to={`/reports/campaigns/${selectedCampaignId}/answers?employee=${selectedEmployeeId}`} replace />;
     }
     return <EmployeeReportDetailContent campaignId={selectedCampaignId} employeeId={selectedEmployeeId} getAccessToken={getAccessToken} />;
   }}</ReportsLayout>;

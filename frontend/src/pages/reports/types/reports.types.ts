@@ -367,3 +367,9 @@ export type SectionQuestions = {
   groups: Array<{ id: number; name: string }>;
   questions: SectionQuestion[];
 };
+
+export type AnswersIndexEmployee = { employee_id: number; employee_name: string; self_assigned: boolean; self_submitted: boolean; peer_assigned: number; peer_submitted: number };
+export type AnswersIndex = { campaign_id: number; min_peer_reviewers: number; employees: AnswersIndexEmployee[] };
+export type SubmittedAnswer = { question_id: string; text: string; type: string; required: boolean; answered: boolean; rating: number | null; scale_min: number | null; scale_max: number | null; choices: string[]; text_answer: string | null };
+export type SubmittedQuestionnaire = { label: string; kind: 'self' | 'peer'; form_name: string; sections: Array<{ section_id: number | null; section_name: string; answers: SubmittedAnswer[] }> };
+export type EmployeeAnswers = { campaign_id: number; employee: { id: number; name: string }; min_peer_reviewers: number; self_assigned: boolean; self_submitted: boolean; peer_assigned: number; peer_submitted: number; peer_availability: 'available' | 'no_data' | 'suppressed'; questionnaires: SubmittedQuestionnaire[] };

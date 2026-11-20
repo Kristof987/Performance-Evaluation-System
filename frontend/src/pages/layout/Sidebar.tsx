@@ -239,8 +239,9 @@ export default function Sidebar({
         </div>}
         {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && !teamReportsOnly && <div className="sidebar-report-links" aria-label="Reports pages">
           <NavLink end to={reportBase}>Overview</NavLink>
-          <NavLink to={`${reportBase}/detailed`} className={({ isActive }) => isActive || location.pathname.includes('/questions') || location.pathname.includes('/groups') || location.pathname.includes('/roles') ? 'active' : ''}>Detailed Results</NavLink>
           <NavLink to={`${reportBase}/employees`}>Employees</NavLink>
+          {(auth0User?.permissions ?? []).includes('campaigns.manage') && <NavLink to={`${reportBase}/answers`}>All Answers</NavLink>}
+          <NavLink to={`${reportBase}/groups`} className={({ isActive }) => isActive || location.pathname.includes('/roles') ? 'active' : ''}>Groups & Roles</NavLink>
           <NavLink to={`${reportBase}/ai-analysis`}>AI Analysis</NavLink>
         </div>}
         {can(ACCESS.settings) && <Link

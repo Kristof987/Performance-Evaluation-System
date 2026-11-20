@@ -163,7 +163,7 @@ export default function SectionQuestionList({ theme, campaignId, sectionId, grou
           })}
         </div>}
         {rated.length === 0 && <p className="reports-chart-notice">This section has no rating or choice questions.</p>}
-        {written.length > 0 && <p className="reports-chart-footnote reports-q-written">{written.length === 1 ? '1 written question' : `${written.length} written questions`} ({written.reduce((total, question) => total + (question.response_count ?? 0), 0)} answers) · <Link to={`/reports/campaigns/${campaignId}/detailed?section=${sectionId}`}>Read written feedback</Link></p>}
+        {written.length > 0 && <p className="reports-chart-footnote reports-q-written">{written.length === 1 ? '1 written question' : `${written.length} written questions`} ({written.reduce((total, question) => total + (question.response_count ?? 0), 0)} answers) · <Link to={`/reports/campaigns/${campaignId}/answers`}>Read in All Answers</Link></p>}
       </>}
   </ChartCard>;
 }

@@ -986,6 +986,64 @@ class ReportWrittenFeedbackIndexResponse(BaseModel):
     evaluatees: list[ReportWrittenFeedbackEvaluatee]
 
 
+class AnswersIndexEmployee(BaseModel):
+    employee_id: int
+    employee_name: str
+    self_assigned: bool
+    self_submitted: bool
+    peer_assigned: int
+    peer_submitted: int
+
+
+class AnswersIndexResponse(BaseModel):
+    campaign_id: int
+    min_peer_reviewers: int
+    employees: list[AnswersIndexEmployee]
+
+
+class SubmittedAnswer(BaseModel):
+    question_id: str
+    text: str
+    type: str
+    required: bool
+    answered: bool
+    rating: int | None
+    scale_min: int | None
+    scale_max: int | None
+    choices: list[str]
+    text_answer: str | None
+
+
+class SubmittedAnswerSection(BaseModel):
+    section_id: int | None
+    section_name: str
+    answers: list[SubmittedAnswer]
+
+
+class SubmittedQuestionnaire(BaseModel):
+    label: str
+    kind: Literal["self", "peer"]
+    form_name: str
+    sections: list[SubmittedAnswerSection]
+
+
+class AnswersEmployee(BaseModel):
+    id: int
+    name: str
+
+
+class EmployeeAnswersResponse(BaseModel):
+    campaign_id: int
+    employee: AnswersEmployee
+    min_peer_reviewers: int
+    self_assigned: bool
+    self_submitted: bool
+    peer_assigned: int
+    peer_submitted: int
+    peer_availability: Literal["available", "no_data", "suppressed"]
+    questionnaires: list[SubmittedQuestionnaire]
+
+
 class ReportRatingDistribution(BaseModel):
     section_id: int | None
     availability: Literal["available", "no_data", "suppressed"]
