@@ -2213,13 +2213,15 @@ def get_campaign_section_questions(
     campaign_id: int,
     section_id: int,
     group_ids: str = Query(default="", pattern=r"^(\d+(,\d+)*)?$"),
+    role_ids: str = Query(default="", pattern=r"^(\d+(,\d+)*)?$"),
     requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
     selected = list(dict.fromkeys(int(value) for value in group_ids.split(",") if value))
-    return report_dashboard_service.build_section_questions(campaign_id, section_id, selected, actor, db)
+    roles = list(dict.fromkeys(int(value) for value in role_ids.split(",") if value))
+    return report_dashboard_service.build_section_questions(campaign_id, section_id, selected, actor, db, role_ids=roles)
 
 
 @app.get("/reports/campaigns/{campaign_id}/evaluation-quality", response_model=schemas.EvaluationQualityResponse)

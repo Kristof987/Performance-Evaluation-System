@@ -1,5 +1,5 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, RolePerspective, RoleReportDetail, RolesReport, WrittenFeedbackResponse } from '../types/reports.types';
+import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, RolePerspective, WrittenFeedbackResponse } from '../types/reports.types';
 
 async function requestReports<T>(getAccessToken: AccessTokenGetter, path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, `/reports${path}`, { signal });
@@ -33,8 +33,8 @@ export function fetchCampaignDashboard(getAccessToken: AccessTokenGetter, campai
   return requestReports<CampaignDashboard>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/dashboard`, signal, 'Campaign dashboard could not be loaded.');
 }
 
-export function fetchSectionQuestions(getAccessToken: AccessTokenGetter, campaignId: number, sectionId: number, groupIds: number[], signal: AbortSignal) {
-  const query = groupIds.length ? `?group_ids=${groupIds.join(',')}` : '';
+export function fetchSectionQuestions(getAccessToken: AccessTokenGetter, campaignId: number, sectionId: number, groupIds: number[], signal: AbortSignal, dimension: 'groups' | 'roles' = 'groups') {
+  const query = groupIds.length ? `?${dimension === 'roles' ? 'role_ids' : 'group_ids'}=${groupIds.join(',')}` : '';
   return requestReports<SectionQuestions>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/sections/${encodeURIComponent(sectionId)}/questions${query}`, signal, 'Section questions could not be loaded.');
 }
 
@@ -79,24 +79,6 @@ export function fetchGroupReportDetail(getAccessToken: AccessTokenGetter, campai
     `/campaigns/${encodeURIComponent(campaignId)}/groups/${encodeURIComponent(groupId)}`,
     signal,
     'Group report could not be loaded.',
-  );
-}
-
-export function fetchRolesReport(getAccessToken: AccessTokenGetter, campaignId: number, perspective: RolePerspective, signal: AbortSignal) {
-  return requestReports<RolesReport>(
-    getAccessToken,
-    `/campaigns/${encodeURIComponent(campaignId)}/roles?perspective=${encodeURIComponent(perspective)}`,
-    signal,
-    'Role reports could not be loaded.',
-  );
-}
-
-export function fetchRoleReportDetail(getAccessToken: AccessTokenGetter, campaignId: number, roleId: number, perspective: RolePerspective, signal: AbortSignal) {
-  return requestReports<RoleReportDetail>(
-    getAccessToken,
-    `/campaigns/${encodeURIComponent(campaignId)}/roles/${encodeURIComponent(roleId)}?perspective=${encodeURIComponent(perspective)}`,
-    signal,
-    'Role report could not be loaded.',
   );
 }
 

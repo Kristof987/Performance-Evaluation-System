@@ -65,9 +65,9 @@ function Spread({ theme, question }: { theme: ChartTheme; question: SectionQuest
 }
 
 /** Every answer option against every scope, so a low average can be traced to the group that drives it. */
-function Breakdown({ theme, question, groups, colorOf }: { theme: ChartTheme; question: SectionQuestion; groups: Array<{ id: number; name: string }>; colorOf: (id: number) => string }) {
+function Breakdown({ theme, question, groups, colorOf, allLabel }: { theme: ChartTheme; question: SectionQuestion; groups: Array<{ id: number; name: string }>; colorOf: (id: number) => string; allLabel: string }) {
   const scopes = [
-    { key: 'all', name: 'All groups', color: undefined as string | undefined, cell: question as SectionQuestionCell },
+    { key: 'all', name: allLabel, color: undefined as string | undefined, cell: question as SectionQuestionCell },
     ...groups.map((group) => ({ key: `g${group.id}`, name: group.name, color: colorOf(group.id), cell: question.groups[String(group.id)] ?? { availability: 'no_data' as const, response_count: 0, average: null } })),
     ...(question.self.availability === 'available' && question.self.distribution ? [{ key: 'self', name: 'Self ratings', color: undefined, cell: question.self }] : []),
   ];
@@ -96,8 +96,10 @@ function questionRows(data: SectionQuestions) {
   ];
 }
 
-export default function SectionQuestionList({ theme, campaignId, sectionId, groupIds, colorOf, getAccessToken }: {
+export default function SectionQuestionList({ theme, campaignId, sectionId, groupIds, colorOf, getAccessToken, dimension = 'groups' }: {
   theme: ChartTheme;
+  /** Whether groupIds are groups or company roles. */
+  dimension?: 'groups' | 'roles';
   campaignId: number;
   sectionId: number;
   groupIds: number[];
@@ -111,7 +113,8 @@ export default function SectionQuestionList({ theme, campaignId, sectionId, grou
   const [open, setOpen] = useState<string[]>([]);
   const tokenRef = useRef(getAccessToken);
   useEffect(() => { tokenRef.current = getAccessToken; });
-  const groupKey = groupIds.join(',');
+  const groupKey = `${dimension}:${groupIds.join(',')}`;
+  const allLabel = dimension === 'roles' ? 'All roles' : 'All groups';
   const hasToken = !!getAccessToken;
 
   useEffect(() => {
@@ -119,27 +122,28 @@ export default function SectionQuestionList({ theme, campaignId, sectionId, grou
     if (!token) return undefined;
     const controller = new AbortController();
     setError('');
-    fetchSectionQuestions(token, campaignId, sectionId, groupKey ? groupKey.split(',').map(Number) : [], controller.signal)
+    const ids = groupKey.split(':')[1];
+    fetchSectionQuestions(token, campaignId, sectionId, ids ? ids.split(',').map(Number) : [], controller.signal, groupKey.startsWith('roles') ? 'roles' : 'groups')
       .then((result) => { if (!controller.signal.aborted) setData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Section questions could not be loaded.'); });
     return () => controller.abort();
   }, [campaignId, sectionId, groupKey, reloadKey, hasToken]);
 
-  const current = data && data.section.id === sectionId && data.campaign.id === campaignId && data.groups.map((group) => group.id).join(',') === groupKey ? data : null;
+  const current = data && data.section.id === sectionId && data.campaign.id === campaignId && `${data.dimension ?? 'groups'}:${data.groups.map((group) => group.id).join(',')}` === groupKey ? data : null;
   const rated = current?.questions.filter((question) => question.category !== 'text') ?? [];
   const written = current?.questions.filter((question) => question.category === 'text') ?? [];
   const hasSelf = rated.some((question) => released(question.self) !== null);
   const columns = `minmax(220px, 1.6fr) minmax(150px, 1fr) 92px${current?.groups.map(() => ' 88px').join('') ?? ''} minmax(110px, .8fr)`;
 
   return <ChartCard id="section-questions" className="reports-q-card" title={`Questions in ${current?.section.name ?? 'this section'}`}
-    subtitle={`Peer average per question, 1–5 · click a question for its answers by group${hasSelf ? ' · ◆ = self rating' : ''}${current?.previous_campaign ? ` · | = ${current.previous_campaign.name}` : ''}`}
+    subtitle={`Peer average per question, 1–5 · click a question for its answers by ${dimension === 'roles' ? 'role' : 'group'}${hasSelf ? ' · ◆ = self rating' : ''}${current?.previous_campaign ? ` · | = ${current.previous_campaign.name}` : ''}`}
     actions={<span className="reports-card-actions">{current && <CsvButton name={`${current.campaign.name} ${current.section.name} questions`} rows={() => questionRows(current)} />}{rated.length > 1 && <label className="reports-q-order reports-no-print"><span>Order</span><select value={order} onChange={(event) => setOrder(event.target.value as Order)}>{ORDERS.filter((item) => item.value !== 'change' || current?.previous_campaign).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>}</span>}>
     {error ? <LoadError message={error} onRetry={() => setReloadKey((value) => value + 1)} />
       : !current ? <LoadingState variant="section" label="Loading questions" />
       : <>
         {rated.length > 0 && <div className="reports-q-table" role="table" aria-label={`Questions in ${current.section.name}`}>
           <div className="reports-q-row reports-q-head" role="row" style={{ gridTemplateColumns: columns }}>
-            <span role="columnheader">Question</span><span role="columnheader">All groups</span><span role="columnheader" className="reports-q-num">Average</span>
+            <span role="columnheader">Question</span><span role="columnheader">{allLabel}</span><span role="columnheader" className="reports-q-num">Average</span>
             {current.groups.map((group) => <span key={group.id} role="columnheader" className="reports-q-num" title={group.name}><i style={{ background: colorOf(group.id) }} aria-hidden="true" />{group.name}</span>)}
             <span role="columnheader">Answers</span>
           </div>
@@ -158,7 +162,7 @@ export default function SectionQuestionList({ theme, campaignId, sectionId, grou
                 </span>;
               })}
               <span role="cell" className="reports-q-answers"><Spread theme={theme} question={question} /></span>
-              {expanded && <Breakdown theme={theme} question={question} groups={current.groups} colorOf={colorOf} />}
+              {expanded && <Breakdown theme={theme} question={question} groups={current.groups} colorOf={colorOf} allLabel={allLabel} />}
             </div>;
           })}
         </div>}

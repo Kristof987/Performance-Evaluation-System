@@ -239,7 +239,11 @@ export function ProfileRadar({ theme, sections, series, onSelect }: { theme: Cha
 }
 
 /** Self minus peer per section: right of zero = rates themself higher than peers do. */
-export function GapBars({ theme, rows, onSelect }: { theme: ChartTheme; rows: Array<{ id: number; name: string; peer: number; self: number }>; onSelect?: (sectionId: number) => void }) {
+type GapLabels = { self: string; peer: string; gap: string };
+const SELF_PEER: GapLabels = { self: 'Self rating', peer: 'Peer rating', gap: 'Gap' };
+
+/** Signed difference of two ratings per row: self against peer by default, or any pair named in labels. */
+export function GapBars({ theme, rows, onSelect, labels = SELF_PEER }: { theme: ChartTheme; rows: Array<{ id: number; name: string; peer: number; self: number }>; onSelect?: (sectionId: number) => void; labels?: GapLabels }) {
   const data = rows.map((row) => ({ ...row, gap: Number((row.self - row.peer).toFixed(2)), label: shorten(row.name), fullName: row.name }));
   const extent = Math.max(0.5, ...data.map((row) => Math.abs(row.gap)));
   const step = extent > 1.5 ? 1 : 0.5;
@@ -248,7 +252,7 @@ export function GapBars({ theme, rows, onSelect }: { theme: ChartTheme; rows: Ar
   const tip = ({ active, payload }: TooltipProps) => {
     const row = payload?.[0]?.payload as (typeof data)[number] | undefined;
     if (!active || !row) return null;
-    return <TooltipCard title={row.fullName} rows={[{ name: 'Self rating', value: row.self.toFixed(2) }, { name: 'Peer rating', value: row.peer.toFixed(2) }, { name: 'Gap', value: `${row.gap > 0 ? '+' : row.gap < 0 ? '−' : '±'}${Math.abs(row.gap).toFixed(2)}` }]} />;
+    return <TooltipCard title={row.fullName} rows={[{ name: labels.self, value: row.self.toFixed(2) }, { name: labels.peer, value: row.peer.toFixed(2) }, { name: labels.gap, value: `${row.gap > 0 ? '+' : row.gap < 0 ? '−' : '±'}${Math.abs(row.gap).toFixed(2)}` }]} />;
   };
   return <ResponsiveContainer width="100%" height={Math.max(150, data.length * 38 + 44)}>
     <BarChart data={data} layout="vertical" margin={{ top: 6, right: 40, bottom: 4, left: 4 }} barCategoryGap="30%">
@@ -257,7 +261,7 @@ export function GapBars({ theme, rows, onSelect }: { theme: ChartTheme; rows: Ar
       <YAxis type="category" dataKey="label" width={118} {...axisProps(theme)} />
       <ReferenceLine x={0} stroke={theme.textMuted} />
       <Tooltip content={tip} cursor={{ fill: theme.surfaceMuted, opacity: 0.6 }} />
-      <Bar dataKey="gap" name="Self − peer" radius={4} isAnimationActive={false} cursor={onSelect ? 'pointer' : undefined} onClick={(entry) => { const id = clickedId(entry); if (id !== null) onSelect?.(id); }}>
+      <Bar dataKey="gap" name={labels.gap} radius={4} isAnimationActive={false} cursor={onSelect ? 'pointer' : undefined} onClick={(entry) => { const id = clickedId(entry); if (id !== null) onSelect?.(id); }}>
         {data.map((row) => <Cell key={row.id} fill={row.gap >= 0 ? theme.series[3] : theme.series[0]} />)}
         <LabelList dataKey="gap" position="right" formatter={(value) => typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}` : ''} fill={theme.textSecondary} fontSize={11} />
       </Bar>

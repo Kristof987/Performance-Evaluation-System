@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
-import { fetchGroupReportDetail, fetchGroupsReport, fetchRoleReportDetail, fetchRolesReport } from './api/reports.api';
+import { Link, Navigate, useLocation, useParams } from 'react-router';
+import { fetchGroupReportDetail, fetchGroupsReport } from './api/reports.api';
 import ReportsEmptyState from './components/ReportsEmptyState';
 import EmployeeAIAnalysisPanel from './components/EmployeeAIAnalysisPanel';
 import SectionScoresChart from './components/SectionScoresChart';
 import ReportsLayout from './ReportsLayout';
-import type { GroupReportDetail, GroupsReport, RolePerspective, RoleReportDetail, RolesReport } from './types/reports.types';
+import type { GroupReportDetail, GroupsReport } from './types/reports.types';
 import type { AccessTokenGetter } from '../../auth/authenticated-api';
 import { useAppAuth } from '../../auth/AppAuth';
 import { hasTeamReportsOnly } from '../../app/access';
@@ -40,28 +40,26 @@ function ReportKpis({ items }: { items: Array<{ label: string; value: string | n
   return <section className="reports-kpi-panel reports-kpi-panel-compact">{items.map((item, index) => <div className={index === 0 ? 'reports-kpi-segment reports-kpi-primary' : 'reports-kpi-segment'} key={item.label}><span>{item.label}</span><strong>{item.value}</strong>{item.context && <small>{item.context}</small>}</div>)}</section>;
 }
 
-function GroupsRolesTabs({ campaignId, view }: { campaignId: number; view: 'groups' | 'roles' }) {
-  const navigate = useNavigate();
-  // Group leaders only see the groups they lead; role comparisons span the whole campaign.
-  if (useTeamReportsOnly()) return null;
-  return <div className="reports-segmented" role="tablist" aria-label="Groups and roles reports"><button className={view === 'groups' ? 'active' : ''} type="button" onClick={() => navigate(`/reports/campaigns/${campaignId}/groups`)}>Groups</button><button className={view === 'roles' ? 'active' : ''} type="button" onClick={() => navigate(`/reports/campaigns/${campaignId}/roles`)}>Roles</button></div>;
-}
-
+/**
+ * Group reports for group leaders. Everyone else compares groups and roles on the Overview,
+ * so their old Groups, Roles and detail links open the matching Overview view.
+ */
 export function GroupsRolesPage() {
   const { campaignId } = useParams();
   const selectedCampaignId = Number(campaignId);
   const validCampaignId = Number.isSafeInteger(selectedCampaignId) && selectedCampaignId > 0;
+  const location = useLocation();
+  const teamOnly = useTeamReportsOnly();
+  if (!teamOnly && validCampaignId) return <Navigate to={`/reports/campaigns/${selectedCampaignId}${location.pathname.includes('/roles') ? '?by=roles' : ''}`} replace />;
   return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{(layout) => <GroupsRolesContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layout} />}</ReportsLayout>;
 }
 
 function GroupsRolesContent({ selectedCampaignId, validCampaignId, getAccessToken, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: { selectedCampaignId: number; validCampaignId: boolean; getAccessToken: AccessTokenGetter | undefined; loadingCampaigns: boolean; campaignsError: string; campaigns: Array<{ id: number }>; retryCampaigns: () => void }) {
-  const location = useLocation();
-  const view = location.pathname.includes('/roles') ? 'roles' : 'groups';
   const [groupData, setGroupData] = useState<GroupsReport | null>(null);
   const [groupError, setGroupError] = useState('');
   const [reloadGroups, setReloadGroups] = useState(0);
   useEffect(() => {
-    if (!validCampaignId || !getAccessToken || view !== 'groups') return undefined;
+    if (!validCampaignId || !getAccessToken) return undefined;
     const controller = new AbortController();
     setGroupData(null);
     setGroupError('');
@@ -69,12 +67,12 @@ function GroupsRolesContent({ selectedCampaignId, validCampaignId, getAccessToke
       .then((result) => { if (!controller.signal.aborted) setGroupData(result); })
       .catch((cause) => { if (!controller.signal.aborted) setGroupError(cause instanceof Error ? cause.message : 'Group reports could not be loaded.'); });
     return () => controller.abort();
-  }, [selectedCampaignId, getAccessToken, reloadGroups, validCampaignId, view]);
+  }, [selectedCampaignId, getAccessToken, reloadGroups, validCampaignId]);
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <LoadingState variant="page" label="Loading campaigns" />;
   if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
   if (!campaigns.some((campaign) => campaign.id === selectedCampaignId)) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
-  return <div className="reports-overview"><GroupsRolesTabs campaignId={selectedCampaignId} view={view} />{view === 'groups' ? groupData?.campaign.id === selectedCampaignId ? <GroupsOverview data={groupData} campaignId={selectedCampaignId} /> : <LoadingOrError error={groupError} retry={() => setReloadGroups((value) => value + 1)} /> : <RolesOverview campaignId={selectedCampaignId} getAccessToken={getAccessToken} />}</div>;
+  return <div className="reports-overview">{groupData?.campaign.id === selectedCampaignId ? <GroupsOverview data={groupData} campaignId={selectedCampaignId} /> : <LoadingOrError error={groupError} retry={() => setReloadGroups((value) => value + 1)} />}</div>;
 }
 
 function GroupsOverview({ campaignId, data }: { campaignId: number; data: GroupsReport }) {
@@ -102,47 +100,12 @@ function GroupsOverview({ campaignId, data }: { campaignId: number; data: Groups
   </>;
 }
 
-function RolesOverview({ campaignId, getAccessToken }: { campaignId: number; getAccessToken: AccessTokenGetter | undefined }) {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const perspective = searchParams.get('perspective') === 'evaluator' ? 'evaluator' : 'evaluatee';
-  const [data, setData] = useState<RolesReport | null>(null);
-  const [error, setError] = useState('');
-  const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    if (!getAccessToken) return undefined;
-    const controller = new AbortController();
-    setData(null);
-    setError('');
-    fetchRolesReport(getAccessToken, campaignId, perspective, controller.signal)
-      .then((result) => { if (!controller.signal.aborted) setData(result); })
-      .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Role reports could not be loaded.'); });
-    return () => controller.abort();
-  }, [campaignId, perspective, getAccessToken, reload]);
-
-  function changePerspective(value: RolePerspective) {
-    navigate(`/reports/campaigns/${campaignId}/roles?perspective=${value}`);
-  }
-
-  if (data === null || data.campaign.id !== campaignId || data.perspective !== perspective) return <><RoleHeader perspective={perspective} onChange={changePerspective} /><LoadingOrError error={error} retry={() => setReload((value) => value + 1)} /></>;
-
-  return <>
-    <RoleHeader perspective={perspective} onChange={changePerspective} />
-    <ReportKpis items={[{ label: 'Roles in analysis', value: data.kpis.roles_in_campaign }, { label: perspective === 'evaluator' ? 'Assigned evaluators' : 'Employees to evaluate', value: data.kpis.participating_employees, context: perspective === 'evaluator' ? 'Unique evaluators with assigned reviews' : 'Unique evaluatees with assigned reviews' }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Roles with reportable results', value: data.kpis.roles_with_reportable_results }]} />
-     {data.section_comparison && <section className="reports-card reports-wide-card"><div className="reports-section-heading"><h2>{data.section_comparison.section_name} by role</h2><p>Normalized scores on a common 1–5 scale. Only roles meeting privacy thresholds for this section are shown.</p></div><div className="reports-dimension-chart" role="list">{data.section_comparison.roles.map((role) => <div className="reports-bar-row" role="listitem" key={role.role_id}><div className="reports-bar-label"><strong>{role.role_name}</strong><span>{role.evaluatee_count} employees · {role.evaluator_count} peer evaluators · 1–5 scale</span></div><div className="reports-bar-track" aria-label={`${role.role_name}: ${role.average_score.toFixed(2)} out of 5`}><span style={{ width: `${Math.min(100, (role.average_score / 5) * 100)}%` }} /></div><strong className="reports-bar-value">{role.average_score.toFixed(2)}</strong></div>)}</div></section>}
-      <section className="reports-card reports-table reports-wide-card"><div className="reports-section-heading"><h2>Role comparison</h2><p>{perspective === 'evaluatee' ? 'Average ratings received by employees in each company role.' : 'Average ratings given by employees in each company role. This is not a measure of evaluator performance.'}</p></div>{data.roles.length === 0 ? <ReportsEmptyState title="No role data available." message="Role comparison will appear after evaluations are assigned for this campaign." /> : <><div className="reports-table-row reports-table-head reports-roles-row"><span>Role</span><span>Employees</span><span>Completed evaluations</span><span>Sections</span><span>Average score</span><span>Actions</span></div>{data.roles.map((role) => <div className="reports-table-row reports-roles-row" key={role.role_id}><strong>{role.role_name}</strong><span className="reports-number-cell">{role.employee_count}</span><span className="reports-number-cell">{role.completed_evaluations}</span><span className="reports-number-cell">{role.available_sections}</span><span className="reports-number-cell" title={role.average_score_context}>{reportableScore(role.average_score, role.score_availability)}</span><span className="reports-action-cell"><Link className="btn btn-secondary btn-small" to={`/reports/campaigns/${campaignId}/roles/${role.role_id}?perspective=${perspective}`}>Details</Link></span></div>)}</>}</section>
-  </>;
-}
-
-function RoleHeader({ perspective, onChange }: { perspective: RolePerspective; onChange: (value: RolePerspective) => void }) {
-  return <section className="reports-role-header"><div><h2>Role comparison</h2><p>{perspective === 'evaluatee' ? 'Average ratings received by employees in each company role.' : 'Average ratings given by employees in each company role.'}</p></div><select className="form-control reports-role-select" value={perspective} onChange={(event) => onChange(event.target.value as RolePerspective)} aria-label="Role analysis perspective"><option value="evaluatee">Evaluated role</option><option value="evaluator">Evaluator role</option></select></section>;
-}
-
 export function GroupDetailPage() {
   const { campaignId, groupId } = useParams();
   const selectedCampaignId = Number(campaignId);
   const selectedGroupId = Number(groupId);
+  const teamOnly = useTeamReportsOnly();
+  if (!teamOnly && Number.isSafeInteger(selectedCampaignId) && selectedCampaignId > 0) return <Navigate to={`/reports/campaigns/${selectedCampaignId}${Number.isSafeInteger(selectedGroupId) && selectedGroupId > 0 ? `?groups=${selectedGroupId}` : ''}`} replace />;
   return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ getAccessToken }) => <GroupDetailContent campaignId={selectedCampaignId} groupId={selectedGroupId} getAccessToken={getAccessToken} />}</ReportsLayout>;
 }
 
@@ -164,39 +127,16 @@ function GroupDetailContent({ campaignId, groupId, getAccessToken }: { campaignI
   }, [campaignId, groupId, getAccessToken, reload]);
 
   if (data === null || data.campaign.id !== campaignId || data.group.id !== groupId) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-   return <div className="reports-overview"><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/groups`}>← Back to Groups & Roles</Link><header className="reports-detail-heading"><h2>{data.group.name}</h2><p>{data.campaign.name} · Group analysis</p>{data.group.description && <p>{data.group.description}</p>}</header><ReportKpis items={[{ label: 'Employees', value: data.kpis.employees }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Completion rate', value: formatPercent(data.kpis.completion_rate) }, { label: 'Reportable sections', value: data.kpis.reportable_sections, context: `Overall peer score: ${data.kpis.overall_peer_score === null ? 'Unavailable' : `${formatScore(data.kpis.overall_peer_score)} / 5`}` }]} />{getAccessToken && <EmployeeAIAnalysisPanel scope={{ type: 'group', campaignId, groupId }} getAccessToken={getAccessToken} />}<div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div>{!teamOnly && <Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?group_id=${groupId}`}>Explore group questions →</Link>}<SimpleTable title="Roles in this group" emptyTitle="No role coverage yet." emptyMessage="No employees with company roles are available for this group." columns={['Company role', 'Employees', 'Completed received', 'Reportable average']} rows={data.roles.map((role) => [role.role_name, role.employee_count, role.completed_evaluations_received, reportableScore(role.average_score, role.score_availability)])} /><SimpleTable title="Group employee coverage" emptyTitle="No employee coverage available." emptyMessage="This group has no campaign participants to summarize." columns={['Employee', 'Role', 'Reviews received', 'Self-evaluation', 'Feedback availability']} rows={data.employees.map((employee) => [employee.employee_name, employee.role_name, employee.reviews_received, employee.completed_self_evaluation ? 'Completed' : 'Not completed', employee.feedback_availability])} /></div>;
-}
-
-export function RoleDetailPage() {
-  const { campaignId, roleId } = useParams();
-  const [searchParams] = useSearchParams();
-  const perspective = searchParams.get('perspective') === 'evaluator' ? 'evaluator' : 'evaluatee';
-  const selectedCampaignId = Number(campaignId);
-  const selectedRoleId = Number(roleId);
-  return <ReportsLayout selectedCampaignId={Number.isSafeInteger(selectedCampaignId) ? selectedCampaignId : null}>{({ getAccessToken }) => <RoleDetailContent campaignId={selectedCampaignId} roleId={selectedRoleId} getAccessToken={getAccessToken} perspective={perspective} />}</ReportsLayout>;
-}
-
-function RoleDetailContent({ campaignId, roleId, getAccessToken, perspective }: { campaignId: number; roleId: number; getAccessToken: AccessTokenGetter | undefined; perspective: RolePerspective }) {
-  const navigate = useNavigate();
-  const [data, setData] = useState<RoleReportDetail | null>(null);
-  const [error, setError] = useState('');
-  const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    if (!getAccessToken) return undefined;
-    const controller = new AbortController();
-    setData(null);
-    setError('');
-    fetchRoleReportDetail(getAccessToken, campaignId, roleId, perspective, controller.signal)
-       .then((result) => { if (!controller.signal.aborted) setData(result); })
-      .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Role report could not be loaded.'); });
-    return () => controller.abort();
-  }, [campaignId, perspective, getAccessToken, roleId, reload]);
-
-  if (data === null || data.campaign.id !== campaignId || data.role.id !== roleId || data.perspective !== perspective) return <LoadingOrError error={error} retry={() => setReload((value) => value + 1)} />;
-    return <div className="reports-overview"><button className="campaign-details-link link-button" type="button" onClick={() => navigate(`/reports/campaigns/${campaignId}/roles?perspective=${perspective}`)}>← Back to Roles</button><header className="reports-detail-heading"><h2>{data.role.name}</h2><p>{data.campaign.name} · {perspective === 'evaluator' ? 'Evaluator role' : 'Evaluated role'}</p></header><ReportKpis items={[{ label: perspective === 'evaluator' ? 'Assigned evaluators' : 'Employees to evaluate', value: data.kpis.employees }, { label: perspective === 'evaluator' ? 'Completed reviews submitted' : 'Completed reviews received', value: data.kpis.completed_evaluations }, { label: 'Reportable sections', value: data.kpis.reportable_sections }, { label: perspective === 'evaluator' ? 'Average rating given' : 'Overall section score', value: formatScore(data.kpis.overall_score) }]} />{perspective === 'evaluatee' && getAccessToken && <EmployeeAIAnalysisPanel scope={{ type: 'role', campaignId, roleId }} getAccessToken={getAccessToken} />}<div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?role_id=${roleId}&perspective=${perspective}`}>Explore role questions →</Link><SimpleTable title="Group breakdown" emptyTitle="No group breakdown available." emptyMessage="This role has no campaign group coverage for the selected perspective." columns={['Group', 'Employees', 'Completed evaluations', 'Reportable average']} rows={data.groups.map((group) => [group.group_name, group.employee_count, group.completed_evaluations, reportableScore(group.average_score, group.score_availability)])} /><section className="reports-card"><div className="reports-section-heading"><h2>Evaluation coverage</h2><p>{data.coverage.completed_evaluations} of {data.coverage.assigned_evaluations} role-scoped evaluations completed.</p></div></section></div>;
+   return <div className="reports-overview"><Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/groups`}>← Back to Groups</Link><header className="reports-detail-heading"><h2>{data.group.name}</h2><p>{data.campaign.name} · Group analysis</p>{data.group.description && <p>{data.group.description}</p>}</header><ReportKpis items={[{ label: 'Employees', value: data.kpis.employees }, { label: 'Completed evaluations', value: data.kpis.completed_evaluations }, { label: 'Completion rate', value: formatPercent(data.kpis.completion_rate) }, { label: 'Reportable sections', value: data.kpis.reportable_sections, context: `Overall peer score: ${data.kpis.overall_peer_score === null ? 'Unavailable' : `${formatScore(data.kpis.overall_peer_score)} / 5`}` }]} />{getAccessToken && <EmployeeAIAnalysisPanel scope={{ type: 'group', campaignId, groupId }} getAccessToken={getAccessToken} />}<div className="reports-chart-grid reports-chart-grid-single"><SectionScoresChart sections={data.sections} /></div>{!teamOnly && <Link className="campaign-details-link" to={`/reports/campaigns/${campaignId}/questions?group_id=${groupId}`}>Explore group questions →</Link>}<SimpleTable title="Roles in this group" emptyTitle="No role coverage yet." emptyMessage="No employees with company roles are available for this group." columns={['Company role', 'Employees', 'Completed received', 'Reportable average']} rows={data.roles.map((role) => [role.role_name, role.employee_count, role.completed_evaluations_received, reportableScore(role.average_score, role.score_availability)])} /><SimpleTable title="Group employee coverage" emptyTitle="No employee coverage available." emptyMessage="This group has no campaign participants to summarize." columns={['Employee', 'Role', 'Reviews received', 'Self-evaluation', 'Peer rating']} rows={data.employees.map((employee) => [employee.employee_name, employee.role_name, employee.reviews_assigned != null ? `${employee.reviews_received} / ${employee.reviews_assigned}` : employee.reviews_received, employee.completed_self_evaluation ? 'Completed' : 'Not completed', employee.peer_score != null ? employee.peer_score.toFixed(2) : employee.score_availability === 'suppressed' ? 'Hidden' : '–'])} /></div>;
 }
 
 function SimpleTable({ title, emptyTitle, emptyMessage, columns, rows }: { title: string; emptyTitle: string; emptyMessage: string; columns: string[]; rows: Array<Array<string | number>> }) {
   return <section className="reports-card reports-simple-table"><div className="reports-section-heading"><h2>{title}</h2></div>{rows.length === 0 ? <ReportsEmptyState title={emptyTitle} message={emptyMessage} /> : <table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table>}</section>;
+}
+
+/** Role reports moved to the Overview's Roles view; old links open it with the role selected. */
+export function RoleDetailPage() {
+  const { campaignId, roleId } = useParams();
+  const id = Number(roleId);
+  return <Navigate to={`/reports/campaigns/${campaignId}?by=roles${Number.isSafeInteger(id) && id > 0 ? `&roles=${id}` : ''}`} replace />;
 }

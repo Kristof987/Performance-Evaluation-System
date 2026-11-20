@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Plus, X } from 'lucide-react';
+import { GROUP_NOUN, type Noun } from '../reports.utils';
 
 export const MAX_COMPARED_GROUPS = 5;
 const MAX_GROUP_CHIPS = 8;
@@ -25,7 +26,7 @@ export function SectionTabs({ sections, selected, onSelect }: { sections: Option
   </div>;
 }
 
-function GroupPicker({ groups, onPick }: { groups: Option[]; onPick: (id: number) => void }) {
+function GroupPicker({ groups, onPick, noun }: { groups: Option[]; onPick: (id: number) => void; noun: Noun }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null);
@@ -37,30 +38,37 @@ function GroupPicker({ groups, onPick }: { groups: Option[]; onPick: (id: number
   }, [open]);
   const matches = groups.filter((group) => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return <div className="reports-group-picker" ref={root}>
-    <button type="button" className="reports-group-add" aria-expanded={open} onClick={() => setOpen((value) => !value)}><Plus size={14} aria-hidden="true" />Group</button>
-    {open && <div className="reports-group-menu" role="dialog" aria-label="Add group" onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false); }}>
-      <input autoFocus type="search" placeholder="Search groups" aria-label="Search groups" value={query} onChange={(event) => setQuery(event.target.value)} />
-      <ul>{matches.length === 0 ? <li className="reports-group-menu-empty">No matching group</li> : matches.map((group) => <li key={group.id}><button type="button" onClick={() => { onPick(group.id); setOpen(false); setQuery(''); }}>{group.name}</button></li>)}</ul>
+    <button type="button" className="reports-group-add" aria-expanded={open} onClick={() => setOpen((value) => !value)}><Plus size={14} aria-hidden="true" />{noun.One}</button>
+    {open && <div className="reports-group-menu" role="dialog" aria-label={`Add ${noun.one}`} onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false); }}>
+      <input autoFocus type="search" placeholder={`Search ${noun.many}`} aria-label={`Search ${noun.many}`} value={query} onChange={(event) => setQuery(event.target.value)} />
+      <ul>{matches.length === 0 ? <li className="reports-group-menu-empty">No matching {noun.one}</li> : matches.map((group) => <li key={group.id}><button type="button" onClick={() => { onPick(group.id); setOpen(false); setQuery(''); }}>{group.name}</button></li>)}</ul>
     </div>}
   </div>;
 }
 
-/** Groups to compare: toggled chips for the first few groups, a searchable picker for the rest. */
-export function GroupToggles({ groups, selected, colorOf, onChange }: { groups: Option[]; selected: number[]; colorOf: (id: number) => string; onChange: (ids: number[]) => void }) {
+/** Groups (or roles) to compare: toggled chips for the first few, a searchable picker for the rest. */
+export function GroupToggles({ groups, selected, colorOf, onChange, noun = GROUP_NOUN }: { groups: Option[]; selected: number[]; colorOf: (id: number) => string; onChange: (ids: number[]) => void; noun?: Noun }) {
   if (groups.length === 0) return null;
   const full = selected.length >= MAX_COMPARED_GROUPS;
   const chips = groups.length <= MAX_GROUP_CHIPS ? groups : groups.filter((group) => selected.includes(group.id));
   const pickable = groups.length <= MAX_GROUP_CHIPS ? [] : groups.filter((group) => !selected.includes(group.id));
   const toggle = (id: number) => onChange(selected.includes(id) ? selected.filter((item) => item !== id) : full ? selected : [...selected, id]);
-  return <div className="reports-group-toggles" aria-label="Compare groups">
+  return <div className="reports-group-toggles" aria-label={`Compare ${noun.many}`}>
     <span className="reports-filter-label">Compare</span>
     {chips.map((group) => {
       const active = selected.includes(group.id);
-      return <button key={group.id} type="button" aria-pressed={active} disabled={!active && full} title={!active && full ? `Up to ${MAX_COMPARED_GROUPS} groups can be compared` : undefined} className={`reports-group-chip${active ? ' is-active' : ''}`} style={active ? { borderColor: colorOf(group.id) } : undefined} onClick={() => toggle(group.id)}>
+      return <button key={group.id} type="button" aria-pressed={active} disabled={!active && full} title={!active && full ? `Up to ${MAX_COMPARED_GROUPS} ${noun.many} can be compared` : undefined} className={`reports-group-chip${active ? ' is-active' : ''}`} style={active ? { borderColor: colorOf(group.id) } : undefined} onClick={() => toggle(group.id)}>
         <span className="reports-group-dot" style={{ background: active ? colorOf(group.id) : undefined }} aria-hidden="true" />{group.name}{active && groups.length > MAX_GROUP_CHIPS && <X size={13} aria-hidden="true" />}
       </button>;
     })}
-    {pickable.length > 0 && !full && <GroupPicker groups={pickable} onPick={(id) => onChange([...selected, id])} />}
-    {selected.length > 0 && <button type="button" className="reports-group-clear" onClick={() => onChange([])}>All groups</button>}
+    {pickable.length > 0 && !full && <GroupPicker groups={pickable} noun={noun} onPick={(id) => onChange([...selected, id])} />}
+    {selected.length > 0 && <button type="button" className="reports-group-clear" onClick={() => onChange([])}>{noun.all}</button>}
+  </div>;
+}
+
+/** Compare the campaign by assignment groups or by the evaluated employees' company roles. */
+export function DimensionSwitch({ value, onChange }: { value: 'groups' | 'roles'; onChange: (value: 'groups' | 'roles') => void }) {
+  return <div className="reports-dimension-switch" role="group" aria-label="Compare by">
+    {(['groups', 'roles'] as const).map((item) => <button key={item} type="button" aria-pressed={value === item} className={value === item ? 'is-active' : ''} onClick={() => onChange(item)}>{item === 'groups' ? 'Groups' : 'Roles'}</button>)}
   </div>;
 }

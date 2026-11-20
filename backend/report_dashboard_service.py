@@ -1,4 +1,4 @@
-"""Campaign dashboard: group x section matrix, previous-campaign deltas and a campaign trend.
+"""Campaign dashboard: group x section and role x section matrices, rater calibration, previous-campaign deltas and a campaign trend.
 
 Every figure goes through the same scoring and privacy suppression as the other report
 endpoints; this module only combines them across campaigns.
@@ -35,17 +35,35 @@ def _summarize(campaign: models.Campaign, roles: dict[int, int], aggregate_acces
     rows = reporting_service.campaign_report_rows(campaign.id, db)
     totals: dict[int | None, set[int]] = {}
     completed: dict[int | None, set[int]] = {}
+    role_totals: dict[int, set[int]] = {}
+    role_completed: dict[int, set[int]] = {}
+    role_people: dict[int, set[int]] = {}
     for filled_form, _form, status in rows:
+        done = reporting_service.status_key(status, filled_form.finish_date) == "completed"
         for key in (None, filled_form.company_group_id):
             totals.setdefault(key, set()).add(filled_form.id)
-            if reporting_service.status_key(status, filled_form.finish_date) == "completed":
+            if done:
                 completed.setdefault(key, set()).add(filled_form.id)
+        # Roles are those of the evaluated employee, frozen when the questionnaire was issued.
+        role_id = reporting_service.assignment_role_id(filled_form, roles)
+        if role_id is not None:
+            role_totals.setdefault(role_id, set()).add(filled_form.id)
+            role_people.setdefault(role_id, set()).add(filled_form.evaluatee_id)
+            if done:
+                role_completed.setdefault(role_id, set()).add(filled_form.id)
     scored, names = reporting_service._section_report_data(rows, db)
     return {
         "campaign": campaign,
         "counts": {key: (len(completed.get(key, ())), len(ids)) for key, ids in totals.items()},
+        "role_counts": {key: (len(role_completed.get(key, ())), len(ids)) for key, ids in role_totals.items()},
+        "role_people": {key: len(ids) for key, ids in role_people.items()},
         "scores": section_scoring_service.campaign_scores(scored, campaign.id, aggregate_access=aggregate_access),
         "groups": section_scoring_service.group_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
+        "roles": section_scoring_service.role_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
+        "raters": section_scoring_service.evaluator_role_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
+        "rater_people": {role_id: len({item.evaluator_id for item in scored if item.campaign_id == campaign.id and item.evaluator_id != item.evaluatee_id
+                                       and section_scoring_service.role_of(item, roles, evaluator=True) == role_id})
+                         for role_id in {section_scoring_service.role_of(item, roles, evaluator=True) for item in scored} if role_id is not None},
         "names": names,
     }
 
@@ -78,6 +96,9 @@ def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) 
     def previous_group(group_id: int) -> float | None:
         return _released(previous["groups"][group_id].overall) if previous and group_id in previous["groups"] else None
 
+    def previous_role(role_id: int) -> float | None:
+        return _released(previous["roles"][role_id].overall) if previous and role_id in previous["roles"] else None
+
     done, total = current["counts"].get(None, (0, 0))
     previous_done, previous_total = previous["counts"].get(None, (0, 0)) if previous else (0, 0)
     section_ids = sorted(current["scores"].sections, key=lambda item: ((current["names"].get(item) or "").casefold(), item))
@@ -96,6 +117,30 @@ def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) 
             "sections": {section_id: _score(result.sections.get(section_id) if result else None) for section_id in section_ids},
         })
 
+    role_names = reporting_service.company_role_names(db)
+    role_ids = sorted(current["role_counts"], key=lambda item: (role_names.get(item, "").casefold(), item))
+    role_rows = []
+    for role_id in role_ids:
+        result = current["roles"].get(role_id)
+        role_done, role_total = current["role_counts"][role_id]
+        role_rows.append({
+            "id": role_id,
+            "name": role_names.get(role_id, "Unknown role"),
+            "employee_count": current["role_people"].get(role_id, 0),
+            "completed_evaluations": role_done,
+            "total_evaluations": role_total,
+            "completion_rate": _rate(role_done, role_total),
+            "overall": {**_score(result.overall if result else None), "previous_score": previous_role(role_id)},
+            "sections": {section_id: _score(result.sections.get(section_id) if result else None) for section_id in section_ids},
+        })
+    # How each evaluator role rates others, for calibration; same evaluator-side privacy rules as the roles report.
+    raters = [{
+        "id": role_id,
+        "name": role_names.get(role_id, "Unknown role"),
+        "evaluator_count": current["rater_people"].get(role_id, 0),
+        "overall": _score(result.overall),
+    } for role_id, result in sorted(current["raters"].items(), key=lambda pair: (role_names.get(pair[0], "").casefold(), pair[0]))]
+
     return {
         "campaign": reporting_service._report_campaign_option(campaign),
         "previous_campaign": reporting_service._report_campaign_option(previous["campaign"]) if previous else None,
@@ -106,6 +151,8 @@ def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) 
                       **_score(current["scores"].sections[section_id]), "previous_score": previous_section(section_id)}
                      for section_id in section_ids],
         "groups": group_rows,
+        "roles": role_rows,
+        "raters": raters,
         "trend": [{
             "campaign": reporting_service._report_campaign_option(item["campaign"]),
             "overall": _released(item["scores"].overall),
@@ -114,6 +161,9 @@ def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) 
             "groups": {group.id: _released(item["groups"][group.id].overall) if group.id in item["groups"] else None for group in groups},
             "group_sections": {group.id: {section_id: _released(item["groups"][group.id].sections.get(section_id)) if group.id in item["groups"] else None
                                           for section_id in section_ids} for group in groups},
+            "roles": {role_id: _released(item["roles"][role_id].overall) if role_id in item["roles"] else None for role_id in role_ids},
+            "role_sections": {role_id: {section_id: _released(item["roles"][role_id].sections.get(section_id)) if role_id in item["roles"] else None
+                                        for section_id in section_ids} for role_id in role_ids},
         } for item in summaries],
     }
 
@@ -132,26 +182,38 @@ def _cell(item: dict | None) -> dict[str, Any]:
             "distribution": item["distribution"] if item["availability"] == "available" else None}
 
 
-def build_section_questions(campaign_id: int, section_id: int, group_ids: list[int], actor: models.User, db: Session) -> dict[str, Any]:
-    """One section's questions for the campaign, the compared groups, self ratings and the previous campaign.
+def build_section_questions(campaign_id: int, section_id: int, group_ids: list[int], actor: models.User, db: Session,
+                            role_ids: list[int] | None = None) -> dict[str, Any]:
+    """One section's questions for the campaign, the compared groups or roles, self ratings and the previous campaign.
 
+    Compared roles are the evaluated employees' roles; they come back in the same "groups" fields as groups do.
     Every slice comes from the question report, so each keeps its own privacy release decision.
     Questions are matched across campaigns by their content key, which only changes when the question does.
     """
     campaign = reporting_service.require_reports_access(campaign_id, actor, db)
     assert campaign is not None
-    if len(group_ids) > MAX_SECTION_GROUPS:
-        raise HTTPException(status_code=400, detail=f"Compare at most {MAX_SECTION_GROUPS} groups at a time")
-    groups = {group.id: group for group in reporting_service.assigned_campaign_groups(campaign_id, db)}
-    if any(group_id not in groups for group_id in group_ids):
-        raise HTTPException(status_code=404, detail="Group report not found")
+    role_ids = role_ids or []
+    if group_ids and role_ids:
+        raise HTTPException(status_code=400, detail="Compare either groups or roles, not both")
+    if len(group_ids) > MAX_SECTION_GROUPS or len(role_ids) > MAX_SECTION_GROUPS:
+        raise HTTPException(status_code=400, detail=f"Compare at most {MAX_SECTION_GROUPS} groups or roles at a time")
+    if role_ids:
+        names = reporting_service.company_role_names(db)
+        if any(role_id not in names for role_id in role_ids):
+            raise HTTPException(status_code=404, detail="Role report not found")
+        cohorts = [(role_id, names[role_id], {"role_id": role_id}) for role_id in role_ids]
+    else:
+        groups = {group.id: group for group in reporting_service.assigned_campaign_groups(campaign_id, db)}
+        if any(group_id not in groups for group_id in group_ids):
+            raise HTTPException(status_code=404, detail="Group report not found")
+        cohorts = [(group_id, groups[group_id].name, {"group_id": group_id}) for group_id in group_ids]
 
     peer = _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db), section_id)
     if not peer:
         raise HTTPException(status_code=404, detail="Section is not part of this campaign report")
     self_rated = _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, evaluation_type="self"), section_id)
-    by_group = {group_id: _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, group_id=group_id), section_id)
-                for group_id in group_ids}
+    by_group = {cohort_id: _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, **scope), section_id)
+                for cohort_id, _name, scope in cohorts}
     history = _history(campaign, db)
     previous_campaign = history[-1] if history else None
     previous = (_section_questions(question_analytics_service.build_question_report(previous_campaign.id, actor, db), section_id)
@@ -166,7 +228,8 @@ def build_section_questions(campaign_id: int, section_id: int, group_ids: list[i
         "campaign": reporting_service._report_campaign_option(campaign),
         "previous_campaign": reporting_service._report_campaign_option(previous_campaign) if previous_campaign else None,
         "section": {"id": section_id, "name": section_name},
-        "groups": [{"id": group_id, "name": groups[group_id].name} for group_id in group_ids],
+        "dimension": "roles" if role_ids else "groups",
+        "groups": [{"id": cohort_id, "name": name} for cohort_id, name, _scope in cohorts],
         "questions": [{
             "key": key,
             "text": item["text"],
@@ -179,7 +242,7 @@ def build_section_questions(campaign_id: int, section_id: int, group_ids: list[i
             "distribution_kind": item["distribution_kind"],
             "distribution": item["distribution"],
             "self": _cell(self_rated.get(key)),
-            "groups": {group_id: _cell(by_group[group_id].get(key)) for group_id in group_ids},
+            "groups": {cohort_id: _cell(by_group[cohort_id].get(key)) for cohort_id, _name, _scope in cohorts},
         } for key, item in peer.items()],
     }
 

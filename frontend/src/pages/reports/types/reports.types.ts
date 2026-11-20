@@ -160,42 +160,11 @@ export type GroupReportDetail = {
   kpis: { employees: number; completed_evaluations: number; completion_rate: number | null; reportable_sections: number; overall_peer_score: number | null };
   sections: ReportSectionScore[];
   roles: Array<{ role_id: number; role_name: string; employee_count: number; completed_evaluations_received: number; average_score: number | null; score_availability: 'available' | 'no_data' | 'suppressed' }>;
-  employees: Array<{ employee_id: number; employee_name: string; role_name: string; reviews_received: number; completed_self_evaluation: boolean; feedback_availability: string }>;
+  employees: Array<{ employee_id: number; employee_name: string; role_name: string; reviews_received: number; reviews_assigned?: number; completed_self_evaluation: boolean; feedback_availability: string; peer_score?: number | null; score_availability?: ScoreAvailability }>;
   notes: Record<string, string>;
 };
 
 export type RolePerspective = 'evaluatee' | 'evaluator';
-
-export type RoleReportSummary = {
-  role_id: number;
-  role_name: string;
-  employee_count: number;
-  completed_evaluations: number;
-  available_sections: number;
-  average_score: number | null;
-  score_availability: 'available' | 'no_data' | 'suppressed';
-  average_score_context: string;
-};
-
-export type RolesReport = {
-  campaign: ReportCampaignOption;
-  perspective: RolePerspective;
-  kpis: { roles_in_campaign: number; participating_employees: number; completed_evaluations: number; roles_with_reportable_results: number };
-  roles: RoleReportSummary[];
-  section_comparison: null | { section_id: number; section_name: string; roles: Array<{ role_id: number; role_name: string; average_score: number; evaluatee_count: number; evaluator_count: number }> };
-  notes: Record<string, string>;
-};
-
-export type RoleReportDetail = {
-  campaign: ReportCampaignOption;
-  role: { id: number; name: string };
-  perspective: RolePerspective;
-  kpis: { employees: number; completed_evaluations: number; reportable_sections: number; overall_score: number | null };
-  sections: ReportSectionScore[];
-  groups: Array<{ group_id: number; group_name: string; employee_count: number; completed_evaluations: number; average_score: number | null; score_availability: 'available' | 'no_data' | 'suppressed' }>;
-  coverage: { assigned_evaluations: number; completed_evaluations: number };
-  notes: Record<string, string>;
-};
 
 export type EmployeeSelfEvaluationSummary = {
   status: string;
@@ -337,7 +306,11 @@ export type DashboardTrendPoint = {
   sections: Record<string, number | null>;
   groups: Record<string, number | null>;
   group_sections: Record<string, Record<string, number | null>>;
+  roles: Record<string, number | null>;
+  role_sections: Record<string, Record<string, number | null>>;
 };
+/** How evaluators in one company role rate their colleagues, for calibration. */
+export type DashboardRater = { id: number; name: string; evaluator_count: number; overall: { score: number | null; availability: ScoreAvailability } };
 export type CampaignDashboard = {
   campaign: ReportCampaignOption;
   previous_campaign: ReportCampaignOption | null;
@@ -345,6 +318,9 @@ export type CampaignDashboard = {
   overall: DashboardDeltaScore;
   sections: Array<DashboardDeltaScore & { id: number; name: string }>;
   groups: DashboardGroup[];
+  /** Evaluated employees' company roles, in the same shape as groups. */
+  roles: DashboardGroup[];
+  raters: DashboardRater[];
   trend: DashboardTrendPoint[];
 };
 export type SectionQuestionCell = { availability: ScoreAvailability; response_count: number | null; average: number | null; distribution?: Array<{ label: string; count: number; percentage: number }> | null };
@@ -364,6 +340,8 @@ export type SectionQuestions = {
   campaign: ReportCampaignOption;
   previous_campaign: ReportCampaignOption | null;
   section: { id: number; name: string };
+  /** Whether the compared cohorts in `groups` are groups or roles. */
+  dimension?: 'groups' | 'roles';
   groups: Array<{ id: number; name: string }>;
   questions: SectionQuestion[];
 };

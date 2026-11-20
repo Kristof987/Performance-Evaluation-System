@@ -241,7 +241,6 @@ export default function Sidebar({
           <NavLink end to={reportBase}>Overview</NavLink>
           <NavLink to={`${reportBase}/employees`}>Employees</NavLink>
           {(auth0User?.permissions ?? []).includes('campaigns.manage') && <NavLink to={`${reportBase}/answers`}>All Answers</NavLink>}
-          <NavLink to={`${reportBase}/groups`} className={({ isActive }) => isActive || location.pathname.includes('/roles') ? 'active' : ''}>Groups & Roles</NavLink>
           <NavLink to={`${reportBase}/ai-analysis`}>AI Analysis</NavLink>
         </div>}
         {can(ACCESS.settings) && <Link

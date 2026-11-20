@@ -583,14 +583,20 @@ def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: 
             continue
         employee, role = employee_role
         received = [row for row in completed_rows if row[0].evaluatee_id == employee.id and row[0].evaluator_id != employee.id]
+        assigned = [row for row in group_rows if row[0].evaluatee_id == employee.id and row[0].evaluator_id != employee.id]
         self_completed = any(row[0].evaluatee_id == employee.id and row[0].evaluator_id == employee.id for row in completed_rows)
+        # The employee's campaign-wide peer score, released by the same rules as on the Employees report.
+        employee_result = section_scoring_service.employee_scores(scored, campaign_id, employee.id, aggregate_access=aggregate_access).overall_peer
         employees.append({
             "employee_id": employee.id,
             "employee_name": employee.full_name,
             "role_name": role_names.get(cohort_roles.get(employee.id, role.id), role.name),
             "reviews_received": len({row[0].id for row in received}),
+            "reviews_assigned": len({row[0].id for row in assigned}),
             "completed_self_evaluation": self_completed,
             "feedback_availability": "Submitted" if len(received) > 0 else "No submitted peer feedback",
+            "peer_score": employee_result.score if employee_result.availability == "available" else None,
+            "score_availability": employee_result.availability,
         })
     return {
         "campaign": overview["campaign"],

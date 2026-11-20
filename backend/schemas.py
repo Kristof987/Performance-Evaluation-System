@@ -859,6 +859,15 @@ class DashboardTrendPoint(BaseModel):
     sections: dict[int, float | None]
     groups: dict[int, float | None]
     group_sections: dict[int, dict[int, float | None]]
+    roles: dict[int, float | None] = {}
+    role_sections: dict[int, dict[int, float | None]] = {}
+
+
+class DashboardRater(BaseModel):
+    id: int
+    name: str
+    evaluator_count: int
+    overall: DashboardScore
 
 
 class CampaignDashboardResponse(BaseModel):
@@ -868,6 +877,8 @@ class CampaignDashboardResponse(BaseModel):
     overall: DashboardDeltaScore
     sections: list[DashboardSection]
     groups: list[DashboardGroup]
+    roles: list[DashboardGroup] = []
+    raters: list[DashboardRater] = []
     trend: list[DashboardTrendPoint]
 
 
@@ -951,6 +962,7 @@ class SectionQuestionsResponse(BaseModel):
     campaign: ReportCampaignOption
     previous_campaign: ReportCampaignOption | None = None
     section: ReportNamedOption
+    dimension: Literal["groups", "roles"] = "groups"
     groups: list[ReportNamedOption]
     questions: list[SectionQuestion]
 

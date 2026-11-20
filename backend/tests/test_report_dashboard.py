@@ -239,3 +239,53 @@ def test_team_lead_employee_benchmarks_stay_inside_led_groups(db, permissions):
 
     assert result["benchmarks"]["campaign"] is None
     assert [group["id"] for group in result["benchmarks"]["groups"]] == [world.groups[0].id]
+
+
+def test_dashboard_compares_roles_and_rater_calibration(db, permissions):
+    world = World(db)
+    support_role = add(db, models.CompanyRole(name=f"Support role {uuid4().hex}"))
+    for person in world.people[3:]:
+        person.company_role_id = support_role.id
+    db.flush()
+    old = world.campaign(2098)
+    world.rate_everyone(old, alpha=(3, 2), beta=(3, 2))
+    current = world.campaign(2099)
+    world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
+
+    result = report_dashboard_service.build_campaign_dashboard(current.id, world.actor, db)
+
+    roles = {item["id"]: item for item in result["roles"]}
+    sales, support = roles[world.role.id], roles[support_role.id]
+    assert (sales["employee_count"], sales["completed_evaluations"], sales["total_evaluations"]) == (3, 6, 6)
+    assert sales["overall"]["score"] == 4.5 and sales["overall"]["previous_score"] == 3.0
+    assert support["sections"][world.section_b.id] == {"score": 2.0, "availability": "available"}
+    assert result["trend"][0]["roles"][support_role.id] == 2.0
+    assert result["trend"][1]["role_sections"][world.role.id][world.section_a.id] == 5.0
+    raters = {item["id"]: item for item in result["raters"]}
+    assert raters[world.role.id]["overall"]["score"] == 4.5 and raters[world.role.id]["evaluator_count"] == 3
+    assert raters[support_role.id]["overall"]["score"] == 2.5
+
+    questions = report_dashboard_service.build_section_questions(current.id, world.section_a.id, [], world.actor, db, role_ids=[support_role.id])
+    assert questions["dimension"] == "roles"
+    assert questions["groups"] == [{"id": support_role.id, "name": support_role.name}]
+    assert questions["questions"][0]["groups"][support_role.id]["average"] == 3.0
+
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as both:
+        report_dashboard_service.build_section_questions(current.id, world.section_a.id, [world.groups[0].id], world.actor, db, role_ids=[support_role.id])
+    with pytest.raises(HTTPException) as unknown:
+        report_dashboard_service.build_section_questions(current.id, world.section_a.id, [], world.actor, db, role_ids=[10**9])
+    assert (both.value.status_code, unknown.value.status_code) == (400, 404)
+
+
+def test_group_detail_lists_member_scores(db, permissions):
+    world = World(db)
+    current = world.campaign(2100)
+    world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
+    world.review(current, world.groups[0], world.people[1], world.people[0], 1, 1, completed=False)
+
+    result = reporting_service.build_group_detail(current.id, world.groups[0].id, world.actor, db)
+
+    first = next(item for item in result["employees"] if item["employee_id"] == world.people[0].id)
+    assert (first["reviews_received"], first["reviews_assigned"]) == (2, 3)
+    assert (first["peer_score"], first["score_availability"]) == (4.5, "available")
