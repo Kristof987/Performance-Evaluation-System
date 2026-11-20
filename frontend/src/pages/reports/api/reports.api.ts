@@ -1,5 +1,5 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, GroupsReport, ReportCampaignOption, ReportQuestions, RolePerspective, WrittenFeedbackResponse } from '../types/reports.types';
+import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, ReportCampaignOption, ReportQuestions, RolePerspective, WrittenFeedbackResponse } from '../types/reports.types';
 
 async function requestReports<T>(getAccessToken: AccessTokenGetter, path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, `/reports${path}`, { signal });
@@ -62,15 +62,6 @@ export function fetchWrittenFeedback(getAccessToken: AccessTokenGetter, campaign
   return requestReports<WrittenFeedbackResponse>(getAccessToken,
     `/campaigns/${encodeURIComponent(campaignId)}/written-feedback?${params}`, signal,
     'Written feedback could not be loaded.');
-}
-
-export function fetchGroupsReport(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {
-  return requestReports<GroupsReport>(
-    getAccessToken,
-    `/campaigns/${encodeURIComponent(campaignId)}/groups`,
-    signal,
-    'Group reports could not be loaded.',
-  );
 }
 
 export function fetchGroupReportDetail(getAccessToken: AccessTokenGetter, campaignId: number, groupId: number, signal: AbortSignal) {

@@ -863,6 +863,12 @@ class DashboardTrendPoint(BaseModel):
     role_sections: dict[int, dict[int, float | None]] = {}
 
 
+class DashboardBenchmark(BaseModel):
+    """The whole campaign, shown to group leaders next to the groups they lead."""
+    overall: DashboardScore
+    sections: dict[int, DashboardScore]
+
+
 class DashboardRater(BaseModel):
     id: int
     name: str
@@ -877,6 +883,7 @@ class CampaignDashboardResponse(BaseModel):
     overall: DashboardDeltaScore
     sections: list[DashboardSection]
     groups: list[DashboardGroup]
+    benchmark: "DashboardBenchmark | None" = None
     roles: list[DashboardGroup] = []
     raters: list[DashboardRater] = []
     trend: list[DashboardTrendPoint]

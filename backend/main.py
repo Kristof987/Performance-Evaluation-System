@@ -2202,7 +2202,7 @@ def get_campaign_report_dashboard(
     campaign_id: int,
     requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
     return report_dashboard_service.build_campaign_dashboard(campaign_id, actor, db)
@@ -2216,7 +2216,7 @@ def get_campaign_section_questions(
     role_ids: str = Query(default="", pattern=r"^(\d+(,\d+)*)?$"),
     requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
     selected = list(dict.fromkeys(int(value) for value in group_ids.split(",") if value))
@@ -2252,9 +2252,11 @@ def get_campaign_rating_distribution(
     campaign_id: int,
     requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
     reject_conflicting_requester(requester_user_id, actor)
+    # Campaign-wide counts; for a group leader they are the company reference next to their groups.
+    reporting_service.require_team_campaign(campaign_id, actor, db)
     return question_analytics_service.build_rating_distribution_report(campaign_id, actor, db)
 
 

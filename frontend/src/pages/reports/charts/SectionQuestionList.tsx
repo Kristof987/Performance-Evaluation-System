@@ -96,7 +96,9 @@ function questionRows(data: SectionQuestions) {
   ];
 }
 
-export default function SectionQuestionList({ theme, campaignId, sectionId, groupIds, colorOf, getAccessToken, dimension = 'groups' }: {
+export default function SectionQuestionList({ theme, campaignId, sectionId, groupIds, colorOf, getAccessToken, dimension = 'groups', allLabel: allOverride }: {
+  /** Name of the campaign-wide column, when it is not simply all groups or roles. */
+  allLabel?: string;
   theme: ChartTheme;
   /** Whether groupIds are groups or company roles. */
   dimension?: 'groups' | 'roles';
@@ -114,7 +116,7 @@ export default function SectionQuestionList({ theme, campaignId, sectionId, grou
   const tokenRef = useRef(getAccessToken);
   useEffect(() => { tokenRef.current = getAccessToken; });
   const groupKey = `${dimension}:${groupIds.join(',')}`;
-  const allLabel = dimension === 'roles' ? 'All roles' : 'All groups';
+  const allLabel = allOverride ?? (dimension === 'roles' ? 'All roles' : 'All groups');
   const hasToken = !!getAccessToken;
 
   useEffect(() => {

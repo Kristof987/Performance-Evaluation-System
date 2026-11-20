@@ -118,7 +118,9 @@ function useReportScope(data: CampaignDashboard) {
   const [params, setParams] = useSearchParams();
   const sectionParam = Number(params.get('section'));
   const section = data.sections.find((item) => item.id === sectionParam);
-  const dim = DIMS[params.get('by') === 'roles' && (data.roles ?? []).length > 0 ? 'roles' : 'groups'];
+  const base = DIMS[params.get('by') === 'roles' && (data.roles ?? []).length > 0 ? 'roles' : 'groups'];
+  // A group leader's totals cover only the groups they lead.
+  const dim = data.benchmark ? { ...base, all: 'Your groups' } : base;
   const cohorts = (dim.key === 'roles' ? data.roles : data.groups) ?? [];
   const groupIds = (params.get(dim.key) ?? '').split(',').map(Number).filter((id) => cohorts.some((group) => group.id === id)).slice(0, MAX_COMPARED_GROUPS);
   const update = (changes: { section?: number | null; groups?: number[]; by?: Dim['key'] }) => setParams((current) => {
@@ -176,10 +178,10 @@ function Dashboard({ getAccessToken, data, distribution, distributionFailed, onR
     </div>
     {data.completion.completed_evaluations === 0 && <p className="reports-dashboard-note">{data.completion.total_evaluations === 0 ? 'No evaluations have been assigned yet.' : 'No evaluations have been completed yet. Charts use submitted responses only.'}</p>}
     {section
-      ? <SectionView theme={theme} data={data} dim={dim} cohorts={cohorts} onTrend={openCampaign} employeesLink={employeesLink} sectionId={section.id} groups={selectedGroups} colorOf={colorOf} distribution={distribution} onCompare={compareGroup} questions={<SectionQuestionList theme={theme} campaignId={data.campaign.id} sectionId={section.id} groupIds={groupIds} dimension={dim.key} colorOf={colorOf} getAccessToken={getAccessToken} />} />
+      ? <SectionView theme={theme} data={data} dim={dim} cohorts={cohorts} onTrend={openCampaign} employeesLink={employeesLink} sectionId={section.id} groups={selectedGroups} colorOf={colorOf} distribution={distribution} onCompare={compareGroup} questions={<SectionQuestionList theme={theme} campaignId={data.campaign.id} sectionId={section.id} groupIds={groupIds} dimension={dim.key} allLabel={data.benchmark ? 'Company' : undefined} colorOf={colorOf} getAccessToken={getAccessToken} />} />
       : selectedGroups.length
         ? <GroupsView theme={theme} data={data} dim={dim} onTrend={openCampaign} employeesLink={employeesLink} groups={selectedGroups} colorOf={colorOf} onCell={focusCell}
-          panel={dim.key === 'groups' && selectedGroups.length === 1 ? <GroupPanel key={selectedGroups[0].id} campaignId={data.campaign.id} group={selectedGroups[0]} campaignScore={available(data.overall)} getAccessToken={getAccessToken} /> : null} />
+          panel={dim.key === 'groups' && selectedGroups.length === 1 ? <GroupPanel key={selectedGroups[0].id} campaignId={data.campaign.id} group={selectedGroups[0]} campaignScore={available(data.benchmark ? data.benchmark.overall : data.overall)} campaignLabel={data.benchmark ? 'company' : 'all groups'} getAccessToken={getAccessToken} /> : null} />
         : <CampaignView theme={theme} data={data} dim={dim} cohorts={cohorts} onTrend={openCampaign} colorOf={colorOf} distribution={distribution} onSection={(id) => update({ section: id })} onCell={focusCell} />}
     {distributionFailed && <LoadError message="The rating distribution couldn’t load." onRetry={onRetry} />}
     {data.previous_campaign && <p className="reports-chart-footnote">Changes compare with {data.previous_campaign.name}, the previous reportable campaign.</p>}
@@ -204,19 +206,20 @@ function CampaignView({ theme, data, dim, cohorts, colorOf, distribution, onSect
   const trend = data.trend.filter((point) => point.overall !== null).length > 1;
   const groupRows: HeatmapRow[] = cohorts.map((group) => ({ id: group.id, name: group.name, color: colorOf(group.id), cells: group.sections }));
   const campaignRow: HeatmapRow = { id: 0, name: dim.all, emphasis: true, cells: Object.fromEntries(data.sections.map((item) => [String(item.id), item])) };
+  const companyRows: HeatmapRow[] = companyRow(data);
   const ratingBins = distribution?.campaign.availability === 'available' ? distribution.campaign.bins : null;
 
   return <>
     <section className="reports-kpi-row" aria-label="Campaign metrics">
-      <Kpi label="Average peer rating" value={overall === null ? (data.overall.availability === 'suppressed' ? 'Hidden' : '–') : overall.toFixed(2)}>{change(overall, data.overall.previous_score, 'Peer ratings on a 1–5 scale')}</Kpi>
+      <Kpi label={data.benchmark ? 'Your groups’ peer rating' : 'Average peer rating'} value={overall === null ? (data.overall.availability === 'suppressed' ? 'Hidden' : '–') : overall.toFixed(2)}>{change(overall, data.overall.previous_score, 'Peer ratings on a 1–5 scale')}{data.benchmark && <> · Company {available(data.benchmark.overall)?.toFixed(2) ?? (data.benchmark.overall.availability === 'suppressed' ? 'hidden' : '–')}</>}</Kpi>
       <Kpi label="Completion" value={data.completion.rate === null ? '–' : `${data.completion.rate}%`}>{change(data.completion.rate, data.completion.previous_rate, `${data.completion.completed_evaluations} / ${data.completion.total_evaluations} evaluations`, 0, ' pt')}</Kpi>
       <Kpi label="Strongest section" value={strongest?.name ?? '–'} valueStyle={strongest ? { color: scoreColor(theme, strongest.score!) } : undefined}>{strongest ? <>{strongest.score!.toFixed(2)} {change(strongest.score, strongest.previous_score, '')}</> : 'Not enough released ratings'}</Kpi>
       <Kpi label="Development area" value={weakest?.name ?? '–'} valueStyle={weakest ? { color: scoreColor(theme, weakest.score!) } : undefined}>{weakest ? <>{weakest.score!.toFixed(2)} {change(weakest.score, weakest.previous_score, '')}</> : 'Needs at least two released sections'}</Kpi>
     </section>
 
     <div className="reports-viz-grid">
-      {reportable.length > 0 && <ChartCard actions={<CsvButton name={`${data.campaign.name} sections`} rows={() => sectionRows(data)} />} title="Average rating by section" subtitle={`Peer ratings, 1–5 · colour follows the score · line = campaign average${hiddenSections ? ` · ${hiddenSections} hidden or without ratings` : ''}`}>
-        <ScoreBars theme={theme} rows={reportable.map((item) => ({ id: item.id, name: item.name, score: item.score, previous: item.previous_score }))} reference={overall} referenceLabel="Campaign average" onSelect={onSection} />
+      {reportable.length > 0 && <ChartCard actions={<CsvButton name={`${data.campaign.name} sections`} rows={() => sectionRows(data)} />} title="Average rating by section" subtitle={`Peer ratings, 1–5 · colour follows the score · line = ${data.benchmark ? 'your groups' : 'campaign average'}${hiddenSections ? ` · ${hiddenSections} hidden or without ratings` : ''}`}>
+        <ScoreBars theme={theme} rows={reportable.map((item) => ({ id: item.id, name: item.name, score: item.score, previous: item.previous_score }))} reference={overall} referenceLabel={data.benchmark ? 'Your groups' : 'Campaign average'} onSelect={onSection} />
       </ChartCard>}
       {reportable.length > 0 && <ChartCard title="Strengths and development areas" subtitle={data.previous_campaign ? `Change since ${data.previous_campaign.name}` : 'Sections from highest to lowest'}>
         <ol className="reports-rank-list">{reportable.map((item, index) => <li key={item.id}>
@@ -228,7 +231,7 @@ function CampaignView({ theme, data, dim, cohorts, colorOf, distribution, onSect
     </div>
 
     {cohorts.length > 0 && data.sections.length > 0 && <ChartCard actions={<CsvButton name={`${data.campaign.name} ${dim.many} by section`} rows={() => matrixRows(data, cohorts, dim)} />} title={`${dim.Many} × sections`} subtitle={`Each cell is the ${dim.one}’s peer rating${dim.key === 'roles' ? ' (role of the evaluated employee)' : ''} · hatched = hidden by the privacy threshold · click a cell for its questions`}>
-      <Heatmap theme={theme} sections={data.sections} rows={[...groupRows, campaignRow]} onCell={onCell} />
+      <Heatmap theme={theme} sections={data.sections} rows={[...groupRows, campaignRow, ...companyRows]} onCell={onCell} />
     </ChartCard>}
 
     <div className="reports-viz-grid">
@@ -237,7 +240,7 @@ function CampaignView({ theme, data, dim, cohorts, colorOf, distribution, onSect
           <MeterRows rows={cohorts.filter((group) => group.total_evaluations > 0).map((group) => ({ id: group.id, name: group.name, value: group.completion_rate, color: colorOf(group.id), detail: `${group.completed_evaluations} / ${group.total_evaluations} completed` }))} />
         </div>
       </ChartCard>}
-      {ratingBins && <ChartCard title="How ratings are spread" subtitle={`${distribution!.campaign.response_count} peer ratings, converted to 1–5`}>
+      {ratingBins && <ChartCard title="How ratings are spread" subtitle={`${distribution!.campaign.response_count} peer ratings${data.benchmark ? ' across the company' : ''}, converted to 1–5`}>
         <DistributionBars theme={theme} bins={ratingBins} />
       </ChartCard>}
     </div>
@@ -266,11 +269,11 @@ function GroupsView({ theme, data, dim, groups, colorOf, onCell, onTrend, employ
         <small>{group.completion_rate === null ? 'No assignments' : `${group.completion_rate}% complete · ${group.employee_count} ${dim.key === 'roles' ? 'evaluated' : 'members'}`}{dim.key === 'groups' && <> · <Link className="reports-no-print" to={employeesLink([group.id])}>Employees →</Link></>}</small>
       </div>;
     })}</section>}
-    {hasScores ? <ChartCard title={`Sections by ${dim.one}`} subtitle={`Peer ratings, 1–5 · line = campaign average${overall !== null ? ` (${overall.toFixed(2)})` : ''}`}>
+    {hasScores ? <ChartCard title={`Sections by ${dim.one}`} subtitle={`Peer ratings, 1–5 · line = ${data.benchmark ? 'your groups' : 'campaign average'}${overall !== null ? ` (${overall.toFixed(2)})` : ''}`}>
       <GroupedBars theme={theme} categories={data.sections} series={series} reference={overall} />
     </ChartCard> : <p className="reports-dashboard-note">The selected {dim.many} have no released section ratings. Small {dim.many} are hidden by the privacy threshold.</p>}
     <ChartCard actions={<CsvButton name={`${data.campaign.name} ${dim.many} by section`} rows={() => matrixRows(data, groups, dim)} />} title={`${dim.Many} × sections`} subtitle={`Selected ${dim.many} and the campaign · hatched = hidden by the privacy threshold`}>
-      <Heatmap theme={theme} sections={data.sections} rows={[...groups.map((group) => ({ id: group.id, name: group.name, color: colorOf(group.id), cells: group.sections })), { id: 0, name: dim.all, emphasis: true, cells: Object.fromEntries(data.sections.map((item) => [String(item.id), item])) }]} onCell={onCell} />
+      <Heatmap theme={theme} sections={data.sections} rows={[...groups.map((group) => ({ id: group.id, name: group.name, color: colorOf(group.id), cells: group.sections })), { id: 0, name: dim.all, emphasis: true, cells: Object.fromEntries(data.sections.map((item) => [String(item.id), item])) }, ...companyRow(data)]} onCell={onCell} />
     </ChartCard>
     {data.trend.length > 1 && <ChartCard title="Over time" subtitle={`${dim.One} peer rating in recent reportable campaigns · click a point to open that campaign`}>
       <TrendLines theme={theme} points={data.trend.map((point) => ({ campaignId: point.campaign.id, label: shortCampaign(point.campaign), fullName: point.campaign.name, overall: point.overall, ...Object.fromEntries(groups.map((group) => [`g${group.id}`, trendOverall(point, dim)[String(group.id)] ?? null])) }))} series={trendSeries} onSelect={onTrend} />
@@ -294,6 +297,7 @@ function SectionView({ theme, data, dim, cohorts, sectionId, groups, colorOf, di
     <section className="reports-kpi-row" aria-label={`${section.name} metrics`}>
       <Kpi label={`${section.name} · ${dim.all.toLowerCase()}`} value={score === null ? (section.availability === 'suppressed' ? 'Hidden' : '–') : score.toFixed(2)} valueStyle={score !== null ? { color: scoreColor(theme, score) } : undefined}>
         <Delta current={score} previous={available(data.overall)} label="vs. average of all sections" /> vs. all sections {data.previous_campaign && <><Delta current={score} previous={section.previous_score} label={`vs. ${data.previous_campaign.name}`} /> vs. previous</>}
+        {data.benchmark && <> <Delta current={score} previous={available(data.benchmark.sections[String(sectionId)])} label="vs. company" /> vs. company</>}
       </Kpi>
       {groups.map((group) => {
         const value = available(group.sections[String(sectionId)]);
@@ -305,7 +309,7 @@ function SectionView({ theme, data, dim, cohorts, sectionId, groups, colorOf, di
         actions={<span className="reports-card-actions reports-no-print">{dim.key === 'groups' && <Link className="reports-card-action" to={employeesLink(groups.map((group) => group.id), sectionId)}>Employees →</Link>}<button type="button" className="reports-card-action" onClick={() => document.getElementById('section-questions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Questions ↓</button></span>}>
         {ranked.length ? <ScoreBars theme={theme} rows={ranked} reference={score} referenceLabel={dim.all} onSelect={onCompare} /> : <p className="reports-chart-notice">No {dim.one} has a released rating for this section.</p>}
       </ChartCard>
-      <ChartCard title={`How ${section.name} answers are spread`} subtitle={sectionBins?.availability === 'available' ? `${sectionBins.response_count} peer ratings across ${dim.all.toLowerCase()}` : undefined}>
+      <ChartCard title={`How ${section.name} answers are spread`} subtitle={sectionBins?.availability === 'available' ? `${sectionBins.response_count} peer ratings across ${data.benchmark ? 'the company' : dim.all.toLowerCase()}` : undefined}>
         {sectionBins?.availability === 'available' && sectionBins.bins ? <DistributionBars theme={theme} bins={sectionBins.bins} /> : <p className="reports-chart-notice">{sectionBins?.availability === 'suppressed' ? 'Hidden by the privacy threshold.' : 'No rating responses for this section.'}</p>}
       </ChartCard>
     </div>
@@ -329,4 +333,10 @@ function RaterCalibration({ theme, data }: { theme: ChartTheme; data: CampaignDa
       : <p className="reports-chart-notice">No evaluator role has enough reviewers to be shown.</p>}
     <p className="reports-chart-footnote">A role that rates much lower or higher than the others shifts the scores of the people it reviews; consider it when comparing results.</p>
   </ChartCard>;
+}
+
+/** For a group leader, the whole campaign as an extra reference row; nothing for HR, whose totals already are the campaign. */
+function companyRow(data: CampaignDashboard): HeatmapRow[] {
+  if (!data.benchmark) return [];
+  return [{ id: -1, name: 'Company', emphasis: true, cells: data.benchmark.sections }];
 }

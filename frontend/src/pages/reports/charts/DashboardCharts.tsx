@@ -93,7 +93,7 @@ export function Heatmap({ theme, sections, rows, onCell }: { theme: ChartTheme; 
         const label = value !== null ? value.toFixed(1) : cell?.availability === 'suppressed' ? 'Hidden' : '–';
         const title = `${row.name} · ${section.name}: ${value !== null ? value.toFixed(2) : cell?.availability === 'suppressed' ? 'hidden by the privacy threshold' : 'no ratings'}`;
         const content = <span className={value === null ? `reports-heat-empty${cell?.availability === 'suppressed' ? ' is-hidden' : ''}` : 'reports-heat-value'} style={value !== null ? { background: scoreColor(theme, value), color: ink } : undefined}>{label}</span>;
-        return <td key={section.id} title={title}>{onCell && value !== null ? <button type="button" aria-label={title} onClick={() => onCell(section.id, row.id || null)}>{content}</button> : content}</td>;
+        return <td key={section.id} title={title}>{onCell && value !== null ? <button type="button" aria-label={title} onClick={() => onCell(section.id, row.id > 0 ? row.id : null)}>{content}</button> : content}</td>;
       })}
     </tr>)}</tbody>
   </table>

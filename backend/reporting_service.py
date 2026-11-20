@@ -100,6 +100,14 @@ def team_employee_ids(campaign_id: int, groups: frozenset[int], actor: models.Us
     return evaluatees
 
 
+def require_team_campaign(campaign_id: int, actor: models.User, db: Session) -> frozenset[int] | None:
+    """Campaign-level views: a group leader only for campaigns that include a group they lead."""
+    groups = enter_report_scope(actor, db)
+    if groups is not None and not groups & {group.id for group in assigned_campaign_groups(campaign_id, db)}:
+        raise HTTPException(status_code=404, detail="Campaign report not found")
+    return groups
+
+
 def require_team_group(campaign_id: int, group_id: int, actor: models.User, db: Session) -> None:
     groups = enter_report_scope(actor, db)
     if groups is not None and group_id not in groups:

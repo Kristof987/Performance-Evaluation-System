@@ -17,7 +17,7 @@ function memberScore(member: Member) {
 }
 
 /** One group in focus on the Overview: its figures, the group-level AI summary and its members. */
-export default function GroupPanel({ campaignId, group, campaignScore, getAccessToken }: { campaignId: number; group: DashboardGroup; campaignScore: number | null; getAccessToken: AccessTokenGetter | undefined }) {
+export default function GroupPanel({ campaignId, group, campaignScore, campaignLabel = 'all groups', getAccessToken }: { campaignId: number; group: DashboardGroup; campaignScore: number | null; campaignLabel?: string; getAccessToken: AccessTokenGetter | undefined }) {
   const theme = useChartTheme();
   const [detail, setDetail] = useState<GroupReportDetail | null>(null);
   const [error, setError] = useState('');
@@ -44,7 +44,7 @@ export default function GroupPanel({ campaignId, group, campaignScore, getAccess
       <div><span>Members</span><strong>{group.employee_count}</strong></div>
       <div><span>Completion</span><strong>{group.completion_rate === null ? '–' : `${group.completion_rate}%`}</strong><small>{group.completed_evaluations} / {group.total_evaluations} evaluations</small></div>
       <div><span>Peer rating</span><strong style={score !== null ? { color: scoreColor(theme, score) } : undefined}>{score === null ? (group.overall.availability === 'suppressed' ? 'Hidden' : '–') : score.toFixed(2)}</strong>{group.overall.previous_score != null && <small><Delta current={score} previous={group.overall.previous_score} label="vs. previous campaign" /> vs. previous</small>}</div>
-      <div><span>vs. all groups</span><strong>{score !== null && campaignScore !== null ? `${score - campaignScore >= 0 ? '+' : '−'}${Math.abs(score - campaignScore).toFixed(2)}` : '–'}</strong>{campaignScore !== null && <small>All groups: {campaignScore.toFixed(2)}</small>}</div>
+      <div><span>vs. {campaignLabel}</span><strong>{score !== null && campaignScore !== null ? `${score - campaignScore >= 0 ? '+' : '−'}${Math.abs(score - campaignScore).toFixed(2)}` : '–'}</strong>{campaignScore !== null && <small>{campaignLabel[0].toUpperCase() + campaignLabel.slice(1)}: {campaignScore.toFixed(2)}</small>}</div>
     </div>
     </div>
 

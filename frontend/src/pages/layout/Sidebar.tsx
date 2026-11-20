@@ -234,8 +234,8 @@ export default function Sidebar({
           <span className="nav-item-label">Reports</span>
         </Link>}
         {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && teamReportsOnly && <div className="sidebar-report-links" aria-label="Reports pages">
+          <NavLink end to={reportBase}>Overview</NavLink>
           <NavLink to={`${reportBase}/employees`}>Employees</NavLink>
-          <NavLink to={`${reportBase}/groups`}>Groups</NavLink>
         </div>}
         {activePage === 'reports' && reportCampaignId && !isSidebarCollapsed && !teamReportsOnly && <div className="sidebar-report-links" aria-label="Reports pages">
           <NavLink end to={reportBase}>Overview</NavLink>

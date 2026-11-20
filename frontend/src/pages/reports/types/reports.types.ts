@@ -147,12 +147,6 @@ export type GroupsReportGroupSummary = ReportGroupSummary & {
   reportable_sections: number;
 };
 
-export type GroupsReport = {
-  campaign: ReportCampaignOption;
-  kpis: { groups_in_campaign: number; participating_employees: number; completed_evaluations: number; groups_with_reportable_results: number };
-  groups: GroupsReportGroupSummary[];
-  notes: Record<string, string>;
-};
 
 export type GroupReportDetail = {
   campaign: ReportCampaignOption;
@@ -318,6 +312,8 @@ export type CampaignDashboard = {
   overall: DashboardDeltaScore;
   sections: Array<DashboardDeltaScore & { id: number; name: string }>;
   groups: DashboardGroup[];
+  /** Group leaders only: the whole campaign as a reference next to the groups they lead. */
+  benchmark?: { overall: { score: number | null; availability: ScoreAvailability }; sections: Record<string, { score: number | null; availability: ScoreAvailability }> } | null;
   /** Evaluated employees' company roles, in the same shape as groups. */
   roles: DashboardGroup[];
   raters: DashboardRater[];

@@ -21,7 +21,7 @@ import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/E
 import SettingsPage from './pages/settings/SettingsPage'
 import NotFound from './pages/layout/NotFound'
 import './styles/shared.css'
-import { ACCESS, hasAccess, hasTeamReportsOnly, type AccessRule } from './app/access'
+import { ACCESS, hasAccess, type AccessRule } from './app/access'
 import { PageTitle } from './app/usePageTitle'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
 import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './auth/AppAuth'
@@ -50,11 +50,8 @@ function DetailedResultsRedirect() {
 /** Old questionnaire links (e.g. in bookmarks) keep working. */
 /** Group leaders have no campaign-wide overview; their reports start at the employee list. */
 function CampaignOverviewRoute() {
-  const { state } = useAppAuth()
-  const { campaignId } = useParams()
-  const permissions = state.status === 'authenticated' ? state.user.permissions : []
-  if (hasTeamReportsOnly(permissions)) return <Navigate to={`/reports/campaigns/${campaignId}/employees`} replace />
-  return <ProtectedPage rule={ACCESS.campaignReports}><CampaignOverviewPage /></ProtectedPage>
+  // Group leaders get the same Overview, limited by the backend to the groups they lead.
+  return <ProtectedPage rule={ACCESS.reports}><CampaignOverviewPage /></ProtectedPage>
 }
 
 function LegacyEvaluationRedirect() {

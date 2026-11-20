@@ -31,7 +31,25 @@ def _rate(completed: int, total: int) -> int | None:
     return round(completed / total * 100) if total else None
 
 
-def _summarize(campaign: models.Campaign, roles: dict[int, int], aggregate_access: bool, db: Session) -> dict[str, Any]:
+def _team_scores(scored: list[Any], campaign_id: int, team: frozenset[int]) -> section_scoring_service.AggregateScores:
+    """A group leader's groups taken together, with the same thresholds as a single group.
+
+    Besides the usual complement check against the whole campaign, the combined score is
+    withheld wherever leaving out one of the led groups would leave too few evaluated
+    employees: otherwise the combined and per-group figures could recover a hidden group.
+    """
+    scoped = [item for item in scored if item.campaign_id == campaign_id]
+    cohort = [item for item in scoped if item.company_group_id in team]
+    result = section_scoring_service.suppress_small_complements(
+        section_scoring_service._aggregate(cohort, reporting_service.min_aggregate_evaluatees()), scoped, cohort)
+    for group_id in team:
+        result = section_scoring_service.suppress_small_complements(result, cohort, [item for item in cohort if item.company_group_id == group_id])
+    return result
+
+
+def _summarize(campaign: models.Campaign, roles: dict[int, int], aggregate_access: bool, db: Session,
+               team: frozenset[int] | None = None) -> dict[str, Any]:
+    """One campaign's figures; for a group leader (team) the totals cover only the groups they lead."""
     rows = reporting_service.campaign_report_rows(campaign.id, db)
     totals: dict[int | None, set[int]] = {}
     completed: dict[int | None, set[int]] = {}
@@ -41,29 +59,34 @@ def _summarize(campaign: models.Campaign, roles: dict[int, int], aggregate_acces
     for filled_form, _form, status in rows:
         done = reporting_service.status_key(status, filled_form.finish_date) == "completed"
         for key in (None, filled_form.company_group_id):
+            if key is None and team is not None and filled_form.company_group_id not in team:
+                continue
             totals.setdefault(key, set()).add(filled_form.id)
             if done:
                 completed.setdefault(key, set()).add(filled_form.id)
         # Roles are those of the evaluated employee, frozen when the questionnaire was issued.
         role_id = reporting_service.assignment_role_id(filled_form, roles)
-        if role_id is not None:
+        if role_id is not None and team is None:
             role_totals.setdefault(role_id, set()).add(filled_form.id)
             role_people.setdefault(role_id, set()).add(filled_form.evaluatee_id)
             if done:
                 role_completed.setdefault(role_id, set()).add(filled_form.id)
     scored, names = reporting_service._section_report_data(rows, db)
+    company = section_scoring_service.campaign_scores(scored, campaign.id, aggregate_access=aggregate_access)
     return {
         "campaign": campaign,
+        "company": company,
         "counts": {key: (len(completed.get(key, ())), len(ids)) for key, ids in totals.items()},
         "role_counts": {key: (len(role_completed.get(key, ())), len(ids)) for key, ids in role_totals.items()},
         "role_people": {key: len(ids) for key, ids in role_people.items()},
-        "scores": section_scoring_service.campaign_scores(scored, campaign.id, aggregate_access=aggregate_access),
+        "scores": company if team is None else _team_scores(scored, campaign.id, team),
         "groups": section_scoring_service.group_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
-        "roles": section_scoring_service.role_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
-        "raters": section_scoring_service.evaluator_role_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
+        # Group leaders get no role views: split by role, small teams would isolate people.
+        "roles": {} if team is not None else section_scoring_service.role_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
+        "raters": {} if team is not None else section_scoring_service.evaluator_role_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
         "rater_people": {role_id: len({item.evaluator_id for item in scored if item.campaign_id == campaign.id and item.evaluator_id != item.evaluatee_id
                                        and section_scoring_service.role_of(item, roles, evaluator=True) == role_id})
-                         for role_id in {section_scoring_service.role_of(item, roles, evaluator=True) for item in scored} if role_id is not None},
+                         for role_id in {section_scoring_service.role_of(item, roles, evaluator=True) for item in scored} if role_id is not None} if team is None else {},
         "names": names,
     }
 
@@ -80,14 +103,20 @@ def _history(campaign: models.Campaign, db: Session) -> list[models.Campaign]:
 
 
 def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
+    team = reporting_service.require_team_campaign(campaign_id, actor, db)
     campaign = reporting_service.require_reports_access(campaign_id, actor, db)
     assert campaign is not None
-    aggregate_access = reporting_service.aggregate_reporting_access(campaign_id, actor, db)
+    # Group leaders never get the managers' unsuppressed statistics.
+    aggregate_access = team is None and reporting_service.aggregate_reporting_access(campaign_id, actor, db)
     roles = {employee_id: role.id for employee_id, (_employee, role) in reporting_service.users_by_id(db).items()}
-    summaries = [_summarize(item, roles, aggregate_access, db) for item in [*_history(campaign, db), campaign]]
+    history = _history(campaign, db)
+    if team is not None:
+        # Only earlier campaigns that included one of the led groups.
+        history = [item for item in history if team & {group.id for group in reporting_service.assigned_campaign_groups(item.id, db)}]
+    summaries = [_summarize(item, roles, aggregate_access, db, team) for item in [*history, campaign]]
     current = summaries[-1]
     previous = summaries[-2] if len(summaries) > 1 else None
-    groups = reporting_service.assigned_campaign_groups(campaign.id, db)
+    groups = [group for group in reporting_service.assigned_campaign_groups(campaign.id, db) if team is None or group.id in team]
     members_by_group, _ = reporting_service.membership_maps(db)
 
     def previous_section(section_id: int) -> float | None:
@@ -151,6 +180,11 @@ def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) 
                       **_score(current["scores"].sections[section_id]), "previous_score": previous_section(section_id)}
                      for section_id in section_ids],
         "groups": group_rows,
+        # For a group leader, the whole campaign as a reference point next to their own groups.
+        "benchmark": None if team is None else {
+            "overall": _score(current["company"].overall),
+            "sections": {section_id: _score(current["company"].sections.get(section_id)) for section_id in section_ids},
+        },
         "roles": role_rows,
         "raters": raters,
         "trend": [{
@@ -190,9 +224,13 @@ def build_section_questions(campaign_id: int, section_id: int, group_ids: list[i
     Every slice comes from the question report, so each keeps its own privacy release decision.
     Questions are matched across campaigns by their content key, which only changes when the question does.
     """
+    team = reporting_service.require_team_campaign(campaign_id, actor, db)
     campaign = reporting_service.require_reports_access(campaign_id, actor, db)
     assert campaign is not None
     role_ids = role_ids or []
+    if team is not None and (role_ids or any(group_id not in team for group_id in group_ids)):
+        # Group leaders compare their own groups; the campaign-wide columns are the company reference.
+        raise HTTPException(status_code=403, detail="You can only view reports of groups you lead")
     if group_ids and role_ids:
         raise HTTPException(status_code=400, detail="Compare either groups or roles, not both")
     if len(group_ids) > MAX_SECTION_GROUPS or len(role_ids) > MAX_SECTION_GROUPS:
@@ -215,6 +253,8 @@ def build_section_questions(campaign_id: int, section_id: int, group_ids: list[i
     by_group = {cohort_id: _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, **scope), section_id)
                 for cohort_id, _name, scope in cohorts}
     history = _history(campaign, db)
+    if team is not None:
+        history = [item for item in history if team & {group.id for group in reporting_service.assigned_campaign_groups(item.id, db)}]
     previous_campaign = history[-1] if history else None
     previous = (_section_questions(question_analytics_service.build_question_report(previous_campaign.id, actor, db), section_id)
                 if previous_campaign is not None else {})

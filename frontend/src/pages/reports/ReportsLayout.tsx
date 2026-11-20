@@ -74,7 +74,7 @@ export default function ReportsLayout({ selectedCampaignId, allowQualityPreview 
         setCampaignsError('');
         if (selectedCampaignId === null && items.length > 0) {
           const initial = items.find((campaign) => reportAvailability(campaign) === null) ?? items[0];
-          navigate(`/reports/campaigns/${initial.id}${teamOnly ? '/employees' : ''}`, { replace: true });
+          navigate(`/reports/campaigns/${initial.id}`, { replace: true });
         }
       })
       .catch((cause) => {
@@ -91,7 +91,7 @@ export default function ReportsLayout({ selectedCampaignId, allowQualityPreview 
     if (location.pathname.includes('/ai-analysis')) return `/reports/campaigns/${campaignId}/ai-analysis`;
     if (location.pathname.includes('/answers')) return `/reports/campaigns/${campaignId}/answers`;
     if (location.pathname.includes('/groups')) return `/reports/campaigns/${campaignId}/groups`;
-    if (location.pathname.includes('/employees') || teamOnly) return `/reports/campaigns/${campaignId}/employees`;
+    if (location.pathname.includes('/employees')) return `/reports/campaigns/${campaignId}/employees`;
     return `/reports/campaigns/${campaignId}`;
   }
 

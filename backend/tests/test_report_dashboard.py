@@ -289,3 +289,97 @@ def test_group_detail_lists_member_scores(db, permissions):
     first = next(item for item in result["employees"] if item["employee_id"] == world.people[0].id)
     assert (first["reviews_received"], first["reviews_assigned"]) == (2, 3)
     assert (first["peer_score"], first["score_availability"]) == (4.5, "available")
+
+
+def as_team_lead(permissions, monkeypatch, *group_ids):
+    permissions.clear()
+    permissions.add("reports.read_team")
+    monkeypatch.setattr(reporting_service, "led_group_ids", lambda _actor, _db: frozenset(group_ids))
+
+
+def test_team_lead_dashboard_covers_only_led_groups_with_company_reference(db, permissions, monkeypatch):
+    world = World(db)
+    old = world.campaign(2103)
+    world.rate_everyone(old, alpha=(3, 2), beta=(3, 2))
+    current = world.campaign(2104)
+    world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
+    as_team_lead(permissions, monkeypatch, world.groups[0].id)
+
+    result = report_dashboard_service.build_campaign_dashboard(current.id, world.actor, db)
+
+    assert [group["id"] for group in result["groups"]] == [world.groups[0].id]
+    assert result["overall"]["score"] == 4.5 and result["overall"]["previous_score"] == 3.0
+    assert result["completion"]["total_evaluations"] == 6
+    assert [section["score"] for section in result["sections"]] == [5.0, 4.0]
+    assert result["benchmark"]["overall"] == {"score": 3.5, "availability": "available"}
+    assert {key: cell["score"] for key, cell in result["benchmark"]["sections"].items()} == {world.section_a.id: 4.0, world.section_b.id: 3.0}
+    assert result["roles"] == [] and result["raters"] == []
+    assert world.groups[1].id not in result["trend"][-1]["groups"]
+
+
+def test_team_lead_combined_score_cannot_reveal_a_hidden_group(db, permissions, monkeypatch):
+    world = World(db)
+    current = world.campaign(2105)
+    for evaluator in world.people[:3]:
+        for evaluatee in world.people[:3]:
+            if evaluator is not evaluatee:
+                world.review(current, world.groups[0], evaluator, evaluatee, 4, 4)
+    # Support has a single evaluated employee: hidden on its own, so the combined score must hide too.
+    world.review(current, world.groups[1], world.people[4], world.people[3], 1, 1)
+    world.review(current, world.groups[1], world.people[5], world.people[3], 1, 1)
+    # A third, unled group keeps the campaign-wide complements large enough.
+    ops = add(db, models.CompanyGroup(name=f"Ops {uuid4().hex}"))
+    db.execute(models.campaign_company_groups.insert().values(campaign_id=current.id, company_group_id=ops.id))
+    crew = [world.person(uuid4().hex, index) for index in range(3)]
+    for evaluator in crew:
+        for evaluatee in crew:
+            if evaluator is not evaluatee:
+                world.review(current, ops, evaluator, evaluatee, 3, 3)
+    as_team_lead(permissions, monkeypatch, world.groups[0].id, world.groups[1].id)
+
+    result = report_dashboard_service.build_campaign_dashboard(current.id, world.actor, db)
+
+    support = result["groups"][1]
+    assert support["overall"]["availability"] == "suppressed"
+    assert result["overall"]["score"] is None and {section["availability"] for section in result["sections"]} == {"suppressed"}
+
+
+def test_team_lead_campaign_views_stay_inside_led_groups(db, permissions, monkeypatch):
+    from fastapi import HTTPException
+
+    world = World(db)
+    current = world.campaign(2106)
+    world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
+    outsider = add(db, models.CompanyGroup(name=f"Elsewhere {uuid4().hex}"))
+    as_team_lead(permissions, monkeypatch, outsider.id)
+    with pytest.raises(HTTPException) as foreign:
+        report_dashboard_service.build_campaign_dashboard(current.id, world.actor, db)
+    assert foreign.value.status_code == 404
+
+    as_team_lead(permissions, monkeypatch, world.groups[0].id)
+    own = report_dashboard_service.build_section_questions(current.id, world.section_a.id, [world.groups[0].id], world.actor, db)
+    assert own["groups"] == [{"id": world.groups[0].id, "name": world.groups[0].name}]
+    with pytest.raises(HTTPException) as other_group:
+        report_dashboard_service.build_section_questions(current.id, world.section_a.id, [world.groups[1].id], world.actor, db)
+    with pytest.raises(HTTPException) as by_role:
+        report_dashboard_service.build_section_questions(current.id, world.section_a.id, [], world.actor, db, role_ids=[world.role.id])
+    assert (other_group.value.status_code, by_role.value.status_code) == (403, 403)
+
+
+def test_team_scores_withhold_a_combination_that_isolates_one_led_group():
+    from itertools import count
+    from section_scoring_service import EvaluationSections
+
+    ids = count(1)
+
+    def reviews(group_id, evaluatees, score):
+        return [EvaluationSections(next(ids), 1, evaluator, evaluatee, group_id, date(2090, 1, 1), frozenset({7}), {7: score}, {7: frozenset({"q7"})})
+                for evaluatee in evaluatees for evaluator in (1000 + evaluatee, 2000 + evaluatee)]
+
+    big, small, other = reviews(10, [1, 2, 3], 4.0), reviews(20, [4], 1.0), reviews(30, [5, 6, 7], 3.0)
+    scored = big + small + other
+    alone = report_dashboard_service._team_scores(scored, 1, frozenset({10}))
+    together = report_dashboard_service._team_scores(scored, 1, frozenset({10, 20}))
+    assert alone.sections[7].availability == "available"
+    # Big and the combination together would reveal the single employee in the small group.
+    assert together.sections[7].availability == "suppressed"
