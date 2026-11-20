@@ -4219,6 +4219,16 @@ def form_issuance_errors(structure: list[dict], db: Session | None = None) -> li
                 errors.append(f"{name} must score higher values as better.")
             if any(label in question and question[label] is not None and not isinstance(question[label], str) for label in ("min_label", "max_label")):
                 errors.append(f"{name} has an invalid endpoint label.")
+            labels = question.get("scale_labels")
+            if labels is not None and type(minimum) is int and type(maximum) is int and maximum > minimum:
+                points = maximum - minimum + 1
+                if points > MAX_LABELLED_SCALE_POINTS:
+                    errors.append(f"{name} can label every value only on scales of at most {MAX_LABELLED_SCALE_POINTS} values.")
+                elif (not isinstance(labels, list) or len(labels) != points
+                      or not all(isinstance(label, str) and label.strip() for label in labels)):
+                    errors.append(f"{name} needs a label for every scale value.")
+                elif any(len(label.strip()) > MAX_SCALE_LABEL_LENGTH for label in labels):
+                    errors.append(f"{name} has a scale label longer than {MAX_SCALE_LABEL_LENGTH} characters.")
         if question.get("type") in {"Single choice", "Multiple choice"}:
             options = question.get("options")
             valid = isinstance(options, list) and len(options) >= 2 and all(
@@ -4236,6 +4246,11 @@ def form_issuance_errors(structure: list[dict], db: Session | None = None) -> li
             if not valid:
                 errors.append(f'{name} must contain at least two valid answer options.')
     return errors
+
+
+# Labelling every value of a scale (a behaviourally anchored scale) only makes sense for short scales.
+MAX_LABELLED_SCALE_POINTS = 11
+MAX_SCALE_LABEL_LENGTH = 120
 
 
 def _validate_structured_question(question: dict, seen_ids: set, db: Session | None):
@@ -4257,6 +4272,11 @@ def _validate_structured_question(question: dict, seen_ids: set, db: Session | N
         for field in ("min_label", "max_label"):
             if field in question and question[field] is not None and not isinstance(question[field], str):
                 raise HTTPException(status_code=400, detail=f"Scale question {question_id} has an invalid endpoint label")
+        labels = question.get("scale_labels")
+        # A draft may still have blank labels; form_issuance_errors requires every one before issuing.
+        if labels is not None and (not isinstance(labels, list) or len(labels) > 200
+                                   or not all(isinstance(label, str) for label in labels)):
+            raise HTTPException(status_code=400, detail=f"Scale question {question_id} has invalid value labels")
 
 
 def form_section_ids(questions: object) -> set[int]:

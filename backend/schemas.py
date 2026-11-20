@@ -1008,6 +1008,7 @@ class SubmittedAnswer(BaseModel):
     required: bool
     answered: bool
     rating: int | None
+    rating_label: str | None = None
     scale_min: int | None
     scale_max: int | None
     choices: list[str]

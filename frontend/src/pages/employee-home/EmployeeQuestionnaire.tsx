@@ -55,7 +55,7 @@ function QuestionControl({ question, value, readOnly, onChange }: { question: Fo
   const inputId = `employee-question-${question.id}`;
   if (isScale(question)) {
     const { min, max } = scaleLimits(question);
-    return <RatingChoices name={question.id} min={min} max={max} minLabel={question.min_label} maxLabel={question.max_label} value={typeof value === 'number' ? value : undefined} readOnly={readOnly} onChange={(rating) => onChange(rating)} />;
+    return <RatingChoices name={question.id} min={min} max={max} minLabel={question.min_label} maxLabel={question.max_label} labels={Array.isArray(question.scale_labels) ? question.scale_labels as string[] : undefined} value={typeof value === 'number' ? value : undefined} readOnly={readOnly} onChange={(rating) => onChange(rating)} />;
   }
   if (question.type === 'Single choice' || question.type === 'Multiple choice') {
     const options = optionsFor(question);

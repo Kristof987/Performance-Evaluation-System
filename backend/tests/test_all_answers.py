@@ -150,3 +150,15 @@ def test_unknown_employee_is_not_found(db):
     with pytest.raises(HTTPException) as missing:
         answers_service.build_employee_answers(world.campaign.id, outsider.id, world.actor, db)
     assert missing.value.status_code == 404
+
+
+def test_rating_carries_its_value_label(db):
+    world = World(db, ["Anna", "Béla", "Cecil"])
+    anna, bela, cecil = world.people
+    labelled = world.snapshot()
+    labelled["questions"][0]["questions"][0]["scale_labels"] = ["Never", "Rarely", "Sometimes", "Often", "Always"]
+    for reviewer in (bela, cecil):
+        world.review(reviewer, 4).form_snapshot = labelled
+    db.flush()
+    result = answers_service.build_employee_answers(world.campaign.id, anna.id, world.actor, db)
+    assert {item["sections"][0]["answers"][0]["rating_label"] for item in result["questionnaires"]} == {"Often"}

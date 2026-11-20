@@ -16,6 +16,8 @@ export type FormQuestion = {
   scale_max?: number;
   min_label?: string;
   max_label?: string;
+  /** One label per value, lowest first; when present every value is labelled, not just the endpoints. */
+  scale_labels?: string[];
   options?: ChoiceOption[] | string[];
   [key: string]: unknown;
 };
@@ -53,6 +55,7 @@ export type AIGeneratedQuestion = {
   scale_max: number | null;
   min_label: string | null;
   max_label: string | null;
+  scale_labels?: string[] | null;
   options: ChoiceOption[] | null;
 };
 

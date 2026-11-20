@@ -16,6 +16,7 @@ import ExcelFormImportModal from './ExcelFormImportModal';
 import { moveFormItem, type DropPosition, type MovingItem } from './form-order';
 import Pending from '../../components/feedback/Pending';
 import LoadingState from '../../components/feedback/LoadingState';
+import { RatingChoices } from './QuestionnaireChoices';
 
 type Mode = 'forms' | 'templates';
 type Selected = { type: 'question'; id: string } | { type: 'section'; id: number } | null;
@@ -32,7 +33,7 @@ function optionsFor(question: FormQuestion): ChoiceOption[] {
 const initial = (name = 'Untitled form'): ReviewFormValues => ({ name, description: '', questions: [{ type: 'question', question: makeQuestion() }] });
 function importedQuestion(question: AIGeneratedQuestion): FormQuestion {
   const base: FormQuestion = { id: question.id, text: question.text, type: question.type, required: question.required, helpText: question.helpText };
-  if (question.type === 'Scale') return { ...base, scale_direction: 'higher_is_better', scale_min: question.scale_min ?? 1, scale_max: question.scale_max ?? 5, min_label: question.min_label ?? '', max_label: question.max_label ?? '' };
+  if (question.type === 'Scale') return { ...base, scale_direction: 'higher_is_better', scale_min: question.scale_min ?? 1, scale_max: question.scale_max ?? 5, min_label: question.min_label ?? '', max_label: question.max_label ?? '', ...(question.scale_labels?.length ? { scale_labels: question.scale_labels } : {}) };
   if (choiceTypes.has(question.type)) return { ...base, options: question.options ?? [] };
   return base;
 }
@@ -581,6 +582,52 @@ function SectionBlock({ block, name, selected, onSelect, onAdd, onRemove, onDele
     <button type="button" className="forms-add-in-section" onClick={onAdd}>Add question to {name}</button>
   </div>;
 }
+/** Labelling every value (an anchored scale) is offered for scales of at most this many values. */
+const MAX_LABELLED_SCALE_POINTS = 11;
+const scalePoints = (question: FormQuestion) => (question.scale_max ?? 5) - (question.scale_min ?? 1) + 1;
+/** In every-value mode the endpoint labels mirror the first and last value label, for screens that only show those. */
+function withValueLabels(labels: string[]): Partial<FormQuestion> {
+  return { scale_labels: labels, min_label: labels[0] ?? '', max_label: labels[labels.length - 1] ?? '' };
+}
+function scaleRange(question: FormQuestion, minimum: number, maximum: number): Partial<FormQuestion> {
+  const patch: Partial<FormQuestion> = { scale_min: minimum, scale_max: maximum, scale_direction: 'higher_is_better' };
+  if (!Array.isArray(question.scale_labels)) return patch;
+  const points = maximum - minimum + 1;
+  if (!Number.isInteger(points) || points < 2 || points > MAX_LABELLED_SCALE_POINTS) return patch;
+  const current = question.scale_labels as string[];
+  return { ...patch, ...withValueLabels(Array.from({ length: points }, (_value, index) => current[index] ?? '')) };
+}
+function ScaleLabelsEditor({ question, onUpdate }: { question: FormQuestion; onUpdate: (patch: Partial<FormQuestion>) => void }) {
+  const minimum = question.scale_min ?? 1;
+  const points = scalePoints(question);
+  const everyValue = Array.isArray(question.scale_labels);
+  const allowed = Number.isInteger(points) && points >= 2 && points <= MAX_LABELLED_SCALE_POINTS;
+  const labels = everyValue ? question.scale_labels as string[] : [];
+  function setMode(next: boolean) {
+    if (next === everyValue) return;
+    if (next) onUpdate(withValueLabels(Array.from({ length: points }, (_value, index) => index === 0 ? question.min_label ?? '' : index === points - 1 ? question.max_label ?? '' : '')));
+    else onUpdate({ scale_labels: undefined });
+  }
+  return <div className="forms-scale-labels">
+    <div className="forms-scale-labels-mode" role="radiogroup" aria-label="Scale labels">
+      <span className="form-label">Labels</span>
+      <label><input type="radio" name={`labels-${question.id}`} checked={!everyValue} onChange={() => setMode(false)} />Lowest and highest only</label>
+      <label title={allowed ? undefined : `Available for scales of at most ${MAX_LABELLED_SCALE_POINTS} values.`}><input type="radio" name={`labels-${question.id}`} checked={everyValue} disabled={!allowed && !everyValue} onChange={() => setMode(true)} />Every value</label>
+    </div>
+    {!everyValue && <>
+      {!allowed && <p className="forms-editor-hint">Every value can be labelled on scales of at most {MAX_LABELLED_SCALE_POINTS} values.</p>}
+      <label className="form-field forms-editor-field"><span className="form-label">Lowest rating label</span><input className="form-control" value={question.min_label ?? ''} onChange={(event) => onUpdate({ min_label: event.target.value })} /></label>
+      <label className="form-field forms-editor-field"><span className="form-label">Highest rating label</span><input className="form-control" value={question.max_label ?? ''} onChange={(event) => onUpdate({ max_label: event.target.value })} /></label>
+    </>}
+    {everyValue && <>
+      <p className="forms-editor-hint">Describe what each value means, so everyone rates the same way.{!allowed && ` Shorten the scale to at most ${MAX_LABELLED_SCALE_POINTS} values.`}</p>
+      {allowed && <div className="forms-scale-label-list">{labels.map((label, index) => <label className="forms-scale-label-row" key={index}>
+        <span className="forms-scale-label-value">{minimum + index}</span>
+        <input className="form-control" aria-label={`Label for ${minimum + index}`} value={label} maxLength={120} placeholder={index === 0 ? 'e.g. Rarely meets expectations' : index === labels.length - 1 ? 'e.g. Consistently exceeds expectations' : ''} onChange={(event) => onUpdate(withValueLabels(labels.map((item, position) => position === index ? event.target.value : item)))} />
+      </label>)}</div>}
+    </>}
+  </div>;
+}
 function QuestionEditor({ question, sections, current, onUpdate, onMove, onDelete }: { question: FormQuestion; sections: Section[]; current: number | null; onUpdate: (patch: Partial<FormQuestion>) => void; onMove: (id: number | null) => void; onDelete: () => void }) {
   const options = optionsFor(question);
   function updateOptions(next: ChoiceOption[]) { onUpdate({ options: next }); }
@@ -588,7 +635,7 @@ function QuestionEditor({ question, sections, current, onUpdate, onMove, onDelet
   return <div className="forms-editor-props">
     <button className="forms-editor-delete-link" onClick={onDelete}>Delete question</button>
     <label className="form-field forms-editor-field"><span className="form-label">Question text</span><textarea className="form-control" aria-label="Question text" value={question.text} onChange={(event) => onUpdate({ text: event.target.value })} /></label>
-    <label className="form-field forms-editor-field"><span className="form-label">Question type</span><select className="form-control" aria-label="Question type" value={question.type} onChange={(event) => { const type = event.target.value; onUpdate({ type, options: choiceTypes.has(type) ? question.options ?? [] : undefined, ...(isScale({ ...question, type }) ? { scale_min: question.scale_min ?? 1, scale_max: question.scale_max ?? 5, scale_direction: 'higher_is_better' } : {}) }); }}>
+    <label className="form-field forms-editor-field"><span className="form-label">Question type</span><select className="form-control" aria-label="Question type" value={question.type} onChange={(event) => { const type = event.target.value; onUpdate({ type, options: choiceTypes.has(type) ? question.options ?? [] : undefined, ...(isScale({ ...question, type }) ? { scale_min: question.scale_min ?? 1, scale_max: question.scale_max ?? 5, scale_direction: 'higher_is_better' } : { scale_labels: undefined }) }); }}>
       {!['Scale', 'Text', 'Single choice', 'Multiple choice'].includes(question.type) && <option value={question.type}>{question.type}</option>}
       <option value="Scale">Numerical scale</option><option>Text</option><option>Single choice</option><option>Multiple choice</option>
     </select></label>
@@ -602,10 +649,9 @@ function QuestionEditor({ question, sections, current, onUpdate, onMove, onDelet
     </div>}
     {isScale(question) && <>
       <p className="forms-editor-hint">Higher values always mean better performance.</p>
-      <label className="form-field forms-editor-field"><span className="form-label">Minimum</span><input className="form-control" type="number" value={question.scale_min ?? 1} onChange={(event) => onUpdate({ scale_min: Number(event.target.value), scale_direction: 'higher_is_better' })} /></label>
-      <label className="form-field forms-editor-field"><span className="form-label">Maximum</span><input className="form-control" type="number" value={question.scale_max ?? 5} onChange={(event) => onUpdate({ scale_max: Number(event.target.value), scale_direction: 'higher_is_better' })} /></label>
-      <label className="form-field forms-editor-field"><span className="form-label">Lowest rating label</span><input className="form-control" value={question.min_label ?? ''} onChange={(event) => onUpdate({ min_label: event.target.value })} /></label>
-      <label className="form-field forms-editor-field"><span className="form-label">Highest rating label</span><input className="form-control" value={question.max_label ?? ''} onChange={(event) => onUpdate({ max_label: event.target.value })} /></label>
+      <label className="form-field forms-editor-field"><span className="form-label">Minimum</span><input className="form-control" type="number" value={question.scale_min ?? 1} onChange={(event) => onUpdate(scaleRange(question, Number(event.target.value), question.scale_max ?? 5))} /></label>
+      <label className="form-field forms-editor-field"><span className="form-label">Maximum</span><input className="form-control" type="number" value={question.scale_max ?? 5} onChange={(event) => onUpdate(scaleRange(question, question.scale_min ?? 1, Number(event.target.value)))} /></label>
+      <ScaleLabelsEditor question={question} onUpdate={onUpdate} />
     </>}
     <label className="forms-editor-switch"><span>Required question</span><input type="checkbox" checked={question.required} onChange={(event) => onUpdate({ required: event.target.checked })} /></label>
   </div>;
@@ -659,4 +705,4 @@ function ManageSections({ sections, name, editing, pending, error, canManage, on
     </div>
   </div></div>;
 }
-function Preview({ draft, name, onClose }: { draft: ReviewFormValues; name: (id: number) => string; onClose: () => void }) { return <div className="forms-preview-backdrop"><div className="forms-preview-modal"><div className="forms-preview-topbar"><div><h3>Questionnaire preview</h3><span className="forms-preview-mode">Preview mode</span></div><button className="forms-editor-modal-close" onClick={onClose}>×</button></div><div className="forms-preview-body"><div className="forms-preview-paper"><h2>{draft.name}</h2>{draft.questions.map((block, blockIndex) => <div key={blockIndex}>{block.type === 'section' && <h3 className="forms-preview-section-title">{name(block.section_id)}</h3>}{(block.type === 'section' ? block.questions : [block.question]).map((question, questionIndex) => { const index = draft.questions.slice(0, blockIndex).reduce((count, previous) => count + (previous.type === 'section' ? previous.questions.length : 1), questionIndex + 1); const min = question.scale_min ?? 1; const max = question.scale_max ?? 5; return <div className="forms-preview-question" key={question.id}><strong>{index}. {question.text} {question.required && '*'}</strong>{isScale(question) ? <div className="forms-preview-scale-group"><div className="forms-preview-scale">{Array.from({ length: max - min + 1 }, (_, value) => <label key={value}><input type="radio" name={question.id} />{min + value}</label>)}</div><div className="forms-preview-endpoints"><span>{question.min_label || 'Lowest rating'}</span><span>{question.max_label || 'Highest rating'}</span></div></div> : choiceTypes.has(question.type) ? <div className="forms-preview-choice-group">{optionsFor(question).map((option) => <label key={option.id}><input type={question.type === 'Single choice' ? 'radio' : 'checkbox'} name={question.id} /> {option.label}</label>)}</div> : <textarea className="form-control" placeholder="Preview response" />}</div>; })}</div>)}</div></div><div className="forms-preview-footer"><span>Responses are not saved.</span><button className="btn btn-primary" onClick={onClose}>Close preview</button></div></div></div>; }
+function Preview({ draft, name, onClose }: { draft: ReviewFormValues; name: (id: number) => string; onClose: () => void }) { return <div className="forms-preview-backdrop"><div className="forms-preview-modal"><div className="forms-preview-topbar"><div><h3>Questionnaire preview</h3><span className="forms-preview-mode">Preview mode</span></div><button className="forms-editor-modal-close" onClick={onClose}>×</button></div><div className="forms-preview-body"><div className="forms-preview-paper"><h2>{draft.name}</h2>{draft.questions.map((block, blockIndex) => <div key={blockIndex}>{block.type === 'section' && <h3 className="forms-preview-section-title">{name(block.section_id)}</h3>}{(block.type === 'section' ? block.questions : [block.question]).map((question, questionIndex) => { const index = draft.questions.slice(0, blockIndex).reduce((count, previous) => count + (previous.type === 'section' ? previous.questions.length : 1), questionIndex + 1); const min = question.scale_min ?? 1; const max = question.scale_max ?? 5; return <div className="forms-preview-question" key={question.id}><strong>{index}. {question.text} {question.required && '*'}</strong>{isScale(question) && Array.isArray(question.scale_labels) ? <RatingChoices name={question.id} min={min} max={max} minLabel={question.min_label} maxLabel={question.max_label} labels={question.scale_labels as string[]} /> : isScale(question) ? <div className="forms-preview-scale-group"><div className="forms-preview-scale">{Array.from({ length: max - min + 1 }, (_, value) => <label key={value}><input type="radio" name={question.id} />{min + value}</label>)}</div><div className="forms-preview-endpoints"><span>{question.min_label || 'Lowest rating'}</span><span>{question.max_label || 'Highest rating'}</span></div></div> : choiceTypes.has(question.type) ? <div className="forms-preview-choice-group">{optionsFor(question).map((option) => <label key={option.id}><input type={question.type === 'Single choice' ? 'radio' : 'checkbox'} name={question.id} /> {option.label}</label>)}</div> : <textarea className="form-control" placeholder="Preview response" />}</div>; })}</div>)}</div></div><div className="forms-preview-footer"><span>Responses are not saved.</span><button className="btn btn-primary" onClick={onClose}>Close preview</button></div></div></div>; }

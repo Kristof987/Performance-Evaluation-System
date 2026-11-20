@@ -919,7 +919,8 @@
 .reports-answers-row dt { font-size: 13px; }
 .reports-answers-row dd { font-size: 13px; margin: 0; }
 .reports-answers-required { color: var(--color-text-muted); margin-left: 2px; }
-.reports-answers-rating { align-items: center; display: inline-flex; gap: 6px; }
+.reports-answers-rating { align-items: center; display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.reports-answers-rating-label { color: var(--color-text-secondary); }
 .reports-answers-rating small { color: var(--color-text-muted); }
 .reports-answers-dots { display: inline-flex; gap: 3px; }
 .reports-answers-dots i { background: var(--color-border); border-radius: 999px; display: block; height: 8px; width: 8px; }

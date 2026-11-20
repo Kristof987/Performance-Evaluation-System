@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 import models
 import reporting_service
+from form_snapshot_service import snapshot_form_name
 from question_analytics_service import _options
 from section_scoring_service import RATING_TYPES, _rating_range
 
@@ -72,7 +73,7 @@ def _answer(question: dict, value: Any, answered: bool) -> dict[str, Any] | None
         return None
     result: dict[str, Any] = {"question_id": question.get("id") if isinstance(question.get("id"), str) else "",
                               "text": text.strip(), "type": kind, "required": bool(question.get("required")),
-                              "rating": None, "scale_min": None, "scale_max": None, "choices": [], "text_answer": None,
+                              "rating": None, "rating_label": None, "scale_min": None, "scale_max": None, "choices": [], "text_answer": None,
                               "answered": False}
     if kind in RATING_TYPES:
         bounds = _rating_range(question)
@@ -81,6 +82,9 @@ def _answer(question: dict, value: Any, answered: bool) -> dict[str, Any] | None
         result["scale_min"], result["scale_max"] = bounds
         if answered and isinstance(value, int) and not isinstance(value, bool) and bounds[0] <= value <= bounds[1]:
             result["rating"], result["answered"] = value, True
+            labels = question.get("scale_labels")
+            if isinstance(labels, list) and len(labels) == bounds[1] - bounds[0] + 1 and isinstance(labels[value - bounds[0]], str):
+                result["rating_label"] = labels[value - bounds[0]].strip() or None
     elif kind in {"Single choice", "Multiple choice"}:
         options = _options(question)
         if options is None:
@@ -145,7 +149,7 @@ def _questionnaire(assignment: models.FilledForm, form: models.Form, db_section_
                              "answers": rows})
     if loose:
         sections.append({"section_id": None, "section_name": OTHER_QUESTIONS, "answers": loose})
-    return {"form_name": form.name, "sections": sections}
+    return {"form_name": snapshot_form_name(assignment, form), "sections": sections}
 
 
 def build_employee_answers(campaign_id: int, employee_id: int, actor: models.User, db: Session) -> dict[str, Any]:

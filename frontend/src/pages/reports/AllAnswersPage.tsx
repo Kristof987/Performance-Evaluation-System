@@ -84,7 +84,7 @@ function AnswersContent({ campaignId, getAccessToken }: { campaignId: number; ge
 
 function answerText(answer: SubmittedAnswer) {
   if (!answer.answered) return '';
-  if (answer.rating !== null) return `${answer.rating} / ${answer.scale_max}`;
+  if (answer.rating !== null) return `${answer.rating} / ${answer.scale_max}${answer.rating_label ? ` (${answer.rating_label})` : ''}`;
   if (answer.choices.length) return answer.choices.join('; ');
   return answer.text_answer ?? '';
 }
@@ -181,9 +181,10 @@ function AnswerValue({ answer }: { answer: SubmittedAnswer }) {
   if (!answer.answered) return <span className="reports-question-muted">No answer</span>;
   if (answer.rating !== null && answer.scale_min !== null && answer.scale_max !== null) {
     const steps = Array.from({ length: answer.scale_max - answer.scale_min + 1 }, (_value, index) => answer.scale_min! + index);
-    return <span className="reports-answers-rating" aria-label={`${answer.rating} out of ${answer.scale_max}`}>
+    return <span className="reports-answers-rating" aria-label={`${answer.rating} out of ${answer.scale_max}${answer.rating_label ? `: ${answer.rating_label}` : ''}`}>
       <span className="reports-answers-dots" aria-hidden="true">{steps.map((step) => <i key={step} className={step <= answer.rating! ? 'is-on' : ''} />)}</span>
       <strong>{answer.rating}</strong><small>/ {answer.scale_max}</small>
+      {answer.rating_label && <span className="reports-answers-rating-label">{answer.rating_label}</span>}
     </span>;
   }
   if (answer.choices.length) return <span className="reports-answers-choices">{answer.choices.map((choice) => <span key={choice}>{choice}</span>)}</span>;

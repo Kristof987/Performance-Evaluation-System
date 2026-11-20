@@ -136,3 +136,23 @@ def test_the_example_sheet_is_never_imported(db, actor):
     with pytest.raises(HTTPException) as error:
         form_import_service.parse_form_workbook(buffer, "form.xlsx", actor, db)
     assert "Invalid template columns" in error.value.detail
+
+
+def test_scale_options_label_every_value(db, actor):
+    result = parse(db, actor, [["Anchored", None]], [
+        [None, "Meets deadlines", "Numerical scale", "Yes", None, 1, 4, None, None, "Often late; Sometimes late; Usually on time; Always on time"],
+        [None, "Wrong count", "Numerical scale", "Yes", None, 1, 5, None, None, "Low; High"],
+        [None, "Both kinds", "Numerical scale", "Yes", None, 1, 2, "Low", None, "Low; High"],
+        [None, "Too long", "Numerical scale", "Yes", None, 0, 20, None, None, "; ".join(str(value) for value in range(21))],
+    ])
+    assert result["errors"] == [
+        "Questions row 3: Options must give exactly 5 labels for a 1–5 scale, one per value, separated by semicolons.",
+        "Questions row 4: Use either Lowest/Highest Label or Options (one label per value), not both.",
+        "Questions row 5: Every value can be labelled only on scales of at most 11 values.",
+    ]
+    ok = parse(db, actor, [["Anchored", None]], [
+        [None, "Meets deadlines", "Numerical scale", "Yes", None, 1, 4, None, None, "Often late; Sometimes late; Usually on time; Always on time"],
+    ])
+    question = ok["form"]["blocks"][0]["question"]
+    assert question["scale_labels"] == ["Often late", "Sometimes late", "Usually on time", "Always on time"]
+    assert (question["min_label"], question["max_label"]) == ("Often late", "Always on time")

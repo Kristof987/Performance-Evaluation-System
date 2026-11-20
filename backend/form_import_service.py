@@ -22,6 +22,8 @@ QUESTION_TYPES = {"numerical scale": "Scale", "scale": "Scale", "text": "Text",
 CHOICE_TYPES = {"Single choice", "Multiple choice"}
 MAX_FORM_QUESTIONS = 200
 MAX_NAME_LENGTH = 120
+# Kept in step with main.MAX_LABELLED_SCALE_POINTS.
+MAX_LABELLED_SCALE_POINTS = 11
 
 
 def _text(value: Any) -> str:
@@ -76,6 +78,17 @@ def _question(row_number: int, cells: list[Any], errors: list[str]) -> dict[str,
             problems.append("Scale Max must be greater than Scale Min.")
         question.update(scale_direction="higher_is_better", scale_min=low, scale_max=high,
                         min_label=_text(low_label), max_label=_text(high_label))
+        point_labels = [_text(label) for label in str(options or "").split(";")] if _text(options) else []
+        if point_labels and low is not None and high is not None and high > low:
+            points = high - low + 1
+            if _text(low_label) or _text(high_label):
+                problems.append("Use either Lowest/Highest Label or Options (one label per value), not both.")
+            elif points > MAX_LABELLED_SCALE_POINTS:
+                problems.append(f"Every value can be labelled only on scales of at most {MAX_LABELLED_SCALE_POINTS} values.")
+            elif len(point_labels) != points or not all(point_labels):
+                problems.append(f"Options must give exactly {points} labels for a {low}–{high} scale, one per value, separated by semicolons.")
+            else:
+                question.update(scale_labels=point_labels, min_label=point_labels[0], max_label=point_labels[-1])
     if question_type in CHOICE_TYPES:
         labels = [_text(label) for label in str(options or "").split(";")]
         labels = [label for label in labels if label]
