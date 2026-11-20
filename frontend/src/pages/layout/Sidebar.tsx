@@ -1,4 +1,5 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { MirraMark, MirraWordmark } from '../../components/brand/MirraLogo';
 import { Link, NavLink, useLocation } from 'react-router';
 import { useNavigate } from 'react-router';
 import { mediaUrl } from '../../config';
@@ -8,7 +9,6 @@ import {
   ChevronDown,
   ClipboardPen,
   ClipboardCheck,
-  Compass,
   Files,
   LayoutDashboard,
   LogOut,
@@ -170,10 +170,8 @@ export default function Sidebar({
       </button>
 
       <div className="company">
-        <div className="logo">
-          <Compass size={17} />
-        </div>
-        <div className="company-name">Compass</div>
+        <MirraMark className="logo" size={30} title="Mirra" />
+        <MirraWordmark className="company-name" height={22} />
       </div>
 
       <nav className="sidebar-nav" aria-label="Main navigation">

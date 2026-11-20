@@ -18,7 +18,7 @@ export function Auth0PermissionDenied({ feature, required, activePage }: {
     <div className="main-content auth0-transition-content">
       <h1>{feature} access unavailable</h1>
       <section className="card auth0-transition-card">
-        <p>Your PerfEval account needs {required} permission to view this page.</p>
+        <p>Your Mirra account needs {required} permission to view this page.</p>
         {dashboardPath !== pathname && <Link className="btn btn-primary" to={dashboardPath}>Back to Dashboard</Link>}
       </section>
     </div>

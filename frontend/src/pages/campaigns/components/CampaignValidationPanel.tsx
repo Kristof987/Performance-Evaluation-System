@@ -84,7 +84,7 @@ export function campaignFeedbackFromError(error: unknown, action: 'schedule' | '
   };
   if (!(error instanceof CampaignRequestError) && (error instanceof TypeError || error instanceof Error && /network|fetch/i.test(error.message))) return {
     kind: 'network', title: 'Connection interrupted',
-    description: 'Could not reach Compass. Your unsaved changes are still here; check your connection and try again.', issues: [],
+    description: 'Could not reach Mirra. Your unsaved changes are still here; check your connection and try again.', issues: [],
   };
 
   const detail = error instanceof CampaignRequestError ? error.message : '';

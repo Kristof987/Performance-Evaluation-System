@@ -32,6 +32,6 @@ export async function fetchAuthMe(
   });
   if (response.status === 401) return { status: 'unlinked' };
   if (response.status === 403) return { status: 'forbidden' };
-  if (!response.ok) throw new Error('Could not check the PerfEval account');
+  if (!response.ok) throw new Error('Could not check the Mirra account');
   return { status: 'linked', user: await response.json() as AuthMe };
 }

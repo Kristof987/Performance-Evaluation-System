@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 
-const APP_NAME = 'PerfEval';
+const APP_NAME = 'Mirra';
 
-/** Sets the browser tab title, most specific part first: "Q3 Review · Campaigns · PerfEval". */
+/** Sets the browser tab title, most specific part first: "Q3 Review · Campaigns · Mirra". */
 export function usePageTitle(...parts: (string | null | undefined | false)[]) {
   const title = [...parts.filter((part): part is string => Boolean(part && part.trim())), APP_NAME].join(' · ');
   useEffect(() => {

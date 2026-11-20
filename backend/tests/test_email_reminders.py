@@ -61,13 +61,13 @@ def test_templates_render_in_english_and_escape_html():
     subject, text, html = email_service.render("campaign_reminder", {
         "first_name": "<Peter>", "campaign_name": "Q4 & review", "open_count": 2, "evaluation_word": "evaluations",
         "deadline": "15 December 2026, 17:00", "time_left": "3 days left", "link": "http://localhost:5173/evaluations",
-        "sender_name": "Compass"})
+        "sender_name": "Mirra"})
     assert subject == "Reminder: 2 evaluations left in Q4 & review"
     assert "Hi <Peter>," in text and "3 days left" in text
     assert "&lt;Peter&gt;" in html and "Q4 &amp; review" in html and "<Peter>" not in html
     launch_subject, _text, _html = email_service.render("campaign_launch", {
         "first_name": "Anna", "campaign_name": "Q4", "open_count": 1, "evaluation_word": "evaluation",
-        "deadline": "1 December 2026, 17:00", "time_left": "", "link": "x", "sender_name": "Compass"})
+        "deadline": "1 December 2026, 17:00", "time_left": "", "link": "x", "sender_name": "Mirra"})
     assert launch_subject == "Q4: your evaluations are open"
 
 

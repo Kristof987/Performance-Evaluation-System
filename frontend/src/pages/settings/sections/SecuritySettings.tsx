@@ -61,7 +61,7 @@ export default function SecuritySettings() {
       <div className="settings-security-section"><h3>Sign-in method</h3>
         <p>Auth0 · {security.identity_provider}</p>
         {security.password_reset_available ? <>
-          <p className="settings-note">Auth0 sends a secure reset email. Compass never handles your password.</p>
+          <p className="settings-note">Auth0 sends a secure reset email. Mirra never handles your password.</p>
           <button className="btn btn-secondary" type="button" disabled={!canManage || pending}
             onClick={() => void sendPasswordReset()}>{pending ? <Pending label="Sending" /> : 'Send password reset email'}</button>
         </> : <p className="settings-note">Password changes are managed by your sign-in provider or organization.</p>}

@@ -60,7 +60,7 @@ export default function PreferenceSettings({ section }: { section: 'notification
     <section className="card settings-panel" aria-labelledby="preferences-title">
       <div className="settings-panel-header"><h2 id="preferences-title">
         {section === 'notifications' ? 'Notifications' : 'Appearance'}</h2>
-        <p>{section === 'notifications' ? 'Choose the updates you want to receive.' : 'Customize your Compass workspace.'}</p>
+        <p>{section === 'notifications' ? 'Choose the updates you want to receive.' : 'Customize your Mirra workspace.'}</p>
       </div>
       {!canManage && <p className="settings-note">You have read-only access to preferences.</p>}
       {section === 'notifications' ? <>

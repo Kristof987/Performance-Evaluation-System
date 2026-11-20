@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Compass } from 'lucide-react';
+import { MirraWordmark } from '../../components/brand/MirraLogo';
 import { getAuthenticatedDashboardPath, isHrOrManagerRole } from '../layout/sidebar-user';
 import { API_BASE_URL, AUTH0_CONFIGURED } from '../../config';
 import Auth0SignIn from './Auth0SignIn';
@@ -76,7 +76,7 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
       const landing = isHrOrManagerRole(loggedInUser.role_name ?? null) ? '/hr-home' : '/employee-home';
       navigate(from ?? landing, { replace: true });
     } catch (cause) {
-      setErrorMessage(cause instanceof Error ? cause.message : 'Could not connect to Compass. Please try again.');
+      setErrorMessage(cause instanceof Error ? cause.message : 'Could not connect to Mirra. Please try again.');
     } finally {
       pending.current = false;
       setIsSubmitting(false);
@@ -88,7 +88,7 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
       <section className="login-panel" aria-label="Sign in">
         <div className="login-content">
           <h1>Welcome back</h1>
-          <p className="login-intro">Sign in to your Compass workspace.</p>
+          <p className="login-intro">Sign in to your Mirra workspace.</p>
 
           {auth0Content}
 
@@ -124,11 +124,10 @@ function LoginContent({ showDevelopmentLogin, auth0Content }: { showDevelopmentL
         </div>
       </section>
 
-      <section className="login-visual" aria-label="About Compass">
+      <section className="login-visual" aria-label="About Mirra">
         <div className="login-visual-copy">
           <div className="login-brand">
-            <span className="login-brand-mark" aria-hidden="true"><Compass size={25} /></span>
-            <span>Compass</span>
+            <MirraWordmark height={40} />
           </div>
           <h2>Better feedback.<br />Stronger teams.</h2>
           <p>Bring performance reviews, team feedback, and growth conversations into one clear workspace.</p>

@@ -1455,7 +1455,7 @@ export default function People() {
     const nextRole = systemRoles.find((role) => role.id === roleId)?.name ?? 'the selected role';
     const confirmed = await confirm({
       title: `Change ${employee.name}’s system role to ${nextRole}?`,
-      message: `This changes what ${employee.name} can see and do in PerfEval, from ${employee.systemRole ?? 'their current role'} to ${nextRole}. It applies the next time they load a page.`,
+      message: `This changes what ${employee.name} can see and do in Mirra, from ${employee.systemRole ?? 'their current role'} to ${nextRole}. It applies the next time they load a page.`,
       confirmLabel: 'Change role',
     });
     if (!confirmed) return;

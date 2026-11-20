@@ -23,15 +23,6 @@
   letter-spacing: -0.02em;
 }
 
-.login-brand-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-lg);
-  background: var(--color-primary);
-  color: var(--color-surface);
-}
 
 .login-content {
   align-self: center;

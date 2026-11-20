@@ -58,7 +58,7 @@ export default function ProfilePhoto({ name, employeeId, initialPhoto }: {
       : <Avatar className="settings-photo-avatar" name={name} photo={photo} />}
     <div className="settings-photo-body">
       <strong>Profile photo</strong>
-      <span>{file ? 'Preview — save to use this photo.' : 'Shown next to your name across PerfEval. JPG, PNG or WebP, up to 5 MB.'}</span>
+      <span>{file ? 'Preview — save to use this photo.' : 'Shown next to your name across Mirra. JPG, PNG or WebP, up to 5 MB.'}</span>
       {canEdit && <div className="settings-photo-actions">
         <input ref={input} id="profile-photo-input" type="file" accept={PROFILE_PHOTO_TYPES.join(',')} hidden
           onChange={(event) => choose(event.target.files?.[0] ?? null)} />

@@ -56,7 +56,7 @@ def send(recipient: str, subject: str, text_body: str, html_body: str) -> None:
 
 
 def sender_name() -> str:
-    return os.getenv("SMTP_FROM_NAME", "Compass")
+    return os.getenv("SMTP_FROM_NAME", "Mirra")
 
 
 def app_link(path: str) -> str:

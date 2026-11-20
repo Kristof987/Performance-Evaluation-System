@@ -129,26 +129,22 @@
   padding: 0 4px;
 }
 .logo {
-  align-items: center;
-  background-color: var(--color-primary-solid);
-  border-radius: 9px;
-  display: flex;
+  color: var(--color-primary-solid);
+  display: none;
   flex-shrink: 0;
-  height: 30px;
-  justify-content: center;
-  width: 30px;
-  color: var(--color-on-primary);
+}
+/* The wordmark when the sidebar is open, the square mark when it is collapsed. */
+.layout.sidebar-collapsed .logo {
+  display: block;
 }
 .lucide {
   flex-shrink: 0;
 }
 .company-name {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--color-text);
+  display: block;
+  flex-shrink: 0;
+  margin: 4px 0 4px 6px;
 }
 .sidebar-nav {
   align-items: flex-start;
@@ -438,6 +434,9 @@
   .layout.sidebar-collapsed .user-info,
   .layout.sidebar-collapsed .user-menu > svg {
     display: block;
+  }
+  .layout.sidebar-collapsed .logo {
+    display: none;
   }
   .layout.sidebar-collapsed .nav-item {
     justify-content: flex-start;
