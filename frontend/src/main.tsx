@@ -24,7 +24,7 @@ import './styles/shared.css'
 import { ACCESS, hasAccess, type AccessRule } from './app/access'
 import { PageTitle } from './app/usePageTitle'
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_CONFIGURED, AUTH0_DOMAIN } from './config'
-import { Auth0AppAuthProvider, DevelopmentAppAuthProvider, useAppAuth } from './auth/AppAuth'
+import { Auth0AppAuthProvider, UnconfiguredAppAuthProvider, useAppAuth } from './auth/AppAuth'
 import { Auth0PermissionDenied } from './pages/layout/Auth0Transition'
 import PreferencesProvider from './pages/settings/PreferencesProvider'
 import { applyTheme, cachedTheme } from './pages/settings/theme'
@@ -158,6 +158,6 @@ createRoot(document.getElementById('root')!).render(
       >
         <Auth0AppAuthProvider><PreferencesProvider><FeedbackProvider><AppRoutes /></FeedbackProvider></PreferencesProvider></Auth0AppAuthProvider>
       </Auth0Provider>
-    ) : <DevelopmentAppAuthProvider><PreferencesProvider><FeedbackProvider><AppRoutes /></FeedbackProvider></PreferencesProvider></DevelopmentAppAuthProvider>}
+    ) : <UnconfiguredAppAuthProvider><PreferencesProvider><FeedbackProvider><AppRoutes /></FeedbackProvider></PreferencesProvider></UnconfiguredAppAuthProvider>}
   </StrictMode>,
 )

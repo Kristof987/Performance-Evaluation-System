@@ -31,7 +31,7 @@ export async function fetchAccountSettingsProfile(
 }
 
 export type SecuritySettings = {
-  sign_in_method: 'auth0' | 'development';
+  sign_in_method: 'auth0';
   identity_provider: string;
   password_reset_available: boolean;
   last_login: string | null;

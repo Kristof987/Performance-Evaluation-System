@@ -16,9 +16,7 @@ def main():
     if not database_url:
         raise RuntimeError("Set DATABASE_URL explicitly to the local development database")
     url = make_url(database_url)
-    if (os.getenv("COMPASS_ENV", "").lower() != "development"
-            or os.getenv("COMPASS_DEV_LOGIN_ENABLED", "").lower() != "true"
-            or url.get_backend_name() != "postgresql"
+    if (url.get_backend_name() != "postgresql"
             or (url.host, url.port) not in {
                 ("localhost", 5433), ("127.0.0.1", 5433), ("::1", 5433),
                 ("db", 5432),

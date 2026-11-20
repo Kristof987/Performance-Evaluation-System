@@ -15,13 +15,7 @@ import {
   Settings,
   Users,
 } from 'lucide-react';
-import {
-  getUserDisplayName,
-  getDashboardPath,
-  getAuthenticatedDashboardPath,
-  getSidebarUser,
-  getUserInitials,
-} from './sidebar-user';
+import { getAuthenticatedDashboardPath, getUserInitials } from './sidebar-user';
 import { useAppAuth } from '../../auth/AppAuth';
 import { ACCESS, hasAccess, hasTeamReportsOnly, type AccessRule } from '../../app/access';
 
@@ -67,19 +61,15 @@ export default function Sidebar({
 
   const { state, signOut } = useAppAuth();
   const auth0User = state.status === 'authenticated' ? state.user : null;
-  const sidebarUser = auth0User ? null : getSidebarUser();
   const navigate = useNavigate();
   const location = useLocation();
   const reportCampaignId = /^\/reports\/campaigns\/(\d+)/.exec(location.pathname)?.[1];
   const reportBase = reportCampaignId ? `/reports/campaigns/${reportCampaignId}` : '/reports';
   const teamReportsOnly = hasTeamReportsOnly(auth0User?.permissions ?? []);
   const sidebarPhoto = mediaUrl(useProfilePhoto(auth0User?.employee.id,
-    auth0User ? auth0User.employee.profile_image_url : sidebarUser?.profile_image_url));
-  const sidebarUserName = auth0User?.employee.full_name ?? (
-    sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser));
-  const dashboardPath = auth0User
-    ? getAuthenticatedDashboardPath(auth0User.permissions)
-    : getDashboardPath();
+    auth0User?.employee.profile_image_url ?? null));
+  const sidebarUserName = auth0User?.employee.full_name ?? 'User';
+  const dashboardPath = getAuthenticatedDashboardPath(auth0User?.permissions ?? []);
   const isDashboardActive =
     activePage === 'hr-home' || activePage === 'employee-home';
   const can = (rule: AccessRule) => hasAccess(auth0User?.permissions ?? [], rule);
@@ -270,7 +260,7 @@ export default function Sidebar({
           </div>
           <div className="user-info">
             <div className="user-name">{sidebarUserName}</div>
-            <div className="user-role">{auth0User?.system_role_name ?? sidebarUser?.role_name ?? 'Employee'}</div>
+            <div className="user-role">{auth0User?.system_role_name ?? 'Employee'}</div>
           </div>
           <button
             className="user-menu-toggle"

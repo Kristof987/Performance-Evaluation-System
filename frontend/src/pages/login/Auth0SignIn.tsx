@@ -8,13 +8,12 @@ import LoadingState from '../../components/feedback/LoadingState';
 
 export default function Auth0SignIn() {
   const { error, loginWithRedirect } = useAuth0();
-  const { state, clearDevelopmentUser, signOut, retryAuth0 } = useAppAuth();
+  const { state, signOut, retryAuth0 } = useAppAuth();
   const location = useLocation();
   const [loginError, setLoginError] = useState(false);
 
   async function signIn() {
     setLoginError(false);
-    clearDevelopmentUser();
     const from = safeReturnPath((location.state as { from?: unknown } | null)?.from);
     if (from) sessionStorage.setItem('auth0ReturnTo', from);
     try {

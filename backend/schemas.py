@@ -148,10 +148,6 @@ class SystemRoleResponse(BaseModel):
 # User
 # --------------------
 
-class UserLogin(BaseModel):
-    name: str
-
-
 class UserResponse(BaseModel):
     id: int
     username: str
@@ -170,10 +166,6 @@ class UserResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
-
-
-class DevelopmentLoginResponse(UserResponse):
-    access_token: str
 
 
 class AuthEmployeeResponse(BaseModel):
@@ -338,7 +330,7 @@ class AccountSettingsProfile(BaseModel):
 
 
 class SecuritySettingsResponse(BaseModel):
-    sign_in_method: Literal["auth0", "development"]
+    sign_in_method: Literal["auth0"]
     identity_provider: str
     password_reset_available: bool
     last_login: datetime | None

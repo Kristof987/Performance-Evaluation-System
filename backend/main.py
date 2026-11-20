@@ -2,7 +2,6 @@ from copy import deepcopy
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 import os
-import secrets
 from uuid import uuid4
 from typing import Callable, Literal
 
@@ -78,7 +77,6 @@ app.add_middleware(
 )
 
 email_validator = TypeAdapter(schemas.EmailStr)
-development_token_key = secrets.token_bytes(32)
 EMPLOYEE_IMPORT_HEADERS = [
     "Employee Name",
     "Employee Email Address",
@@ -104,17 +102,8 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
         algorithm = jwt.get_unverified_header(credentials.credentials).get("alg")
     except InvalidTokenError:
         algorithm = None
-    if algorithm == "HS256" and development_login_enabled():
-        try:
-            claims = jwt.decode(credentials.credentials, development_token_key, algorithms=["HS256"],
-                                issuer="compass-development", options={"require": ["exp", "iss", "sub"]})
-            subject = claims["sub"]
-            if not isinstance(subject, str) or not subject.isdecimal() or int(subject) <= 0:
-                raise InvalidTokenError("Invalid development identity")
-        except InvalidTokenError:
-            raise HTTPException(status_code=401, detail="Invalid bearer credentials", headers={"WWW-Authenticate": "Bearer"}) from None
-        user = db.query(models.User).filter(models.User.id == int(subject)).first()
-    elif algorithm == "RS256":
+    # Auth0 is the only way in: no other token type is accepted.
+    if algorithm == "RS256":
         sub = get_verified_auth0_sub(credentials)
         user = db.query(models.User).filter(models.User.auth0_user_id == sub).first()
     else:
@@ -277,64 +266,6 @@ def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Dep
                          "company_role_name": roles.company_role_name,
                          "is_active": employee.is_active,
                          "profile_image_url": employee.profile_image_url} if employee else None}
-
-
-def development_login_enabled() -> bool:
-    return os.getenv("COMPASS_ENV", "production").lower() == "development" and os.getenv("COMPASS_DEV_LOGIN_ENABLED", "false").lower() == "true"
-
-
-def require_development_login():
-    # Both settings must be explicitly enabled on the backend; neither is a credential.
-    if not development_login_enabled():
-        raise HTTPException(status_code=404, detail="Development login is unavailable")
-
-
-@app.post("/login", response_model=schemas.DevelopmentLoginResponse)
-def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
-    require_development_login()
-    name = " ".join(user_login.name.split()).lower()
-    if not name:
-        raise HTTPException(status_code=400, detail="Enter your full name, username or email")
-    matches = (
-        db.query(models.User, models.Employee, models.CompanyRole.name.label("role_name"), models.SystemRole.name.label("system_role_name"))
-        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
-        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
-        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
-        .filter(or_(
-            func.lower(func.trim(models.Employee.full_name)) == name,
-            func.lower(func.trim(models.User.username)) == name,
-            func.lower(func.trim(models.User.email)) == name,
-        ))
-        .filter(models.User.is_active.is_(True))
-        .limit(2)
-        .all()
-    )
-
-    if not matches:
-        raise HTTPException(status_code=404, detail="No active user matches that name, username or email")
-    if len(matches) > 1:
-        raise HTTPException(status_code=409, detail="Multiple users match. Enter your unique username or email")
-
-    user, employee, role_name, system_role_name = matches[0]
-    if employee is None or not employee.is_active:
-        raise HTTPException(status_code=403, detail="An active employee profile is required for development access")
-
-    user.last_login = func.now()
-    db.commit()
-    db.refresh(user)
-
-    return {
-        **user.__dict__,
-        "access_token": jwt.encode({"sub": str(user.id), "iss": "compass-development",
-                                    "exp": datetime.now(timezone.utc) + timedelta(hours=8)},
-                                   development_token_key, algorithm="HS256"),
-        "employee_id": employee.id if employee else None,
-        "full_name": employee.full_name if employee else None,
-        "company_role_id": employee.company_role_id if employee else None,
-        "profile_image_url": employee.profile_image_url if employee else None,
-        "role_name": (system_role_name if system_role_name.strip().lower() == "hr" or "manager" in system_role_name.strip().lower()
-                      else role_name or system_role_name),
-    }
 
 
 @app.get("/people", response_model=schemas.PeopleResponse)
@@ -503,10 +434,10 @@ def get_profile_photo(photo_id: str, db: Session = Depends(get_db)):
 
 @app.get("/me/security", response_model=schemas.SecuritySettingsResponse)
 def get_my_security(actor: models.User = Depends(require_permission("settings.read"))):
-    subject = actor.auth0_user_id
-    provider = subject.split("|", 1)[0] if subject else "development"
+    subject = actor.auth0_user_id or ""
+    provider = subject.split("|", 1)[0]
     return {
-        "sign_in_method": "auth0" if subject else "development",
+        "sign_in_method": "auth0",
         "identity_provider": "Auth0 database" if provider == "auth0" else provider,
         "password_reset_available": bool(subject and subject.startswith("auth0|"))
         and auth0_management.password_reset_available(),

@@ -1,5 +1,4 @@
 import AppLayout from '../layout/AppLayout';
-import { getSidebarUser, getUserDisplayName } from '../layout/sidebar-user';
 import { useAppAuth } from '../../auth/AppAuth';
 import './hr-home.css';
 import { useNavigate } from 'react-router';
@@ -32,9 +31,7 @@ function HrHome() {
     selectCampaign,
   } = useHrDashboard();
 
-  const sidebarUser = getSidebarUser();
-  const sidebarUserName = auth0User?.employee.full_name ?? (
-    sidebarUser === null ? 'User' : getUserDisplayName(sidebarUser));
+  const sidebarUserName = auth0User?.employee.full_name ?? 'User';
 
   const campaignsButtonHandler = () => {
     navigate('/campaigns');

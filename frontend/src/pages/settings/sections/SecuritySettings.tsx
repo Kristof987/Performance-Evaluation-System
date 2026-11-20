@@ -20,7 +20,6 @@ export default function SecuritySettings() {
   const [pending, setPending] = useState(false);
   const [retry, setRetry] = useState(0);
   const canManage = state.status === 'authenticated' && state.user.permissions.includes('settings.manage_self');
-  const development = state.mode === 'development' || security?.sign_in_method === 'development';
 
   useEffect(() => {
     const controller = new AbortController();
@@ -56,8 +55,7 @@ export default function SecuritySettings() {
     {error && (security ? <InlineMessage tone="error" onDismiss={() => setError('')}>{error}</InlineMessage>
       : <LoadError message={error} onRetry={() => setRetry((value) => value + 1)} />)}
         {!security && !error && <LoadingState variant="section" label="Loading security settings" />}
-    {development ? <div className="settings-security-section"><h3>Development account</h3>
-      <p>Development account — security settings unavailable.</p></div> : security && <>
+    {security && <>
       <div className="settings-security-section"><h3>Sign-in method</h3>
         <p>Auth0 · {security.identity_provider}</p>
         {security.password_reset_available ? <>
