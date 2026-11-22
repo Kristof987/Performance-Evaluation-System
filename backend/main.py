@@ -1971,124 +1971,118 @@ def get_campaign_completion_status(
     requester_user_id: int | None = Query(default=None),
     search: str | None = Query(default=None),
     status: str | None = Query(default=None),
-    questionnaire_id: int | None = Query(default=None),
     overdue_only: bool = Query(default=False),
-    sort: str = Query(default="due_date"),
-    order: str = Query(default="asc"),
+    sort: str = Query(default="outstanding"),
+    order: str = Query(default="desc"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("campaigns.read")),
 ):
+    """Progress per evaluator. Who evaluates whom is never part of this view (requirement 7.4)."""
     reject_conflicting_requester(requester_user_id, actor)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
     today = campaign_today()
-    evaluator = aliased(models.Employee)
-    evaluatee = aliased(models.Employee)
-    evaluator_account = aliased(models.User)
-    evaluatee_account = aliased(models.User)
+    now = datetime.now(timezone.utc)
     rows = (
         db.query(
             models.FilledForm.id,
             models.FilledForm.evaluator_id,
-            evaluator.full_name.label("evaluator_name"),
-            evaluator_account.email.label("evaluator_email"),
             models.FilledForm.evaluatee_id,
-            evaluatee.full_name.label("evaluatee_name"),
-            evaluatee_account.email.label("evaluatee_email"),
-            models.FilledForm.form_id.label("questionnaire_id"),
-            models.Form.name.label("questionnaire_name"),
-            models.FormStatus.name.label("status_name"),
-            models.FilledForm.finish_date,
+            models.FilledForm.form_id,
             models.FilledForm.company_group_id,
+            models.FilledForm.finish_date,
+            models.Employee.full_name.label("evaluator_name"),
+            models.User.email.label("evaluator_email"),
+            models.FormStatus.name.label("status_name"),
         )
-        .join(evaluator, evaluator.id == models.FilledForm.evaluator_id)
-        .join(evaluatee, evaluatee.id == models.FilledForm.evaluatee_id)
-        .outerjoin(evaluator_account, evaluator_account.id == evaluator.user_id)
-        .outerjoin(evaluatee_account, evaluatee_account.id == evaluatee.user_id)
-        .join(models.Form, models.Form.id == models.FilledForm.form_id)
+        .join(models.Employee, models.Employee.id == models.FilledForm.evaluator_id)
+        .outerjoin(models.User, models.User.id == models.Employee.user_id)
         .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
         .filter(models.FilledForm.campaign_id == campaign.id)
         .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
         .all()
     )
 
-    def to_item(row):
-        status_key, status_label = normalize_form_status(row.status_name, row.finish_date)
-        due_date = business_date(campaign.end_date)
-        is_overdue = row.finish_date is None and campaign_lifecycle.is_overdue(row, campaign, now=datetime.now(timezone.utc))
-        return {
-            "id": row.id,
+    due_date = business_date(campaign.end_date)
+    people: dict[int, dict] = {}
+    pair_counts: dict[tuple, int] = {}
+    for row in rows:
+        status_key, _label = normalize_form_status(row.status_name, row.finish_date)
+        person = people.setdefault(row.evaluator_id, {
             "evaluator_id": row.evaluator_id,
             "evaluator_name": row.evaluator_name,
             "evaluator_email": row.evaluator_email,
-            "evaluatee_id": row.evaluatee_id,
-            "evaluatee_name": row.evaluatee_name,
-            "evaluatee_email": row.evaluatee_email,
-            "questionnaire_id": row.questionnaire_id,
-            "questionnaire_name": row.questionnaire_name,
-            "status_name": row.status_name,
-            "status_key": status_key,
-            "status_label": status_label,
-            "due_date": due_date,
-            "completed_at": row.finish_date,
-            "is_overdue": is_overdue,
-            "is_self_evaluation": row.evaluator_id == row.evaluatee_id,
-            "duplicate_key": (row.evaluator_id, row.evaluatee_id, row.questionnaire_id, row.company_group_id),
-        }
+            "total": 0, "not_started": 0, "in_progress": 0, "completed": 0, "overdue": 0,
+            "due_date": due_date, "last_completed_at": None,
+        })
+        person["total"] += 1
+        person[status_key] += 1
+        if row.finish_date is None and campaign_lifecycle.is_overdue(row, campaign, now=now):
+            person["overdue"] += 1
+        if row.finish_date is not None and (person["last_completed_at"] is None or row.finish_date > person["last_completed_at"]):
+            person["last_completed_at"] = row.finish_date
+        key = (row.evaluator_id, row.evaluatee_id, row.form_id, row.company_group_id)
+        pair_counts[key] = pair_counts.get(key, 0) + 1
 
-    all_items = [to_item(row) for row in rows]
-    duplicate_keys = {item["duplicate_key"] for item in all_items if sum(1 for other in all_items if other["duplicate_key"] == item["duplicate_key"]) > 1}
-    completed = sum(1 for item in all_items if item["status_key"] == "completed")
-    not_started = sum(1 for item in all_items if item["status_key"] == "not_started")
-    in_progress = sum(1 for item in all_items if item["status_key"] == "in_progress")
-    overdue = sum(1 for item in all_items if item["is_overdue"])
-    total = len(all_items)
+    def progress_key(person: dict) -> str:
+        if person["completed"] == person["total"]:
+            return "completed"
+        if person["completed"] == 0 and person["in_progress"] == 0:
+            return "not_started"
+        return "in_progress"
+
+    labels = {"not_started": "Not started", "in_progress": "In progress", "completed": "Completed"}
+    all_people = []
+    for person in people.values():
+        person["outstanding"] = person["total"] - person["completed"]
+        person["status_key"] = progress_key(person)
+        person["status_label"] = labels[person["status_key"]]
+        all_people.append(person)
+
+    total = len(rows)
+    completed = sum(person["completed"] for person in all_people)
     summary = {
         "total_evaluations": total,
-        "not_started": not_started,
-        "in_progress": in_progress,
+        "not_started": sum(person["not_started"] for person in all_people),
+        "in_progress": sum(person["in_progress"] for person in all_people),
         "completed": completed,
-        "overdue": overdue,
+        "overdue": sum(person["overdue"] for person in all_people),
         "completion_rate": round((completed / total) * 100) if total > 0 else 0,
         "outstanding": total - completed,
+        "evaluators": len(all_people),
+        "evaluators_done": sum(1 for person in all_people if person["status_key"] == "completed"),
     }
-    questionnaires = sorted(
-        {item["questionnaire_id"]: {"id": item["questionnaire_id"], "name": item["questionnaire_name"]} for item in all_items}.values(),
-        key=lambda item: (item["name"].lower(), item["id"]),
-    )
 
-    filtered = all_items
+    filtered = all_people
     if search is not None and search.strip() != "":
         term = search.strip().lower()
-        filtered = [item for item in filtered if term in item["evaluator_name"].lower() or term in item["evaluator_email"].lower() or term in item["evaluatee_name"].lower() or term in item["evaluatee_email"].lower()]
+        filtered = [person for person in filtered
+                    if term in person["evaluator_name"].lower() or term in (person["evaluator_email"] or "").lower()]
     if status is not None and status.strip() != "":
         status_key = status.strip().lower().replace("-", "_").replace(" ", "_")
-        filtered = [item for item in filtered if item["status_key"] == status_key]
-    if questionnaire_id is not None:
-        filtered = [item for item in filtered if item["questionnaire_id"] == questionnaire_id]
+        filtered = [person for person in filtered if person["status_key"] == status_key]
     if overdue_only:
-        filtered = [item for item in filtered if item["is_overdue"]]
+        filtered = [person for person in filtered if person["overdue"] > 0]
 
     reverse = order.lower() == "desc"
+    name = lambda person: (person["evaluator_name"].lower(), person["evaluator_id"])
     sort_key_map = {
-        "due_date": lambda item: (item["status_key"] == "completed", item["due_date"] or date.max, item["evaluator_name"].lower(), item["id"]),
-        "status": lambda item: ({"not_started": 0, "in_progress": 1, "completed": 2}.get(item["status_key"], 3), item["is_overdue"] is False, item["id"]),
-        "evaluator": lambda item: (item["evaluator_name"].lower(), item["evaluatee_name"].lower(), item["id"]),
-        "evaluatee": lambda item: (item["evaluatee_name"].lower(), item["evaluator_name"].lower(), item["id"]),
-        "completed_at": lambda item: (item["completed_at"] or date.max, item["id"]),
+        "outstanding": lambda person: (person["outstanding"], person["overdue"], *name(person)),
+        "evaluator": name,
+        "completed": lambda person: (person["completed"], *name(person)),
+        "status": lambda person: ({"not_started": 0, "in_progress": 1, "completed": 2}[person["status_key"]], *name(person)),
+        "last_completed_at": lambda person: (person["last_completed_at"] or date.min, *name(person)),
     }
-    filtered = sorted(filtered, key=sort_key_map.get(sort, sort_key_map["due_date"]), reverse=reverse)
+    filtered = sorted(filtered, key=sort_key_map.get(sort, sort_key_map["outstanding"]), reverse=reverse)
     total_items = len(filtered)
     total_pages = max(1, (total_items + page_size - 1) // page_size)
     page = min(page, total_pages)
     page_start = (page - 1) * page_size
-    page_rows = filtered[page_start:page_start + page_size]
-    for item in page_rows:
-        item.pop("status_key", None)
-        item.pop("duplicate_key", None)
+    page_rows = [{key: value for key, value in person.items() if key != "status_key"}
+                 for person in filtered[page_start:page_start + page_size]]
 
     return {
         "campaign": {
@@ -2104,9 +2098,8 @@ def get_campaign_completion_status(
         },
         "summary": summary,
         "rows": page_rows,
-        "questionnaires": questionnaires,
         "pagination": {"page": page, "page_size": page_size, "total_items": total_items, "total_pages": total_pages},
-        "duplicate_assignment_count": len(duplicate_keys),
+        "duplicate_assignment_count": sum(1 for count in pair_counts.values() if count > 1),
     }
 
 
@@ -3372,7 +3365,6 @@ def build_campaign_evaluation_matrix(campaign_id: int, db: Session, issuance_err
             .all()
         )
 
-    status_names = {status.id: status.name for status in db.query(models.FormStatus).all()}
     filled_forms_by_pair = {}
     for filled_form in (
         db.query(models.FilledForm)
@@ -3418,10 +3410,9 @@ def build_campaign_evaluation_matrix(campaign_id: int, db: Session, issuance_err
                     "evaluatee_id": evaluatee.id,
                     "form_id": filled_form.form_id,
                     "filled_form_id": filled_form.id,
+                    # Only whether it is locked: per-pair progress would turn the planning
+                    # matrix into a "who evaluates whom" completion view (requirement 7.4).
                     "issued": assignment_is_immutable(filled_form),
-                    "is_completed": filled_form.finish_date is not None,
-                    "status_name": status_names.get(filled_form.status_id, "Not started") if assignment_is_immutable(filled_form) else "Planned",
-                    "has_answers": bool(filled_form.answers),
                 }
                 for evaluator in employees
                 for evaluatee in employees

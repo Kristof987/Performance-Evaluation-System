@@ -190,7 +190,7 @@ export function CampaignDetails() {
   const selectedPairs = matrixSelectedCount(selectedMatrixAssignments);
   const savedPairCount = new Set(evaluationMatrix.groups.flatMap((group) => group.assignments.map((assignment) => `${assignment.evaluatorId}:${assignment.evaluateeId}`))).size;
   const unissuedAssignments = evaluationMatrix.groups.flatMap((group) => group.assignments)
-    .filter((assignment) => !assignment.issued && !assignment.isCompleted && !assignment.hasAnswers);
+    .filter((assignment) => !assignment.issued);
   const unissuedPairCount = new Set(unissuedAssignments.map((assignment) => `${assignment.evaluatorId}:${assignment.evaluateeId}`)).size;
   const missingPeerPairCount = new Set(unissuedAssignments.filter((assignment) => assignment.evaluatorId !== assignment.evaluateeId && assignment.formId == null).map((assignment) => `${assignment.evaluatorId}:${assignment.evaluateeId}`)).size;
   const missingSelfPairCount = new Set(unissuedAssignments.filter((assignment) => assignment.evaluatorId === assignment.evaluateeId && assignment.formId == null).map((assignment) => assignment.evaluatorId)).size;

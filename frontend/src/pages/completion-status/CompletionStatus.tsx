@@ -33,34 +33,32 @@ export default function CompletionStatus() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
-  const [questionnaireId, setQuestionnaireId] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
-  const [sort, setSort] = useState('due_date');
-  const [order, setOrder] = useState<'asc' | 'desc'>('asc');
+  const [sort, setSort] = useState('outstanding');
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
 
   useEffect(() => {
     if (!Number.isSafeInteger(campaignId) || campaignId <= 0 || !getAccessToken) return;
     const controller = new AbortController();
-    fetchCompletionStatus(getAccessToken, campaignId, { search, status, questionnaireId, overdueOnly, sort, order, page, pageSize: PAGE_SIZE }, controller.signal)
+    fetchCompletionStatus(getAccessToken, campaignId, { search, status, overdueOnly, sort, order, page, pageSize: PAGE_SIZE }, controller.signal)
       .then((result) => { if (!controller.signal.aborted) { setData(result); setError(''); } })
       .catch((cause) => {
         if (cause instanceof ApiAccessError) retryAuth0();
         if (!controller.signal.aborted) { setData(null); setError(cause instanceof Error ? cause.message : 'Completion status could not be loaded.'); }
       });
     return () => controller.abort();
-  }, [campaignId, getAccessToken, search, status, questionnaireId, overdueOnly, sort, order, page]);
+  }, [campaignId, getAccessToken, search, status, overdueOnly, sort, order, page]);
 
   function updateSort(value: string) {
     setPage(1);
     if (sort === value) setOrder((current) => current === 'asc' ? 'desc' : 'asc');
-    else { setSort(value); setOrder('asc'); }
+    else { setSort(value); setOrder(value === 'evaluator' ? 'asc' : 'desc'); }
   }
 
   function resetFilters() {
     setSearch('');
     setStatus('');
-    setQuestionnaireId('');
     setOverdueOnly(false);
     setPage(1);
   }
@@ -79,7 +77,7 @@ export default function CompletionStatus() {
       <header className="completion-header">
         <h1>Completion status</h1>
         {data && <p className="completion-campaign-meta">{data.campaign.name} · {dateRange}</p>}
-        <p>Track evaluation progress and outstanding questionnaires.</p>
+        <p>Track each evaluator’s progress. To protect anonymity, this view never shows whom they evaluate.</p>
       </header>
 
       {invalidRequest && <InlineMessage tone="error">Campaign not found.</InlineMessage>}
@@ -88,7 +86,7 @@ export default function CompletionStatus() {
       {!invalidRequest && !loading && !error && data && summary && <>
         <section className="card completion-kpis" aria-label="Completion status metrics">
           <div className="completion-kpi completion-kpi-primary"><span>Completion rate</span><strong>{summary.completion_rate}%</strong><small>{summary.completed} of {summary.total_evaluations} completed</small></div>
-          <div className="completion-kpi"><span>Total evaluations</span><strong>{summary.total_evaluations}</strong></div>
+          <div className="completion-kpi"><span>Evaluators finished</span><strong>{summary.evaluators_done}</strong><small>of {summary.evaluators} evaluators</small></div>
           <div className="completion-kpi"><span>Not started</span><strong>{summary.not_started}</strong></div>
           <div className="completion-kpi"><span>In progress</span><strong>{summary.in_progress}</strong></div>
           <div className="completion-kpi"><span>Completed</span><strong>{summary.completed}</strong></div>
@@ -97,34 +95,39 @@ export default function CompletionStatus() {
 
         <CampaignEmails campaignId={campaignId} isActive={data.campaign.is_active} hasEndDate={data.campaign.end_date !== null} />
 
-        {data.duplicate_assignment_count > 0 && <InlineMessage tone="warning">{data.duplicate_assignment_count} duplicate assignment {data.duplicate_assignment_count === 1 ? 'group' : 'groups'} detected. Each evaluation is still listed as its own row.</InlineMessage>}
+        {data.duplicate_assignment_count > 0 && <InlineMessage tone="warning">{data.duplicate_assignment_count} duplicate assignment {data.duplicate_assignment_count === 1 ? 'group' : 'groups'} detected. Each evaluation is still counted separately.</InlineMessage>}
 
         <section className="card completion-table-card">
           <div className="completion-toolbar">
-            <input className="form-control completion-search" value={search} placeholder="Search evaluator or evaluatee" onChange={(event) => { setSearch(event.target.value); setPage(1); }} />
+            <input className="form-control completion-search" value={search} placeholder="Search evaluator" onChange={(event) => { setSearch(event.target.value); setPage(1); }} />
             <select className="form-control" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }} aria-label="Status filter">
-              <option value="">All statuses</option><option value="not_started">Not started</option><option value="in_progress">In progress</option><option value="completed">Completed</option>
+              <option value="">All evaluators</option><option value="not_started">Not started</option><option value="in_progress">In progress</option><option value="completed">Finished</option>
             </select>
-            <select className="form-control" value={questionnaireId} onChange={(event) => { setQuestionnaireId(event.target.value); setPage(1); }} aria-label="Questionnaire filter">
-              <option value="">All questionnaires</option>{data.questionnaires.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-            <label className="completion-check"><input type="checkbox" checked={overdueOnly} onChange={(event) => { setOverdueOnly(event.target.checked); setPage(1); }} /> Overdue only</label>
+            <label className="completion-check"><input type="checkbox" checked={overdueOnly} onChange={(event) => { setOverdueOnly(event.target.checked); setPage(1); }} /> Has overdue</label>
             <button className="btn btn-secondary" type="button" onClick={resetFilters}>Reset</button>
-            <span className="completion-match-count">{data.pagination.total_items} matching evaluations</span>
+            <span className="completion-match-count">{data.pagination.total_items} matching {data.pagination.total_items === 1 ? 'evaluator' : 'evaluators'}</span>
           </div>
 
           <div className="completion-table">
             <div className="completion-table-header">
               <SortButton label="Evaluator" value="evaluator" sort={sort} order={order} onSort={updateSort} />
-              <SortButton label="Evaluatee" value="evaluatee" sort={sort} order={order} onSort={updateSort} />
-              <div>Questionnaire</div><SortButton label="Status" value="status" sort={sort} order={order} onSort={updateSort} /><SortButton label="Due date" value="due_date" sort={sort} order={order} onSort={updateSort} /><SortButton label="Completed at" value="completed_at" sort={sort} order={order} onSort={updateSort} />
+              <SortButton label="Progress" value="completed" sort={sort} order={order} onSort={updateSort} />
+              <div>In progress</div><div>Not started</div>
+              <SortButton label="Outstanding" value="outstanding" sort={sort} order={order} onSort={updateSort} />
+              <SortButton label="Status" value="status" sort={sort} order={order} onSort={updateSort} />
+              <SortButton label="Last completed" value="last_completed_at" sort={sort} order={order} onSort={updateSort} />
             </div>
-            {data.rows.length === 0 ? <div className="completion-empty">{summary.total_evaluations === 0 ? 'This campaign has no evaluation assignments yet.' : 'No evaluations match the current filters.'}</div> : data.rows.map((row) => <div className="completion-row" key={row.id}>
+            {data.rows.length === 0 ? <div className="completion-empty">{summary.total_evaluations === 0 ? 'This campaign has no issued evaluations yet.' : 'No evaluators match the current filters.'}</div> : data.rows.map((row) => <div className="completion-row" key={row.evaluator_id}>
               <div><strong>{formatUserName(row.evaluator_name)}</strong><span>{row.evaluator_email}</span></div>
-              <div><strong>{formatUserName(row.evaluatee_name)}</strong><span>{row.evaluatee_email}</span>{row.is_self_evaluation && <em>Self-evaluation</em>}</div>
-              <div><strong>{row.questionnaire_name}</strong></div>
-              <div><span className={`completion-status-pill ${statusClass(row.status_label)}`}>{row.status_label}</span>{row.is_overdue && <span className="completion-overdue">Overdue</span>}</div>
-              <div className="completion-date-cell">{formatDateOrDash(row.due_date)}</div><div className="completion-date-cell">{formatDateOrDash(row.completed_at)}</div>
+              <div className="completion-progress-cell">
+                <strong>{row.completed} of {row.total}</strong>
+                <span className="completion-progress" role="img" aria-label={`${row.completed} of ${row.total} completed`}><span style={{ width: `${row.total > 0 ? Math.round((row.completed / row.total) * 100) : 0}%` }} /></span>
+              </div>
+              <div className="completion-count">{row.in_progress}</div>
+              <div className="completion-count">{row.not_started}</div>
+              <div className="completion-count"><strong>{row.outstanding}</strong>{row.overdue > 0 && <span className="completion-overdue">{row.overdue} overdue</span>}</div>
+              <div><span className={`completion-status-pill ${statusClass(row.status_label)}`}>{row.status_label === 'Completed' ? 'Finished' : row.status_label}</span></div>
+              <div className="completion-date-cell">{formatDateOrDash(row.last_completed_at)}</div>
             </div>)}
           </div>
 

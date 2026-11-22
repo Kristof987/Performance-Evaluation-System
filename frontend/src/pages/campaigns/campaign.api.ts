@@ -125,9 +125,6 @@ function mapCampaignEvaluationMatrix(
         formId: assignment.form_id,
         filledFormId: assignment.filled_form_id,
         issued: assignment.issued,
-        isCompleted: assignment.is_completed,
-        statusName: assignment.status_name,
-        hasAnswers: assignment.has_answers,
       })),
     })),
   };

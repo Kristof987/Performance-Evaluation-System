@@ -29,11 +29,8 @@ export function matrixCell(
   const issued = group.assignments.find((assignment) =>
     assignment.issued && assignment.evaluatorId === evaluatorId && assignment.evaluateeId === evaluateeId
   );
-  if (issued) return { editable: false, reason: issued.isCompleted
-    ? 'This evaluation has been completed and is locked.'
-    : issued.hasAnswers || issued.statusName?.toLowerCase() === 'in progress'
-      ? 'This evaluation is in progress and cannot be changed.'
-      : `This evaluation has already been issued (${issued.statusName || 'Issued'}) and cannot be changed.`, issued: true };
+  // Progress is not shown per pair: that would reveal who evaluates whom next to its status.
+  if (issued) return { editable: false, reason: 'This evaluation has already been issued and cannot be changed.', issued: true };
   if (!evaluator || !evaluatee || evaluator.active === false || evaluatee.active === false) return { editable: false, reason: 'Employee is not in this group.', issued: false };
   return { editable: true, reason: '', issued: false };
 }

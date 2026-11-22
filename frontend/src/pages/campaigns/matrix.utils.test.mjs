@@ -7,7 +7,7 @@ const employees = [
   { id: 2, name: 'Ben', roleId: 20, roleName: 'Tester' },
   { id: 3, name: 'Cal', roleId: 10, roleName: 'Engineer' },
 ];
-const group = { groupId: 1, groupName: 'Alpha', employees, assignments: [{ evaluatorId: 1, evaluateeId: 3, formId: 5, filledFormId: 8, isCompleted: false }] };
+const group = { groupId: 1, groupName: 'Alpha', employees, assignments: [{ evaluatorId: 1, evaluateeId: 3, formId: 5, filledFormId: 8, issued: true }] };
 const rules = { forms: [{ id: 5, name: 'Review' }], groups: [
   { groupId: 1, rolePairs: [
     { evaluatorRoleId: 10, evaluateeRoleId: 20, formId: 5 },
@@ -43,7 +43,7 @@ test('add all includes allowed self pairs and preserves issued records; self onl
   assert.deepEqual(saved, { '1:1:3': true, '2:1:2': true });
 });
 
-test('each self-evaluation toggles independently; issued, started and completed cells stay locked', () => {
+test('each self-evaluation toggles independently; issued cells stay locked without showing progress', () => {
   const saved = { '1:1:3': true };
   const first = toggleMatrixPair(group, rules, saved, 1, 1, { 1: 5, 2: 5 });
   assert.equal(first['1:1:1'], true);
@@ -53,16 +53,14 @@ test('each self-evaluation toggles independently; issued, started and completed 
   assert.equal(second['1:2:2'], true);
   assert.equal(toggleMatrixPair(group, rules, second, 1, 1, { 1: 5 })['1:2:2'], true);
   assert.equal(toggleMatrixPair(group, rules, saved, 1, 3), saved);
-  const completed = { ...group, assignments: [{ ...group.assignments[0], isCompleted: true }] };
-  assert.match(matrixCell(completed, rules, 1, 3).reason, /completed/);
-  const started = { ...group, assignments: [{ ...group.assignments[0], hasAnswers: true, statusName: 'In progress' }] };
-  assert.match(matrixCell(started, rules, 1, 3).reason, /in progress/);
+  // The planning matrix never shows an issued pair's progress (requirement 7.4).
+  assert.doesNotMatch(matrixCell(group, rules, 1, 3).reason, /completed|in progress|not started/i);
 });
 
 test('shared participant diagonal selection synchronizes across groups without editing issued cells', () => {
   const second = { ...group, groupId: 2, assignments: [] };
   assert.deepEqual(synchronizeSelfPair([group, second], {}, 1, true), { '2:1:1': true, '1:1:1': true });
-  const issued = { ...group, assignments: [{ evaluatorId: 1, evaluateeId: 1 }] };
+  const issued = { ...group, assignments: [{ evaluatorId: 1, evaluateeId: 1, issued: true }] };
   assert.deepEqual(synchronizeSelfPair([issued, second], { '1:1:1': true, '2:1:1': true }, 1, false), { '1:1:1': true, '2:1:1': false });
   const effective = matrixGroupWithSelfLocks({ groups: [issued, second] }, second);
   assert.equal(matrixCell(effective, rules, 1, 1, { 1: 5 }).editable, false);

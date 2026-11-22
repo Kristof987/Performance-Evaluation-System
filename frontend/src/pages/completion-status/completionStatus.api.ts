@@ -8,6 +8,8 @@ export type CompletionStatusSummary = {
   overdue: number;
   completion_rate: number;
   outstanding: number;
+  evaluators: number;
+  evaluators_done: number;
 };
 
 export type CompletionStatusCampaign = {
@@ -18,29 +20,26 @@ export type CompletionStatusCampaign = {
   end_date: string | null;
 };
 
+/** One evaluator's progress. The API deliberately never says whom they evaluate. */
 export type CompletionStatusRow = {
-  id: number;
   evaluator_id: number;
   evaluator_name: string;
   evaluator_email: string | null;
-  evaluatee_id: number;
-  evaluatee_name: string;
-  evaluatee_email: string | null;
-  questionnaire_id: number;
-  questionnaire_name: string;
-  status_name: string;
+  total: number;
+  not_started: number;
+  in_progress: number;
+  completed: number;
+  outstanding: number;
+  overdue: number;
   status_label: 'Not started' | 'In progress' | 'Completed' | string;
   due_date: string | null;
-  completed_at: string | null;
-  is_overdue: boolean;
-  is_self_evaluation: boolean;
+  last_completed_at: string | null;
 };
 
 export type CompletionStatusResponse = {
   campaign: CompletionStatusCampaign;
   summary: CompletionStatusSummary;
   rows: CompletionStatusRow[];
-  questionnaires: { id: number; name: string }[];
   pagination: { page: number; page_size: number; total_items: number; total_pages: number };
   duplicate_assignment_count: number;
 };
@@ -48,7 +47,6 @@ export type CompletionStatusResponse = {
 export type CompletionStatusQuery = {
   search: string;
   status: string;
-  questionnaireId: string;
   overdueOnly: boolean;
   sort: string;
   order: 'asc' | 'desc';
@@ -65,7 +63,6 @@ export async function fetchCompletionStatus(getAccessToken: AccessTokenGetter, c
   });
   if (query.search.trim() !== '') params.set('search', query.search.trim());
   if (query.status !== '') params.set('status', query.status);
-  if (query.questionnaireId !== '') params.set('questionnaire_id', query.questionnaireId);
   if (query.overdueOnly) params.set('overdue_only', 'true');
 
   const response = await authenticatedApiFetch(getAccessToken, `/campaigns/${campaignId}/completion-status?${params.toString()}`, { signal });

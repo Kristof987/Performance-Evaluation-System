@@ -147,9 +147,6 @@ export type CampaignEvaluationMatrixAssignment = {
   formId: number | null;
   filledFormId: number | null;
   issued: boolean;
-  isCompleted: boolean;
-  statusName: string;
-  hasAnswers: boolean;
 };
 
 export type CampaignGroupEvaluationMatrix = {
@@ -182,9 +179,6 @@ export type CampaignEvaluationMatrixResponse = {
       form_id: number | null;
       filled_form_id: number | null;
       issued: boolean;
-      is_completed: boolean;
-      status_name: string;
-      has_answers: boolean;
     }>;
   }>;
 };

@@ -649,29 +649,26 @@ class CompletionStatusSummary(BaseModel):
     overdue: int
     completion_rate: int
     outstanding: int
-
-
-class CompletionStatusQuestionnaireFilter(BaseModel):
-    id: int
-    name: str
+    evaluators: int = 0
+    evaluators_done: int = 0
 
 
 class CompletionStatusRow(BaseModel):
-    id: int
+    """One evaluator's progress. Deliberately has no evaluatee fields (requirement 7.4)."""
+    model_config = {"extra": "forbid"}
+
     evaluator_id: int
     evaluator_name: str
     evaluator_email: EmailStr | None
-    evaluatee_id: int
-    evaluatee_name: str
-    evaluatee_email: EmailStr | None
-    questionnaire_id: int
-    questionnaire_name: str
-    status_name: str
+    total: int
+    not_started: int
+    in_progress: int
+    completed: int
+    outstanding: int
+    overdue: int
     status_label: str
     due_date: date | None = None
-    completed_at: date | None = None
-    is_overdue: bool = False
-    is_self_evaluation: bool = False
+    last_completed_at: date | None = None
 
 
 class CompletionStatusPagination(BaseModel):
@@ -685,7 +682,6 @@ class CompletionStatusResponse(BaseModel):
     campaign: DashboardCampaignSummary
     summary: CompletionStatusSummary
     rows: list[CompletionStatusRow]
-    questionnaires: list[CompletionStatusQuestionnaireFilter]
     pagination: CompletionStatusPagination
     duplicate_assignment_count: int = 0
 
@@ -1183,9 +1179,6 @@ class CampaignEvaluationMatrixAssignment(BaseModel):
     form_id: int | None
     filled_form_id: int
     issued: bool = False
-    is_completed: bool = False
-    status_name: str
-    has_answers: bool = False
 
 
 class CampaignGroupEvaluationMatrix(BaseModel):

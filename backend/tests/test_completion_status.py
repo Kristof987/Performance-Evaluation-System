@@ -1,117 +1,147 @@
-import unittest
-from datetime import date, timedelta
+"""Completion status is reported per evaluator and never reveals who evaluates whom (requirement 7.4)."""
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
 from fastapi import HTTPException
 
 import models
+import schemas
 from database import SessionLocal
-from main import get_campaign_completion_status
+from main import build_campaign_evaluation_matrix, get_campaign_completion_status
 
 
-def get_or_create_status(db, name):
-    status = db.query(models.FormStatus).filter(models.FormStatus.name == name).first()
-    if status is None:
-        status = models.FormStatus(name=name)
-        db.add(status)
-        db.flush()
-    return status
+@pytest.fixture
+def db():
+    session = SessionLocal()
+    session.commit = session.flush
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
 
 
-def get_or_create_role(db, name):
-    role = db.query(models.CompanyRole).filter(models.CompanyRole.name == name).first()
-    if role is None:
-        role = models.CompanyRole(name=name)
-        db.add(role)
-        db.flush()
-    return role
+def add(db, item):
+    db.add(item)
+    db.flush()
+    return item
 
 
-class CompletionStatusTests(unittest.TestCase):
-    def setUp(self):
-        self.db = SessionLocal()
-        self.db.commit = self.db.flush
-        suffix = uuid4().hex
-        self.not_started = get_or_create_status(self.db, "Not started")
-        self.in_progress = get_or_create_status(self.db, "In progress")
-        self.completed = get_or_create_status(self.db, "Completed")
-        self.hr_role = get_or_create_role(self.db, "HR")
-        employee_role = models.CompanyRole(name=f"Completion employee {suffix}")
-        system_role = models.SystemRole(name=f"Completion system {suffix}")
-        self.form_a = models.Form(name=f"Peer review {suffix}", questions=[])
-        self.form_b = models.Form(name=f"Self review {suffix}", questions=[])
-        self.db.add_all([employee_role, system_role, self.form_a, self.form_b])
-        self.db.flush()
-        self.hr = models.User(username=f"hr-{suffix}", email=f"hr-{suffix}@example.com", password_hash="test", company_role_id=self.hr_role.id, system_role_id=system_role.id, is_active=True)
-        self.employee = models.User(username=f"adam-{suffix}", email=f"adam-{suffix}@example.com", password_hash="test", company_role_id=employee_role.id, system_role_id=system_role.id, is_active=True)
-        self.peer = models.User(username=f"sarah-{suffix}", email=f"sarah-{suffix}@example.com", password_hash="test", company_role_id=employee_role.id, system_role_id=system_role.id, is_active=True)
-        self.db.add_all([self.hr, self.employee, self.peer])
-        self.db.flush()
-        self.campaign = models.Campaign(name=f"Completion campaign {suffix}", start_date=date.today() - timedelta(days=7), end_date=date.today() - timedelta(days=1), created_by=self.hr.id, is_active=True)
-        self.empty_campaign = models.Campaign(name=f"Empty completion {suffix}", start_date=date.today(), end_date=date.today() + timedelta(days=7), created_by=self.hr.id, is_active=True)
-        self.db.add_all([self.campaign, self.empty_campaign])
-        self.db.flush()
-        self.rows = [
-            models.FilledForm(campaign_id=self.campaign.id, evaluator_id=self.employee.id, evaluatee_id=self.peer.id, form_id=self.form_a.id, status_id=self.not_started.id, finish_date=None, answers=[{"secret": "do not leak"}]),
-            models.FilledForm(campaign_id=self.campaign.id, evaluator_id=self.peer.id, evaluatee_id=self.employee.id, form_id=self.form_a.id, status_id=self.in_progress.id, finish_date=None, answers=[{"secret": "do not leak"}]),
-            models.FilledForm(campaign_id=self.campaign.id, evaluator_id=self.employee.id, evaluatee_id=self.employee.id, form_id=self.form_b.id, status_id=self.completed.id, finish_date=date.today(), answers=[{"secret": "do not leak"}]),
-        ]
-        self.db.add_all(self.rows)
-        self.db.flush()
+def status(db, name):
+    return db.query(models.FormStatus).filter_by(name=name).first() or add(db, models.FormStatus(name=name))
 
-    def tearDown(self):
-        self.db.rollback()
-        self.db.close()
+
+class World:
+    """Anna has 3 evaluations (1 done, 1 started, 1 not started), Béla 1 done, Cecil 1 not started."""
+
+    def __init__(self, db):
+        self.db = db
+        suffix = uuid4().hex[:8]
+        self.suffix = suffix
+        role = add(db, models.CompanyRole(name=f"Role {suffix}"))
+        system_role = db.query(models.SystemRole).first() or add(db, models.SystemRole(name=f"System {suffix}"))
+        self.actor = add(db, models.User(username=f"hr-{suffix}", email=f"hr-{suffix}@example.com", password_hash="",
+                                         system_role_id=system_role.id, is_active=True))
+        self.group = add(db, models.CompanyGroup(name=f"Group {suffix}"))
+        self.form = add(db, models.Form(name=f"Form {suffix}", questions=[]))
+        self.people = {}
+        for index, name in enumerate(["Anna", "Bela", "Cecil", "Dora"]):
+            user = add(db, models.User(username=f"u{index}-{suffix}", email=f"{name.lower()}-{suffix}@example.com",
+                                       password_hash="", system_role_id=system_role.id, is_active=True))
+            self.people[name] = add(db, models.Employee(user_id=user.id, full_name=f"{name} {suffix}",
+                                                        company_role_id=role.id, is_active=True))
+        now = datetime.now(timezone.utc)
+        self.campaign = add(db, models.Campaign(name=f"Campaign {suffix}", status="active", is_active=True,
+                                                start_date=now - timedelta(days=7), end_date=now - timedelta(hours=1),
+                                                created_by=self.actor.id))
+        db.execute(models.campaign_company_groups.insert().values(campaign_id=self.campaign.id, company_group_id=self.group.id))
+        anna, bela, cecil, dora = self.people.values()
+        self.evaluation(anna, bela, "Completed", done=True)
+        self.evaluation(anna, cecil, "In progress")
+        self.evaluation(anna, dora, "Not started")
+        self.evaluation(bela, anna, "Completed", done=True)
+        self.evaluation(cecil, dora, "Not started")
+        # Planned (not yet issued) assignments are not part of the completion view.
+        self.evaluation(dora, anna, "Not started", issued=False)
+
+    def evaluation(self, evaluator, evaluatee, status_name, *, done=False, issued=True):
+        return add(self.db, models.FilledForm(
+            campaign_id=self.campaign.id, form_id=self.form.id, company_group_id=self.group.id,
+            evaluator_id=evaluator.id, evaluatee_id=evaluatee.id, status_id=status(self.db, status_name).id,
+            finish_date=date.today() if done else None, answers=[{"secret": "do not leak"}] if status_name != "Not started" else [],
+            form_snapshot={"schema_version": 2, "questions": []} if issued else None))
 
     def request(self, **overrides):
-        params = {
-            "campaign_id": self.campaign.id,
-            "requester_user_id": self.hr.id,
-            "search": None,
-            "status": None,
-            "questionnaire_id": None,
-            "overdue_only": False,
-            "sort": "due_date",
-            "order": "asc",
-            "page": 1,
-            "page_size": 25,
-            "db": self.db,
-        }
+        params = {"campaign_id": self.campaign.id, "requester_user_id": None, "search": None, "status": None,
+                  "overdue_only": False, "sort": "outstanding", "order": "desc", "page": 1, "page_size": 25,
+                  "db": self.db, "actor": self.actor}
         params.update(overrides)
         return get_campaign_completion_status(**params)
 
-    def test_summary_overdue_self_evaluation_and_no_answer_leakage(self):
-        result = self.request()
-        self.assertEqual(result["summary"]["total_evaluations"], 3)
-        self.assertEqual(result["summary"]["not_started"], 1)
-        self.assertEqual(result["summary"]["in_progress"], 1)
-        self.assertEqual(result["summary"]["completed"], 1)
-        self.assertEqual(result["summary"]["overdue"], 2)
-        self.assertEqual(result["summary"]["completion_rate"], 33)
-        self.assertTrue(any(row["is_self_evaluation"] for row in result["rows"]))
-        self.assertNotIn("answers", str(result))
-        self.assertNotIn("do not leak", str(result))
-
-    def test_search_filters_pagination_and_zero_campaign(self):
-        searched = self.request(search="sarah")
-        self.assertEqual(searched["pagination"]["total_items"], 2)
-        filtered = self.request(status="in_progress", questionnaire_id=self.form_a.id, overdue_only=True)
-        self.assertEqual(filtered["pagination"]["total_items"], 1)
-        self.assertEqual(filtered["rows"][0]["status_label"], "In progress")
-        paged = self.request(sort="evaluator", order="asc", page_size=1, page=2)
-        self.assertEqual(paged["pagination"], {"page": 2, "page_size": 1, "total_items": 3, "total_pages": 3})
-        empty = self.request(campaign_id=self.empty_campaign.id)
-        self.assertEqual(empty["summary"]["total_evaluations"], 0)
-        self.assertEqual(empty["summary"]["completion_rate"], 0)
-
-    def test_authorization_and_missing_campaign(self):
-        with self.assertRaises(HTTPException) as unauthorized:
-            self.request(requester_user_id=self.employee.id)
-        self.assertEqual(unauthorized.exception.status_code, 403)
-        with self.assertRaises(HTTPException) as missing:
-            self.request(campaign_id=999999999)
-        self.assertEqual(missing.exception.status_code, 404)
+    def row(self, result, name):
+        return next(row for row in result["rows"] if row["evaluator_name"].startswith(name))
 
 
-if __name__ == '__main__':
-    unittest.main()
+def test_progress_is_counted_per_evaluator(db):
+    world = World(db)
+    result = world.request()
+    assert result["summary"]["total_evaluations"] == 5
+    assert result["summary"]["completed"] == 2
+    assert result["summary"]["in_progress"] == 1
+    assert result["summary"]["not_started"] == 2
+    assert result["summary"]["overdue"] == 3
+    assert result["summary"]["completion_rate"] == 40
+    assert result["summary"]["evaluators"] == 3
+    assert result["summary"]["evaluators_done"] == 1
+    anna = world.row(result, "Anna")
+    assert (anna["total"], anna["completed"], anna["in_progress"], anna["not_started"], anna["outstanding"], anna["overdue"]) == (3, 1, 1, 1, 2, 2)
+    assert anna["status_label"] == "In progress"
+    assert world.row(result, "Bela")["status_label"] == "Completed"
+    assert world.row(result, "Cecil")["status_label"] == "Not started"
+    assert [row["evaluator_name"].split()[0] for row in result["rows"]] == ["Anna", "Cecil", "Bela"]
+
+
+def test_who_evaluates_whom_is_never_returned(db):
+    world = World(db)
+    result = world.request()
+    for row in result["rows"]:
+        assert not any("evaluatee" in key for key in row)
+        schemas.CompletionStatusRow.model_validate(row)
+    text = str(result)
+    assert "do not leak" not in text
+    # Dora only appears as an evaluatee, so her name must not show up anywhere in the response.
+    assert "Dora" not in text
+    with pytest.raises(Exception):
+        schemas.CompletionStatusRow.model_validate({**result["rows"][0], "evaluatee_name": "x"})
+
+
+def test_search_filters_and_pagination(db):
+    world = World(db)
+    assert world.request(search="anna")["pagination"]["total_items"] == 1
+    # Searching for someone who is only evaluated finds nothing: evaluatees are not searchable.
+    assert world.request(search="dora")["pagination"]["total_items"] == 0
+    assert [row["evaluator_name"].split()[0] for row in world.request(status="completed")["rows"]] == ["Bela"]
+    assert {row["evaluator_name"].split()[0] for row in world.request(overdue_only=True)["rows"]} == {"Anna", "Cecil"}
+    paged = world.request(sort="evaluator", order="asc", page_size=1, page=2)
+    assert paged["pagination"] == {"page": 2, "page_size": 1, "total_items": 3, "total_pages": 3}
+    assert paged["rows"][0]["evaluator_name"].startswith("Bela")
+
+
+def test_evaluation_matrix_does_not_show_progress_per_pair(db):
+    world = World(db)
+    matrix = build_campaign_evaluation_matrix(world.campaign.id, db)
+    assignments = [assignment for group in matrix["groups"] for assignment in group["assignments"]]
+    assert assignments
+    for assignment in assignments:
+        assert set(assignment) == {"evaluator_id", "evaluatee_id", "form_id", "filled_form_id", "issued"}
+
+
+def test_conflicting_requester_and_missing_campaign(db):
+    world = World(db)
+    with pytest.raises(HTTPException) as conflict:
+        world.request(requester_user_id=world.actor.id + 1000000)
+    assert conflict.value.status_code == 403
+    with pytest.raises(HTTPException) as missing:
+        world.request(campaign_id=999999999)
+    assert missing.value.status_code == 404
