@@ -123,6 +123,8 @@ def test_auth_me_tells_every_user_whether_ai_is_on(monkeypatch):
 
     import main
     from api import dependencies
+    from services import account_service
+    from services.business_calendar import BUSINESS_TIMEZONE
     from services import workspace_settings_service
 
     db = SessionLocal()
@@ -132,12 +134,12 @@ def test_auth_me_tells_every_user_whether_ai_is_on(monkeypatch):
             pytest.skip("No active user in the test database")
         main.app.dependency_overrides[dependencies.get_current_user] = lambda: user
         main.app.dependency_overrides[dependencies.get_db] = lambda: db
-        monkeypatch.setattr(main, "record_sign_in", lambda *_args: None)
+        monkeypatch.setattr(account_service, "record_sign_in", lambda *_args: None)
         for enabled in (True, False):
             monkeypatch.setattr(workspace_settings_service, "ai_enabled", lambda _db, value=enabled: value)
             assert TestClient(main.app).get("/auth/me").json()["ai_enabled"] is enabled
         # Every page shows dates in the business time zone the server reports here.
-        assert TestClient(main.app).get("/auth/me").json()["timezone"] == main.BUSINESS_TIMEZONE.key
+        assert TestClient(main.app).get("/auth/me").json()["timezone"] == BUSINESS_TIMEZONE.key
     finally:
         main.app.dependency_overrides.clear()
         db.rollback()

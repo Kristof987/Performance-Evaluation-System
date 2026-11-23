@@ -16,8 +16,17 @@ import main
 SNAPSHOT = Path(__file__).with_name("route_snapshot.json")
 
 
+def flatten(routes):
+    """Endpoints in registration order; routers included with include_router() are expanded in place."""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        elif hasattr(route, "effective_route_contexts"):  # FastAPI's included router
+            yield from route.effective_route_contexts()
+
+
 def api_routes():
-    return [route for route in main.app.routes if isinstance(route, APIRoute)]
+    return list(flatten(main.app.router.routes))
 
 
 def current_entries():
@@ -42,9 +51,9 @@ def sample_path(path: str) -> str:
 
 
 def resolve(method: str, path: str):
-    """The first route Starlette would choose for this request, as the router walks them in order."""
+    """The first endpoint that would handle this request, walking the routes in order like the router does."""
     scope = {"type": "http", "method": method, "path": path, "root_path": "", "path_params": {}}
-    for route in main.app.router.routes:
+    for route in api_routes():
         match, _child = route.matches(scope)
         if match == Match.FULL:
             return route
@@ -57,6 +66,6 @@ def test_every_endpoint_is_reached_by_its_own_requests():
     for route in api_routes():
         for method in route.methods:
             chosen = resolve(method, sample_path(route.path))
-            if chosen is not route and not (isinstance(chosen, APIRoute) and chosen.path == route.path):
+            if chosen is None or (chosen.path, chosen.name) != (route.path, route.name):
                 wrong.append(f"{method} {route.path} -> {getattr(chosen, 'path', None)}")
     assert not wrong, "Requests reach the wrong endpoint:\n" + "\n".join(wrong)

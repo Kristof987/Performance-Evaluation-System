@@ -1,5 +1,6 @@
 """Workspace-wide settings: privacy thresholds, AI features, permission grants and the audit log."""
 
+import os
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
+from integrations import email_service
 
 
 SCOPE = "default"
@@ -350,3 +352,36 @@ def audit_log(db: Session, *, category: str | None, campaign_id: int | None,
         entry.campaign_name = campaign_label(entry.campaign_id)
         entry.actor_name = actors.get(entry.actor_user_id) if entry.actor_user_id is not None else None
     return schemas.AuditLogResponse(entries=page, has_more=len(entries) > offset + limit)
+
+
+def ai_workspace_status(db: Session) -> schemas.AIWorkspaceStatus:
+    settings = get_settings(db)
+    return schemas.AIWorkspaceStatus(
+        **settings.model_dump(),
+        default_model=os.getenv("OPENAI_ANALYSIS_MODEL", "").strip() or None,
+        api_key_configured=bool(os.getenv("OPENAI_API_KEY", "").strip()),
+    )
+
+
+def put_workspace_reminder_defaults(*, update: schemas.WorkspaceReminderDefaultsUpdate, db: Session, actor: models.User):
+    row = _locked_row(db)
+    days = sorted(set(update.default_reminder_days), reverse=True)
+    previous = (row.default_reminder_days, row.default_launch_email)
+    row.default_reminder_days, row.default_launch_email = days, update.default_launch_email
+    row.updated_by_user_id = actor.id
+    if previous != (days, update.default_launch_email):
+        record_audit(
+            db, "notifications", actor,
+            "Default reminders changed: " + (", ".join(f"{day} days before the end" for day in days) or "none"),
+            {"default_reminder_days": days, "default_launch_email": update.default_launch_email})
+    db.commit()
+    return {"default_reminder_days": days, "default_launch_email": update.default_launch_email,
+            "email_configured": email_service.configured()}
+
+
+def get_ai_prompt_version(*, version: str, db: Session):
+    """The exact prompt text behind a prompt version shown on AI analyses and in the audit log."""
+    prompt = db.get(models.AIPromptVersion, version)
+    if prompt is None:
+        raise HTTPException(status_code=404, detail="Prompt version not found")
+    return {"version": prompt.version, "name": prompt.name, "content": prompt.content, "created_at": prompt.created_at}

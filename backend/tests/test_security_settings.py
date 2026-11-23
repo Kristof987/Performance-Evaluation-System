@@ -8,7 +8,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from integrations import auth0_management as service
-from main import app, get_my_security
+from main import app
+from api.me import get_my_security
 import models
 from database import SessionLocal
 

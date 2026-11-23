@@ -1,24 +1,22 @@
 from copy import deepcopy
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 import os
 from uuid import uuid4
 from typing import Literal
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Response, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import and_, asc, case, desc, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
-from database import engine, Base
-from api.dependencies import get_current_employee, get_current_user, get_db, reject_conflicting_requester, require_permission
-from services.business_calendar import BUSINESS_TIMEZONE, business_today as campaign_today, business_date, campaign_instant
+from api.dependencies import get_current_employee, get_db, reject_conflicting_requester, require_permission
+from services.business_calendar import business_today as campaign_today, business_date, campaign_instant
 from services import campaign_lifecycle
 from services import campaign_reminder_service
-from integrations import email_service
 import models
 from services import form_snapshot_service
 from services import reporting_service
@@ -36,9 +34,11 @@ from services.ai_analysis_models import EmployeeAIAnalysis
 from services.ai_generation_service import AnalysisGenerationError
 import schemas
 from integrations import auth0_management
-from services import preferences_service
 from services import workspace_settings_service
-from services import profile_photo_service
+from api import auth as auth_router
+from api import me as me_router
+from api import workspace as workspace_router
+from services import account_service
 
 #Base.metadata.create_all(bind=engine)
 
@@ -83,60 +83,6 @@ EMPLOYEE_IMPORT_HEADERS = [
 GROUP_IMPORT_HEADERS = ["Group Name", "Group Description"]
 
 
-
-def record_sign_in(user: models.User, db: Session) -> None:
-    """The app calls /auth/me on every start; store it as the last sign-in, at most every 5 minutes."""
-    now = datetime.now(timezone.utc)
-    if user.last_login is None or now - user.last_login > timedelta(minutes=5):
-        user.last_login = now
-        db.commit()
-
-
-def sign_in_status(user: models.User | None) -> str:
-    if user is None:
-        return "not_invited"
-    if user.auth0_user_id and user.last_login is not None:
-        return "active"
-    if user.invitation_status in {"sent", "failed"}:
-        return "invited" if user.invitation_status == "sent" else "failed"
-    return "not_invited"
-
-
-def account_fields(user: models.User | None, db: Session) -> dict:
-    system_role = db.get(models.SystemRole, user.system_role_id) if user else None
-    return {"sign_in_status": sign_in_status(user),
-            "sign_in_linked": bool(user and user.auth0_user_id),
-            "invitation_sent_at": user.invitation_sent_at if user else None,
-            "invitation_error": user.invitation_error if user else None,
-            "system_role_id": system_role.id if system_role else None,
-            "system_role_name": system_role.name if system_role else None}
-
-
-INVITATION_ERROR_MESSAGES = {
-    "account_exists": "an Auth0 account already exists with this email",
-    "provider_unavailable": "Auth0 was unavailable; resend the invitation later",
-    "email_failed": "the account was created but the email could not be sent; resend the invitation",
-    "signup_rejected": "Auth0 rejected the sign-up; check that sign-ups are enabled on the connection",
-    "invalid_provider_response": "Auth0 returned an unexpected response",
-    "external_identity": "this account signs in with an external provider",
-}
-
-
-def invitation_error_message(code: str | None) -> str:
-    return INVITATION_ERROR_MESSAGES.get(code or "", "the invitation could not be sent")
-
-
-def normalized_email(email: str) -> str:
-    return email.strip().lower()
-
-
-def email_taken(email: str, db: Session, *, except_user_id: int | None = None) -> bool:
-    query = db.query(models.User.id).filter(func.lower(models.User.email) == normalized_email(email))
-    if except_user_id is not None:
-        query = query.filter(models.User.id != except_user_id)
-    return query.first() is not None
-
-
 def group_member_counts(group_ids: list[int], db: Session) -> dict[int, int]:
     if not group_ids:
         return {}
@@ -169,44 +115,6 @@ def set_group_leaders(group_id: int, leader_ids: list[int], db: Session) -> list
     for employee_id in wanted:
         db.execute(models.company_group_leaders.insert().values(company_group_id=group_id, employee_id=employee_id))
     return wanted
-
-
-@app.get("/auth/me", response_model=schemas.AuthMeResponse)
-def get_auth_me(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    roles = (
-        db.query(
-            models.SystemRole.name.label("system_role_name"),
-            models.CompanyRole.name.label("company_role_name"),
-        )
-        .select_from(models.User)
-        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
-        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
-        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
-        .filter(models.User.id == user.id)
-        .one_or_none()
-    )
-    if roles is None:
-        raise HTTPException(status_code=500, detail="Account role configuration is unavailable")
-    permissions = (
-        db.query(models.SystemPermission.name)
-        .join(models.system_role_permissions,
-              models.system_role_permissions.c.permission_id == models.SystemPermission.id)
-        .filter(models.system_role_permissions.c.system_role_id == user.system_role_id)
-        .order_by(models.SystemPermission.name)
-        .all()
-    )
-    record_sign_in(user, db)
-    employee = user.employee
-    return {"id": user.id, "username": user.username, "email": user.email,
-            "system_role_id": user.system_role_id, "system_role_name": roles.system_role_name,
-            "permissions": [name for (name,) in permissions],
-            "is_active": user.is_active, "ai_enabled": workspace_settings_service.ai_enabled(db),
-            "timezone": BUSINESS_TIMEZONE.key,
-            "employee": {"id": employee.id, "full_name": employee.full_name,
-                         "company_role_id": employee.company_role_id,
-                         "company_role_name": roles.company_role_name,
-                         "is_active": employee.is_active,
-                         "profile_image_url": employee.profile_image_url} if employee else None}
 
 
 @app.get("/people", response_model=schemas.PeopleResponse)
@@ -265,7 +173,7 @@ def get_people(db: Session = Depends(get_db),
                 ],
                 "is_active": employee.is_active,
                 "profile_image_url": employee.profile_image_url,
-                **account_fields(employee.user, db),
+                **account_service.account_fields(employee.user, db),
             }
             for employee in employees
         ],
@@ -275,230 +183,6 @@ def get_people(db: Session = Depends(get_db),
         "system_roles": [{"id": role.id, "name": role.name, "description": role.description}
                          for role in db.query(models.SystemRole).order_by(models.SystemRole.id).all()],
     }
-
-
-@app.get("/users/{user_id}/account-settings/profile", response_model=schemas.AccountSettingsProfile)
-def get_account_settings_profile(user_id: int, db: Session = Depends(get_db),
-                                 actor: models.User = Depends(require_permission("settings.read"))):
-    if user_id != actor.id:
-        raise HTTPException(status_code=404, detail="Account profile not found")
-    return account_profile(actor.id, db)
-
-
-@app.get("/me/account-settings/profile", response_model=schemas.AccountSettingsProfile)
-def get_my_account_settings_profile(db: Session = Depends(get_db),
-                                    actor: models.User = Depends(require_permission("settings.read"))):
-    return account_profile(actor.id, db)
-
-
-def account_profile(user_id: int, db: Session):
-    result = (
-        db.query(
-            models.User,
-            models.Employee,
-            models.CompanyRole.name.label("company_role"),
-            models.SystemRole.name.label("system_role"),
-        )
-        .outerjoin(models.Employee, models.Employee.user_id == models.User.id)
-        .outerjoin(models.CompanyRole, models.CompanyRole.id == models.Employee.company_role_id)
-        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
-        .filter(models.User.id == user_id)
-        .filter(models.User.is_active.is_(True))
-        .first()
-    )
-    if result is None:
-        raise HTTPException(status_code=404, detail="Account profile not found")
-
-    user, employee, company_role, system_role = result
-    memberships = (
-        db.query(models.CompanyGroup)
-        .join(models.employee_company_groups, models.employee_company_groups.c.company_group_id == models.CompanyGroup.id)
-        .filter(models.employee_company_groups.c.employee_id == employee.id)
-        .order_by(models.CompanyGroup.name.asc())
-        .all()
-    ) if employee else []
-    member_counts = dict(db.query(
-        models.employee_company_groups.c.company_group_id, func.count(models.Employee.id),
-    ).join(models.Employee, models.Employee.id == models.employee_company_groups.c.employee_id)
-      .filter(models.Employee.is_active.is_(True))
-      .group_by(models.employee_company_groups.c.company_group_id).all()) if memberships else {}
-    return {
-        "id": user.id,
-        "username": user.username,
-        "full_name": employee.full_name if employee else None,
-        "email": user.email,
-        "company_role": company_role,
-        "system_role": system_role,
-        "groups": [
-            {"id": group.id, "name": group.name, "description": group.description,
-             "member_count": member_counts.get(group.id, 0)}
-            for group in memberships
-        ],
-        "is_active": user.is_active,
-        "last_login": user.last_login,
-        "profile_image_url": employee.profile_image_url if employee else None,
-    }
-
-
-def own_employee(actor: models.User) -> models.Employee:
-    if actor.employee is None or not actor.employee.is_active:
-        raise HTTPException(status_code=409, detail="An active employee profile is required for a profile photo")
-    return actor.employee
-
-
-@app.put("/me/profile-photo", response_model=schemas.ProfilePhotoResponse)
-def upload_my_profile_photo(file: UploadFile = File(...), db: Session = Depends(get_db),
-                            actor: models.User = Depends(require_permission("settings.manage_self"))):
-    # Only ever the caller's own employee: the route has no ID that could point at someone else.
-    data = file.file.read(profile_photo_service.MAX_UPLOAD_BYTES + 1)
-    url = profile_photo_service.save_photo(own_employee(actor), data, db)
-    return {"profile_image_url": url}
-
-
-@app.delete("/me/profile-photo", response_model=schemas.ProfilePhotoResponse)
-def delete_my_profile_photo(db: Session = Depends(get_db),
-                            actor: models.User = Depends(require_permission("settings.manage_self"))):
-    profile_photo_service.remove_photo(own_employee(actor), db)
-    return {"profile_image_url": None}
-
-
-@app.get("/photos/{photo_id}.jpg", include_in_schema=False)
-def get_profile_photo(photo_id: str, db: Session = Depends(get_db)):
-    photo = profile_photo_service.find_servable_photo(photo_id, db)
-    if photo is None:
-        raise HTTPException(status_code=404, detail="Photo not found")
-    return Response(content=photo.content, media_type=photo.content_type, headers={
-        "Cache-Control": "private, max-age=86400",
-        "X-Content-Type-Options": "nosniff",
-    })
-
-
-@app.get("/me/security", response_model=schemas.SecuritySettingsResponse)
-def get_my_security(actor: models.User = Depends(require_permission("settings.read"))):
-    subject = actor.auth0_user_id or ""
-    provider = subject.split("|", 1)[0]
-    return {
-        "sign_in_method": "auth0",
-        "identity_provider": "Auth0 database" if provider == "auth0" else provider,
-        "password_reset_available": bool(subject and subject.startswith("auth0|"))
-        and auth0_management.password_reset_available(),
-        "last_login": actor.last_login,
-        "timezone": BUSINESS_TIMEZONE.key,
-    }
-
-
-@app.post("/me/security/password-reset", response_model=schemas.SettingsActionResponse)
-def reset_my_password(db: Session = Depends(get_db),
-                      actor: models.User = Depends(require_permission("settings.manage_self"))):
-    auth0_management.send_password_reset(actor.id, actor.auth0_user_id, actor.email, db)
-    return {"message": "If your account uses a password, a reset link was sent."}
-
-
-@app.get("/me/preferences", response_model=schemas.PreferencesResponse)
-def get_my_preferences(db: Session = Depends(get_db),
-                       actor: models.User = Depends(require_permission("settings.read"))):
-    return preferences_service.get_preferences(actor.id, db)
-
-
-@app.patch("/me/preferences", response_model=schemas.PreferencesResponse)
-def patch_my_preferences(update: schemas.PreferencesUpdate, db: Session = Depends(get_db),
-                         actor: models.User = Depends(require_permission("settings.manage_self"))):
-    return preferences_service.update_preferences(actor, update, db)
-
-
-def ai_workspace_status(db: Session) -> schemas.AIWorkspaceStatus:
-    settings = workspace_settings_service.get_settings(db)
-    return schemas.AIWorkspaceStatus(
-        **settings.model_dump(),
-        default_model=os.getenv("OPENAI_ANALYSIS_MODEL", "").strip() or None,
-        api_key_configured=bool(os.getenv("OPENAI_API_KEY", "").strip()),
-    )
-
-
-@app.get("/workspace/settings", response_model=schemas.AIWorkspaceStatus)
-def get_workspace_settings(db: Session = Depends(get_db),
-                           _actor: models.User = Depends(require_permission("workspace.manage"))):
-    return ai_workspace_status(db)
-
-
-@app.patch("/workspace/settings", response_model=schemas.AIWorkspaceStatus)
-def patch_workspace_settings(update: schemas.WorkspaceSettingsUpdate, db: Session = Depends(get_db),
-                             actor: models.User = Depends(require_permission("workspace.manage"))):
-    workspace_settings_service.update_settings(actor, update, db)
-    return ai_workspace_status(db)
-
-
-@app.get("/workspace/email-reminders", response_model=schemas.WorkspaceReminderDefaults)
-def get_workspace_reminder_defaults(db: Session = Depends(get_db),
-                                    _actor: models.User = Depends(require_permission("workspace.manage"))):
-    days, launch = campaign_reminder_service.workspace_reminder_defaults(db)
-    return {"default_reminder_days": days, "default_launch_email": launch,
-            "email_configured": email_service.configured()}
-
-
-@app.put("/workspace/email-reminders", response_model=schemas.WorkspaceReminderDefaults)
-def put_workspace_reminder_defaults(update: schemas.WorkspaceReminderDefaultsUpdate, db: Session = Depends(get_db),
-                                    actor: models.User = Depends(require_permission("workspace.manage"))):
-    row = workspace_settings_service._locked_row(db)
-    days = sorted(set(update.default_reminder_days), reverse=True)
-    previous = (row.default_reminder_days, row.default_launch_email)
-    row.default_reminder_days, row.default_launch_email = days, update.default_launch_email
-    row.updated_by_user_id = actor.id
-    if previous != (days, update.default_launch_email):
-        workspace_settings_service.record_audit(
-            db, "notifications", actor,
-            "Default reminders changed: " + (", ".join(f"{day} days before the end" for day in days) or "none"),
-            {"default_reminder_days": days, "default_launch_email": update.default_launch_email})
-    db.commit()
-    return {"default_reminder_days": days, "default_launch_email": update.default_launch_email,
-            "email_configured": email_service.configured()}
-
-
-@app.get("/workspace/permissions", response_model=schemas.PermissionMatrixResponse)
-def get_permission_matrix(db: Session = Depends(get_db),
-                          _actor: models.User = Depends(require_permission("permissions.manage", "workspace.manage"))):
-    return workspace_settings_service.permission_matrix(db)
-
-
-@app.put("/workspace/permissions", response_model=schemas.PermissionMatrixResponse)
-def put_permission_matrix(update: schemas.PermissionMatrixUpdate, db: Session = Depends(get_db),
-                          actor: models.User = Depends(require_permission("permissions.manage"))):
-    return workspace_settings_service.update_permission_matrix(actor, update, db)
-
-
-@app.post("/workspace/permissions/roles", response_model=schemas.PermissionMatrixResponse)
-def post_system_role(create: schemas.SystemRoleCreate, db: Session = Depends(get_db),
-                     actor: models.User = Depends(require_permission("permissions.manage"))):
-    return workspace_settings_service.create_system_role(actor, create, db)
-
-
-@app.delete("/workspace/permissions/roles/{role_id}", response_model=schemas.PermissionMatrixResponse)
-def delete_system_role(role_id: int, db: Session = Depends(get_db),
-                       actor: models.User = Depends(require_permission("permissions.manage"))):
-    return workspace_settings_service.delete_system_role(actor, role_id, db)
-
-
-@app.get("/workspace/ai-prompts/{version}")
-def get_ai_prompt_version(version: str, db: Session = Depends(get_db),
-                          _auditor: models.User = Depends(require_permission("audit.read"))):
-    """The exact prompt text behind a prompt version shown on AI analyses and in the audit log."""
-    prompt = db.get(models.AIPromptVersion, version)
-    if prompt is None:
-        raise HTTPException(status_code=404, detail="Prompt version not found")
-    return {"version": prompt.version, "name": prompt.name, "content": prompt.content, "created_at": prompt.created_at}
-
-
-@app.get("/workspace/audit", response_model=schemas.AuditLogResponse)
-def get_audit_log(
-    category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts", "notifications"] | None = Query(default=None),
-    campaign_id: int | None = Query(default=None, gt=0),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0, le=10_000),
-    db: Session = Depends(get_db),
-    _actor: models.User = Depends(require_permission("audit.read")),
-):
-    return workspace_settings_service.audit_log(db, category=category, campaign_id=campaign_id,
-                                                limit=limit, offset=offset)
 
 
 def get_or_create_company_role(role_name: str, db: Session):
@@ -541,8 +225,8 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
     if name == "" or role_name == "":
         raise HTTPException(status_code=400, detail="Name and role are required")
 
-    email = normalized_email(employee.email)
-    if email_taken(email, db):
+    email = account_service.normalized_email(employee.email)
+    if account_service.email_taken(email, db):
         raise HTTPException(status_code=409, detail="Employee email already exists")
 
     group_ids = sorted(set(employee.group_ids))
@@ -610,7 +294,7 @@ def create_people_employee(employee: schemas.PeopleEmployeeCreate, db: Session =
             for group in groups
         ],
         "is_active": new_employee.is_active,
-        **account_fields(new_user, db),
+        **account_service.account_fields(new_user, db),
     }
 
 
@@ -630,10 +314,10 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
     if name == "" or role_name == "":
         raise HTTPException(status_code=400, detail="Name and role are required")
 
-    email = normalized_email(employee.email)
-    if email_taken(email, db, except_user_id=user.id):
+    email = account_service.normalized_email(employee.email)
+    if account_service.email_taken(email, db, except_user_id=user.id):
         raise HTTPException(status_code=409, detail="Employee email already exists")
-    if user.auth0_user_id and email != normalized_email(user.email):
+    if user.auth0_user_id and email != account_service.normalized_email(user.email):
         # Auth0 still has the old address; changing only ours would send invitations and resets astray.
         raise HTTPException(status_code=409, detail="The email cannot be changed after the sign-in account is created")
 
@@ -701,7 +385,7 @@ def update_people_employee(employee_id: int, employee: schemas.PeopleEmployeeUpd
         ],
         "is_active": person.is_active,
         "profile_image_url": person.profile_image_url,
-        **account_fields(user, db),
+        **account_service.account_fields(user, db),
     }
 
 
@@ -782,7 +466,7 @@ def resend_employee_invitation(employee_id: int, db: Session = Depends(get_db),
                     "member_count": counts.get(group.id, 0)} for group in groups],
         "is_active": person.is_active,
         "profile_image_url": person.profile_image_url,
-        **account_fields(user, db),
+        **account_service.account_fields(user, db),
     }
 
 
@@ -1084,7 +768,7 @@ def import_people_employees(file: UploadFile = File(...), db: Session = Depends(
         if invited.invitation_status == "sent":
             invitations_sent += 1
         elif invited.invitation_status == "failed":
-            invitation_errors.append(f"Row {row_number} ({invited.email}): {invitation_error_message(invited.invitation_error)}")
+            invitation_errors.append(f"Row {row_number} ({invited.email}): {account_service.invitation_error_message(invited.invitation_error)}")
     return {"created_count": len(rows), "errors": [], "invitations_sent": invitations_sent,
             "invitation_errors": invitation_errors}
 
@@ -2378,7 +2062,6 @@ def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
 _register_aggregate_ai_routes("campaign", "/reports/campaigns/{campaign_id}/ai-analysis")
 _register_aggregate_ai_routes("group", "/reports/campaigns/{campaign_id}/groups/{scope_id}/ai-analysis")
 _register_aggregate_ai_routes("role", "/reports/campaigns/{campaign_id}/roles/{scope_id}/ai-analysis")
-
 
 
 def normalize_section_name(name: str) -> tuple[str, str]:
@@ -4317,3 +4000,8 @@ def delete_form_template(template_id: int, db: Session = Depends(get_db),
     db.delete(template)
     db.commit()
     return {"deleted": True}
+
+
+app.include_router(auth_router.router)
+app.include_router(me_router.router)
+app.include_router(workspace_router.router)

@@ -11,8 +11,8 @@ from integrations import auth0_management as service
 import models
 import schemas
 from database import SessionLocal
-from main import (app, create_people_employee, record_sign_in, resend_employee_invitation, sign_in_status,
-                  update_people_employee)
+from main import app, create_people_employee, resend_employee_invitation, update_people_employee
+from services.account_service import record_sign_in, sign_in_status
 
 
 @pytest.fixture
