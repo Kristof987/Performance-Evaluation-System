@@ -8,7 +8,8 @@ from fastapi import HTTPException
 import models
 import schemas
 from database import SessionLocal
-from main import get_assigned_questionnaire, issue_activation_snapshots, update_assigned_questionnaire
+from main import get_assigned_questionnaire, update_assigned_questionnaire
+from services.campaign_service import issue_activation_snapshots
 
 
 @pytest.fixture

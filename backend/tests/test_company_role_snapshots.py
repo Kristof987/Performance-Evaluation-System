@@ -8,7 +8,7 @@ import models
 from services import reporting_service
 from services import section_scoring_service as scoring
 from database import SessionLocal
-from main import snapshot_assignment_roles
+from services.campaign_service import snapshot_assignment_roles
 from api.people import delete_company_role
 from services.people_service import ensure_group_membership_mutable, get_or_create_company_role
 

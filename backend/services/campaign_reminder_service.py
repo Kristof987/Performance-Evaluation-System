@@ -16,6 +16,8 @@ from integrations import email_service
 import models
 from services import reporting_service
 from database import SessionLocal
+from services import workspace_settings_service
+import schemas
 
 
 logger = logging.getLogger(__name__)
@@ -251,3 +253,68 @@ def recipient_list(campaign: models.Campaign, db: Session) -> list[dict]:
         "last_reminded_at": last_manual.get(employee.id),
         "recently_reminded": last_manual.get(employee.id) is not None and _aware(last_manual[employee.id]) >= since,
     } for employee, user, _count in sorted(_recipients(campaign.id, db), key=lambda item: item[0].full_name.lower())]
+
+
+def campaign_for_emails(campaign_id: int, db: Session, *, lock: bool = False) -> models.Campaign:
+    query = db.query(models.Campaign).filter(models.Campaign.id == campaign_id)
+    campaign = (query.with_for_update() if lock else query).first()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign
+
+
+def require_email_schedule_editable(campaign: models.Campaign) -> None:
+    if campaign.is_archived or campaign.status in {models.CampaignStatus.CLOSED.value, models.CampaignStatus.REVIEW.value}:
+        raise HTTPException(status_code=409, detail="Emails can no longer be scheduled for this campaign")
+
+
+def add_campaign_reminder(*, campaign_id: int, payload: schemas.CampaignReminderCreate, db: Session, actor: models.User):
+    campaign = campaign_for_emails(campaign_id, db, lock=True)
+    require_email_schedule_editable(campaign)
+    if campaign.end_date is None:
+        raise HTTPException(status_code=409, detail="Set a campaign end date before scheduling reminders")
+    customize_reminders(campaign, actor, db)
+    if db.query(models.CampaignReminder.id).filter_by(campaign_id=campaign.id, days_before_end=payload.days_before_end).first():
+        raise HTTPException(status_code=409, detail="A reminder is already scheduled for that day")
+    db.add(models.CampaignReminder(campaign_id=campaign.id, days_before_end=payload.days_before_end, created_by=actor.id))
+    workspace_settings_service.record_audit(db, "notifications", actor, f"Reminder added for {campaign.name}",
+                                            {"campaign_id": campaign.id, "days_before_end": payload.days_before_end})
+    db.commit()
+    return email_overview(campaign, db)
+
+
+def delete_campaign_reminder(*, campaign_id: int, days_before_end: int, db: Session, actor: models.User):
+    campaign = campaign_for_emails(campaign_id, db, lock=True)
+    require_email_schedule_editable(campaign)
+    customize_reminders(campaign, actor, db)
+    reminder = db.query(models.CampaignReminder).filter_by(campaign_id=campaign.id, days_before_end=days_before_end).first()
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    workspace_settings_service.record_audit(db, "notifications", actor, f"Reminder removed for {campaign.name}",
+                                            {"campaign_id": campaign.id, "days_before_end": days_before_end})
+    db.delete(reminder)
+    db.commit()
+    return email_overview(campaign, db)
+
+
+def reset_campaign_reminders(*, campaign_id: int, db: Session, actor: models.User):
+    """Drop the campaign's own reminders and follow the workspace defaults again."""
+    campaign = campaign_for_emails(campaign_id, db, lock=True)
+    require_email_schedule_editable(campaign)
+    db.query(models.CampaignReminder).filter_by(campaign_id=campaign.id).delete()
+    campaign.custom_reminders = False
+    workspace_settings_service.record_audit(db, "notifications", actor, f"Reminders reset to defaults for {campaign.name}",
+                                            {"campaign_id": campaign.id})
+    db.commit()
+    return email_overview(campaign, db)
+
+
+def update_campaign_launch_email(*, campaign_id: int, payload: schemas.CampaignLaunchEmailUpdate, db: Session, actor: models.User):
+    campaign = campaign_for_emails(campaign_id, db, lock=True)
+    require_email_schedule_editable(campaign)
+    campaign.launch_email_enabled = payload.enabled
+    workspace_settings_service.record_audit(db, "notifications", actor,
+                                            f"Launch email {'enabled' if payload.enabled else 'disabled'} for {campaign.name}",
+                                            {"campaign_id": campaign.id})
+    db.commit()
+    return email_overview(campaign, db)
