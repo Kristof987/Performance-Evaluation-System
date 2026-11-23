@@ -7,7 +7,8 @@ from fastapi import HTTPException
 import models
 import schemas
 from database import SessionLocal
-from main import create_form, create_form_template, update_form, validate_form_like_payload
+from api.forms import create_form, create_form_template, update_form
+from services.form_service import validate_form_like_payload
 
 
 def unique_name(prefix: str) -> str:

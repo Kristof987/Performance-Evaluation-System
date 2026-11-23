@@ -1,11 +1,9 @@
-from copy import deepcopy
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 import os
-from uuid import uuid4
 from typing import Literal
 
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, case, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -20,14 +18,12 @@ import models
 from services import form_snapshot_service
 from services import reporting_service
 from services import answers_service
-from services import form_import_service
 from services import report_dashboard_service
 from services import question_analytics_service
 from services import evaluation_quality_service
 from services import ai_workflow_service
 from services import ai_aggregate_workflow_service
 from services import ai_generation_jobs
-from services import ai_form_generation_service
 from services.ai_analysis_models import EmployeeAIAnalysis
 from services.ai_generation_service import AnalysisGenerationError
 import schemas
@@ -39,6 +35,8 @@ from api import people as people_router
 from services import campaign_service
 from services import form_service
 from services import people_service
+from api import forms as forms_router
+from api import sections as sections_router
 
 #Base.metadata.create_all(bind=engine)
 
@@ -179,22 +177,9 @@ def campaign_payload(campaign: models.Campaign, today: date, issued: int = 0, su
              "issued_forms_count": issued, "submitted_forms_count": submitted}
 
 
-def require_mutable_campaign_configuration(campaign: models.Campaign) -> None:
-    if campaign.is_archived:
-        raise HTTPException(status_code=409, detail="Archived campaign configuration cannot be changed")
-    if campaign.status in {models.CampaignStatus.PAUSED.value, models.CampaignStatus.REVIEW.value,
-                           models.CampaignStatus.CLOSED.value}:
-        raise HTTPException(status_code=409, detail="Campaign configuration is locked in this lifecycle status")
-
-
 def require_mutable_campaign_plan(campaign: models.Campaign) -> None:
     if campaign.is_archived or campaign.status == models.CampaignStatus.CLOSED.value:
         raise HTTPException(status_code=409, detail="Campaign plan is locked in this lifecycle status")
-
-
-def unissued_snapshot_filter():
-    # Older planned rows may contain JSON null; new rows use SQL NULL.
-    return or_(models.FilledForm.form_snapshot.is_(None), models.FilledForm.form_snapshot == JSONB.NULL)
 
 
 def issued_snapshot_filter():
@@ -235,7 +220,7 @@ def issue_activation_snapshots(campaign: models.Campaign, db: Session,
     self_form_ids = None
     for assignment in db.query(models.FilledForm).filter(
         models.FilledForm.campaign_id == campaign.id,
-        unissued_snapshot_filter(),
+        campaign_service.unissued_snapshot_filter(),
     ).order_by(models.FilledForm.id).all():
         # Historical answers cannot be reconstructed from today's editable form.
         if assignment.finish_date is not None or assignment.answers:
@@ -1327,87 +1312,6 @@ _register_aggregate_ai_routes("group", "/reports/campaigns/{campaign_id}/groups/
 _register_aggregate_ai_routes("role", "/reports/campaigns/{campaign_id}/roles/{scope_id}/ai-analysis")
 
 
-def normalize_section_name(name: str) -> tuple[str, str]:
-    display = " ".join(name.strip().split())
-    if not display or len(display) > 120:
-        raise HTTPException(status_code=400, detail="Section name must contain 1 to 120 characters")
-    normalized = display.casefold()
-    if len(normalized) > 120:
-        raise HTTPException(status_code=400, detail="Normalized section name must contain at most 120 characters")
-    return display, normalized
-
-
-@app.get("/sections", response_model=list[schemas.SectionResponse])
-def get_sections(include_archived: bool = Query(default=True), requester_user_id: int | None = Query(default=None),
-                 db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.read"))):
-    reject_conflicting_requester(requester_user_id, actor)
-    query = db.query(models.Section).filter(models.Section.scope_key == "default")
-    if not include_archived:
-        query = query.filter(models.Section.is_archived.is_(False))
-    return query.order_by(models.Section.is_archived.asc(), models.Section.name.asc()).all()
-
-
-@app.post("/sections", response_model=schemas.SectionResponse, status_code=201)
-def create_section(payload: schemas.SectionCreate, requester_user_id: int | None = Query(default=None),
-                   db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.manage"))):
-    reject_conflicting_requester(requester_user_id, actor)
-    name, normalized = normalize_section_name(payload.name)
-    section = models.Section(scope_key="default", name=name, normalized_name=normalized)
-    db.add(section)
-    try:
-        db.commit()
-    except IntegrityError as error:
-        db.rollback()
-        if getattr(getattr(error.orig, "diag", None), "constraint_name", None) != "uq_section_scope_name":
-            raise
-        raise HTTPException(status_code=409, detail="A section with this name already exists") from error
-    db.refresh(section)
-    return section
-
-
-@app.put("/sections/{section_id}", response_model=schemas.SectionResponse)
-def update_section(section_id: int, payload: schemas.SectionUpdate, requester_user_id: int | None = Query(default=None),
-                   db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.manage"))):
-    reject_conflicting_requester(requester_user_id, actor)
-    section = db.query(models.Section).filter(models.Section.id == section_id, models.Section.scope_key == "default").first()
-    if section is None:
-        raise HTTPException(status_code=404, detail="Section not found")
-    section.name, section.normalized_name = normalize_section_name(payload.name)
-    try:
-        db.commit()
-    except IntegrityError as error:
-        db.rollback()
-        if getattr(getattr(error.orig, "diag", None), "constraint_name", None) != "uq_section_scope_name":
-            raise
-        raise HTTPException(status_code=409, detail="A section with this name already exists") from error
-    db.refresh(section)
-    return section
-
-
-@app.post("/sections/{section_id}/archive", response_model=schemas.SectionResponse)
-def archive_section(section_id: int, requester_user_id: int | None = Query(default=None),
-                    db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.manage"))):
-    reject_conflicting_requester(requester_user_id, actor)
-    return set_section_archived(section_id, True, db)
-
-
-@app.post("/sections/{section_id}/restore", response_model=schemas.SectionResponse)
-def restore_section(section_id: int, requester_user_id: int | None = Query(default=None),
-                    db: Session = Depends(get_db), actor: models.User = Depends(require_permission("sections.manage"))):
-    reject_conflicting_requester(requester_user_id, actor)
-    return set_section_archived(section_id, False, db)
-
-
-def set_section_archived(section_id: int, archived: bool, db: Session):
-    section = db.query(models.Section).filter(models.Section.id == section_id, models.Section.scope_key == "default").first()
-    if section is None:
-        raise HTTPException(status_code=404, detail="Section not found")
-    section.is_archived = archived
-    db.commit()
-    db.refresh(section)
-    return section
-
-
 @app.get("/campaigns", response_model=list[schemas.CampaignResponse])
 def get_campaigns(db: Session = Depends(get_db),
                    _reader: models.User = Depends(require_permission("campaigns.read"))):
@@ -1556,32 +1460,6 @@ def duplicate_campaign_name(db: Session, name: str, exclude_id: int | None = Non
     return query.first() is not None
 
 
-def campaigns_referencing_form(form_id: int, db: Session) -> list[models.Campaign]:
-    ids = {row[0] for model in (models.CampaignEvaluationRule, models.CampaignEmployeeSelfEvaluation, models.FilledForm)
-           for row in db.query(model.campaign_id).filter(model.form_id == form_id).distinct().all()}
-    return [db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().one()
-            for campaign_id in sorted(ids)]
-
-
-def forms_used_by_campaigns(db: Session, campaign_id: int | None = None) -> set[int]:
-    """Form ids referred to by campaign rules, self-evaluations or assignments (optionally of one campaign)."""
-    used: set[int] = set()
-    for model in (models.CampaignEvaluationRule, models.CampaignEmployeeSelfEvaluation, models.FilledForm):
-        query = db.query(model.form_id).filter(model.form_id.isnot(None))
-        if campaign_id is not None:
-            query = query.filter(model.campaign_id == campaign_id)
-        used.update(form_id for (form_id,) in query.distinct())
-    return used
-
-
-def selectable_forms(campaign_id: int, db: Session) -> list[models.Form]:
-    """Forms a campaign can pick from: active ones, plus any archived one it already uses (so its name still shows)."""
-    used = forms_used_by_campaigns(db, campaign_id)
-    return (db.query(models.Form)
-            .filter(or_(models.Form.archived_at.is_(None), models.Form.id.in_(used or {-1})))
-            .order_by(models.Form.name.asc()).all())
-
-
 def change_campaign_schedule(campaign_id: int, target: models.CampaignStatus, db: Session, actor: models.User):
     try:
         campaign = campaign_lifecycle.transition_campaign(
@@ -1703,7 +1581,7 @@ def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, d
 
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    require_mutable_campaign_configuration(campaign)
+    campaign_service.require_mutable_campaign_configuration(campaign)
 
     if duplicate_campaign_name(db, campaign_update.name, campaign_id):
         raise HTTPException(status_code=409, detail="A campaign with this name already exists.")
@@ -1828,7 +1706,7 @@ def update_campaign_groups(campaign_id: int, payload: schemas.CampaignGroupsUpda
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    require_mutable_campaign_configuration(campaign)
+    campaign_service.require_mutable_campaign_configuration(campaign)
 
     unique_group_ids = sorted(set(payload.group_ids))
     if len(unique_group_ids) > 0:
@@ -1928,7 +1806,7 @@ def build_campaign_self_evaluations(campaign_id: int, db: Session, group_ids: li
     ).all():
         if campaign_service.assignment_is_immutable(row):
             issued.setdefault(row.evaluator_id, row.form_id)
-    forms = selectable_forms(campaign_id, db)
+    forms = form_service.selectable_forms(campaign_id, db)
     return {
         "forms": [{"id": form.id, "name": form.name} for form in forms],
         "participants": [
@@ -2060,7 +1938,7 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session, group_ids: list[in
             "configured_required_count": sum(pair["required"] and pair["form_id"] is not None for pair in role_pairs),
         })
 
-    forms = selectable_forms(campaign_id, db)
+    forms = form_service.selectable_forms(campaign_id, db)
     return {
         "forms": [{"id": form.id, "name": form.name} for form in forms],
         "groups": matrices,
@@ -2251,7 +2129,7 @@ def update_campaign_evaluation_rules(campaign_id: int, payload: schemas.Campaign
             ))
     for assignment in db.query(models.FilledForm).filter(
         models.FilledForm.campaign_id == campaign_id,
-        unissued_snapshot_filter(),
+        campaign_service.unissued_snapshot_filter(),
         models.FilledForm.company_group_id.isnot(None),
     ).all():
         if assignment.finish_date is not None or assignment.answers or assignment.evaluator_id == assignment.evaluatee_id:
@@ -2469,7 +2347,7 @@ def issue_ready_campaign_evaluations(campaign_id: int, db: Session = Depends(get
         raise HTTPException(status_code=409, detail="The active campaign window has ended; move to Review before issuing")
 
     planned = db.query(models.FilledForm).filter(
-        models.FilledForm.campaign_id == campaign_id, unissued_snapshot_filter(),
+        models.FilledForm.campaign_id == campaign_id, campaign_service.unissued_snapshot_filter(),
         models.FilledForm.finish_date.is_(None), models.FilledForm.answers == [],
     ).order_by(models.FilledForm.id).all()
     if not planned:
@@ -2532,7 +2410,7 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
         campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
         if campaign is None:
             raise HTTPException(status_code=404, detail="Campaign not found")
-        require_mutable_campaign_configuration(campaign)
+        campaign_service.require_mutable_campaign_configuration(campaign)
         if campaign.status not in {models.CampaignStatus.DRAFT.value, models.CampaignStatus.SCHEDULED.value}:
             raise HTTPException(status_code=409, detail="Only draft and scheduled campaigns can replace their setup")
 
@@ -2702,236 +2580,13 @@ def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate
     return build_campaign_evaluation_matrix(campaign_id, db)
 
 
-@app.get("/forms", response_model=list[schemas.FormResponse])
-def get_forms(db: Session = Depends(get_db),
-              _reader: models.User = Depends(require_permission("forms.read"))):
-    used = forms_used_by_campaigns(db)
-    return [schemas.FormResponse.model_validate(form).model_copy(update={"used_in_campaigns": form.id in used})
-            for form in db.query(models.Form).order_by(models.Form.id.desc()).all()]
-
-
-@app.post("/forms/ai/generate", response_model=schemas.FormAIGenerateResponse)
-def generate_form_draft(request: schemas.FormAIGenerateRequest, db: Session = Depends(get_db),
-                        manager: models.User = Depends(require_permission("forms.manage"))):
-    workspace_settings_service.require_ai_enabled(db)
-
-    def validation_errors(draft: dict) -> list[str]:
-        if not all(section["section_id"] is not None for section in draft["sections"]):
-            return []  # Proposed sections have no DB IDs until HR approves them.
-        blocks = [{"type": "section", "section_id": section["section_id"], "questions": section["questions"]}
-                  for section in draft["sections"]]
-        blocks.extend({"type": "question", "question": question} for question in draft["standalone_questions"])
-        errors = form_service.form_issuance_errors(blocks, db)
-        feedback = []
-        for error in errors:
-            if "option" in error.lower():
-                feedback.append("Choice questions need at least two distinct, labeled options")
-            elif "scale" in error.lower() or "maximum" in error.lower():
-                feedback.append("Rating scales need integer endpoints 1 and 5 with higher values better")
-            elif "section" in error.lower():
-                feedback.append("Every section must be nonempty and reference a unique existing Section")
-            elif "id" in error.lower():
-                feedback.append("Every question needs a unique ID")
-            else:
-                feedback.append("Every question must meet the form issuance rules")
-        return list(dict.fromkeys(feedback))
-
-    return ai_form_generation_service.generate(request, db, validate_draft=validation_errors, actor=manager)
-
-
-@app.get("/form-templates", response_model=list[schemas.FormTemplateResponse])
-def get_form_templates(db: Session = Depends(get_db),
-                       _reader: models.User = Depends(require_permission("forms.read"))):
-    return db.query(models.FormTemplate).order_by(models.FormTemplate.id.asc()).all()
-
-
-def clone_template_questions(questions: list[dict]):
-    cloned_questions = deepcopy(questions)
-    for question in form_service.iter_form_questions(cloned_questions):
-        question["id"] = str(uuid4())
-    return cloned_questions
-
-
-def form_section_ids(questions: object) -> set[int]:
-    return {block["section_id"] for block in questions if isinstance(block, dict) and block.get("type") == "section"
-            and isinstance(block.get("section_id"), int)} if isinstance(questions, list) else set()
-
-
-def reject_newly_archived_sections(questions: list[dict], previous_questions: object, db: Session) -> None:
-    """Archived Sections cannot be added to questionnaires; ones already in a questionnaire may stay."""
-    added = form_section_ids(questions) - form_section_ids(previous_questions)
-    if not added:
-        return
-    archived = db.query(models.Section.name).filter(models.Section.id.in_(added), models.Section.is_archived.is_(True)).order_by(models.Section.name).all()
-    if archived:
-        names = ", ".join(f"“{name}”" for (name,) in archived)
-        raise HTTPException(status_code=400, detail=f"Archived sections cannot be added to a questionnaire: {names}. Restore them or choose another section.")
-
-
-def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, item_id: int | None = None):
-    name = payload.name.strip()
-    if name == "":
-        raise HTTPException(status_code=400, detail="Name is required")
-
-    existing_query = db.query(model).filter(func.lower(model.name) == name.lower())
-    if item_id is not None:
-        existing_query = existing_query.filter(model.id != item_id)
-    if existing_query.first() is not None:
-        raise HTTPException(status_code=400, detail="Name already exists")
-
-    questions = deepcopy(payload.questions)
-    form_service.validate_question_definitions(questions, db)
-    previous = db.query(model.questions).filter(model.id == item_id).scalar() if item_id is not None else None
-    reject_newly_archived_sections(questions, previous, db)
-
-    return {
-        "name": name,
-        "description": payload.description.strip() if payload.description is not None else None,
-        "questions": questions,
-    }
-
-
-@app.post("/forms/import", response_model=schemas.FormImportResponse)
-def import_form_from_excel(file: UploadFile = File(...), db: Session = Depends(get_db),
-                           actor: models.User = Depends(require_permission("forms.manage"))):
-    """Read a filled-in form template into a draft; the editor saves it as a form or a template."""
-    return form_import_service.parse_form_workbook(file.file, file.filename, actor, db)
-
-
-@app.post("/forms", response_model=schemas.FormResponse)
-def create_form(form: schemas.FormCreate, db: Session = Depends(get_db),
-                _manager: models.User = Depends(require_permission("forms.manage"))):
-    values = validate_form_like_payload(form, models.Form, db)
-    if form.source_template_id is not None:
-        template = db.query(models.FormTemplate).filter(models.FormTemplate.id == form.source_template_id).first()
-        if template is None:
-            raise HTTPException(status_code=404, detail="Template not found")
-        values["questions"] = clone_template_questions(template.questions)
-        reject_newly_archived_sections(values["questions"], None, db)
-    new_form = models.Form(**values)
-    db.add(new_form)
-    db.commit()
-    db.refresh(new_form)
-    return new_form
-
-
-@app.get("/forms/{form_id}/validation", response_model=schemas.FormValidationResponse)
-def get_form_issuance_validation(form_id: int, db: Session = Depends(get_db),
-                                 _reader: models.User = Depends(require_permission("forms.read"))):
-    form = db.query(models.Form).filter(models.Form.id == form_id).first()
-    if form is None:
-        raise HTTPException(status_code=404, detail="Form not found")
-    errors = form_service.form_issuance_errors(form.questions if isinstance(form.questions, list) else [], db)
-    return {"valid_for_issuance": not errors, "errors": errors}
-
-
-@app.post("/form-templates", response_model=schemas.FormTemplateResponse)
-def create_form_template(template: schemas.FormCreate, db: Session = Depends(get_db),
-                         _manager: models.User = Depends(require_permission("forms.manage"))):
-    new_template = models.FormTemplate(**validate_form_like_payload(template, models.FormTemplate, db))
-    db.add(new_template)
-    db.commit()
-    db.refresh(new_template)
-    return new_template
-
-
-@app.put("/forms/{form_id}", response_model=schemas.FormResponse)
-def update_form(form_id: int, form_update: schemas.FormUpdate, db: Session = Depends(get_db),
-                  _manager: models.User = Depends(require_permission("forms.manage"))):
-    # Editing a shared source Form must not silently issue campaign questionnaires.
-    campaigns = campaigns_referencing_form(form_id, db)
-    for campaign in campaigns:
-        require_mutable_campaign_configuration(campaign)
-        if campaign.status == models.CampaignStatus.ACTIVE.value and db.query(models.FilledForm.id).filter(
-            models.FilledForm.campaign_id == campaign.id, models.FilledForm.form_id == form_id,
-            unissued_snapshot_filter(),
-        ).first() is not None:
-            raise HTTPException(status_code=409, detail="Issue planned active campaign assignments before editing their source form")
-    form = db.query(models.Form).filter(models.Form.id == form_id).first()
-    if form is None:
-        raise HTTPException(status_code=404, detail="Form not found")
-    if form.archived_at is not None:
-        raise HTTPException(status_code=409, detail="Restore this form before editing it")
-    values = validate_form_like_payload(form_update, models.Form, db, form_id)
-    form.name = values["name"]
-    form.description = values["description"]
-    form.questions = values["questions"]
-    db.flush()
-    for campaign in campaigns:
-        campaign_service.validate_scheduled_campaign(campaign, db)
-    db.commit()
-    db.refresh(form)
-    return schemas.FormResponse.model_validate(form).model_copy(update={"used_in_campaigns": bool(campaigns)})
-
-
-@app.put("/form-templates/{template_id}", response_model=schemas.FormTemplateResponse)
-def update_form_template(template_id: int, template_update: schemas.FormUpdate, db: Session = Depends(get_db),
-                         _manager: models.User = Depends(require_permission("forms.manage"))):
-    template = db.query(models.FormTemplate).filter(models.FormTemplate.id == template_id).first()
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-    values = validate_form_like_payload(template_update, models.FormTemplate, db, template_id)
-    template.name = values["name"]
-    template.description = values["description"]
-    template.questions = values["questions"]
-    db.commit()
-    db.refresh(template)
-    return template
-
-
-@app.delete("/forms/{form_id}", response_model=schemas.FormDeleteResponse)
-def delete_form(form_id: int, db: Session = Depends(get_db),
-                  _manager: models.User = Depends(require_permission("forms.manage"))):
-    """Unused forms are deleted. Forms that only finished campaigns refer to are archived, so their history stays."""
-    form = db.query(models.Form).filter(models.Form.id == form_id).with_for_update().first()
-    if form is None:
-        raise HTTPException(status_code=404, detail="Form not found")
-    campaigns = campaigns_referencing_form(form_id, db)
-    running = [campaign for campaign in campaigns
-               if not campaign.is_archived and campaign.status != models.CampaignStatus.CLOSED.value]
-    if running:
-        names = ", ".join(f"“{campaign.name}”" for campaign in running[:3]) + (" and others" if len(running) > 3 else "")
-        raise HTTPException(status_code=409, detail=f"This form is used by {names}. Remove it from "
-                            f"{'that campaign' if len(running) == 1 else 'those campaigns'} first, or wait until "
-                            f"{'it closes' if len(running) == 1 else 'they close'}.")
-    if campaigns:
-        if form.archived_at is None:
-            form.archived_at = datetime.now(timezone.utc)
-        db.commit()
-        return {"deleted": False, "archived": True}
-    db.delete(form)
-    db.commit()
-    return {"deleted": True, "archived": False}
-
-
-@app.post("/forms/{form_id}/restore", response_model=schemas.FormResponse)
-def restore_form(form_id: int, db: Session = Depends(get_db),
-                 _manager: models.User = Depends(require_permission("forms.manage"))):
-    form = db.query(models.Form).filter(models.Form.id == form_id).first()
-    if form is None:
-        raise HTTPException(status_code=404, detail="Form not found")
-    form.archived_at = None
-    db.commit()
-    db.refresh(form)
-    return schemas.FormResponse.model_validate(form).model_copy(
-        update={"used_in_campaigns": form.id in forms_used_by_campaigns(db)})
-
-
-@app.delete("/form-templates/{template_id}")
-def delete_form_template(template_id: int, db: Session = Depends(get_db),
-                         _manager: models.User = Depends(require_permission("forms.manage"))):
-    template = db.query(models.FormTemplate).filter(models.FormTemplate.id == template_id).first()
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    db.delete(template)
-    db.commit()
-    return {"deleted": True}
-
-
 app.include_router(auth_router.router)
 app.include_router(me_router.router)
 app.include_router(workspace_router.router)
 
 
 app.include_router(people_router.router)
+
+
+app.include_router(forms_router.router)
+app.include_router(sections_router.router)

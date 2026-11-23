@@ -5,6 +5,14 @@ from sqlalchemy.orm import Session
 
 import models
 from services import form_snapshot_service
+from services import campaign_service
+from copy import deepcopy
+from datetime import datetime
+from datetime import timezone
+from sqlalchemy import func
+from sqlalchemy import or_
+from uuid import uuid4
+import schemas
 
 
 def iter_form_questions(structure):
@@ -218,3 +226,181 @@ def _validate_structured_question(question: dict, seen_ids: set, db: Session | N
         if labels is not None and (not isinstance(labels, list) or len(labels) > 200
                                    or not all(isinstance(label, str) for label in labels)):
             raise HTTPException(status_code=400, detail=f"Scale question {question_id} has invalid value labels")
+
+
+def selectable_forms(campaign_id: int, db: Session) -> list[models.Form]:
+    """Forms a campaign can pick from: active ones, plus any archived one it already uses (so its name still shows)."""
+    used = campaign_service.forms_used_by_campaigns(db, campaign_id)
+    return (db.query(models.Form)
+            .filter(or_(models.Form.archived_at.is_(None), models.Form.id.in_(used or {-1})))
+            .order_by(models.Form.name.asc()).all())
+
+
+def get_forms(*, db: Session):
+    used = campaign_service.forms_used_by_campaigns(db)
+    return [schemas.FormResponse.model_validate(form).model_copy(update={"used_in_campaigns": form.id in used})
+            for form in db.query(models.Form).order_by(models.Form.id.desc()).all()]
+
+
+def get_form_templates(*, db: Session):
+    return db.query(models.FormTemplate).order_by(models.FormTemplate.id.asc()).all()
+
+
+def clone_template_questions(questions: list[dict]):
+    cloned_questions = deepcopy(questions)
+    for question in iter_form_questions(cloned_questions):
+        question["id"] = str(uuid4())
+    return cloned_questions
+
+
+def form_section_ids(questions: object) -> set[int]:
+    return {block["section_id"] for block in questions if isinstance(block, dict) and block.get("type") == "section"
+            and isinstance(block.get("section_id"), int)} if isinstance(questions, list) else set()
+
+
+def reject_newly_archived_sections(questions: list[dict], previous_questions: object, db: Session) -> None:
+    """Archived Sections cannot be added to questionnaires; ones already in a questionnaire may stay."""
+    added = form_section_ids(questions) - form_section_ids(previous_questions)
+    if not added:
+        return
+    archived = db.query(models.Section.name).filter(models.Section.id.in_(added), models.Section.is_archived.is_(True)).order_by(models.Section.name).all()
+    if archived:
+        names = ", ".join(f"“{name}”" for (name,) in archived)
+        raise HTTPException(status_code=400, detail=f"Archived sections cannot be added to a questionnaire: {names}. Restore them or choose another section.")
+
+
+def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, item_id: int | None = None):
+    name = payload.name.strip()
+    if name == "":
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    existing_query = db.query(model).filter(func.lower(model.name) == name.lower())
+    if item_id is not None:
+        existing_query = existing_query.filter(model.id != item_id)
+    if existing_query.first() is not None:
+        raise HTTPException(status_code=400, detail="Name already exists")
+
+    questions = deepcopy(payload.questions)
+    validate_question_definitions(questions, db)
+    previous = db.query(model.questions).filter(model.id == item_id).scalar() if item_id is not None else None
+    reject_newly_archived_sections(questions, previous, db)
+
+    return {
+        "name": name,
+        "description": payload.description.strip() if payload.description is not None else None,
+        "questions": questions,
+    }
+
+
+def create_form(*, form: schemas.FormCreate, db: Session):
+    values = validate_form_like_payload(form, models.Form, db)
+    if form.source_template_id is not None:
+        template = db.query(models.FormTemplate).filter(models.FormTemplate.id == form.source_template_id).first()
+        if template is None:
+            raise HTTPException(status_code=404, detail="Template not found")
+        values["questions"] = clone_template_questions(template.questions)
+        reject_newly_archived_sections(values["questions"], None, db)
+    new_form = models.Form(**values)
+    db.add(new_form)
+    db.commit()
+    db.refresh(new_form)
+    return new_form
+
+
+def get_form_issuance_validation(*, form_id: int, db: Session):
+    form = db.query(models.Form).filter(models.Form.id == form_id).first()
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    errors = form_issuance_errors(form.questions if isinstance(form.questions, list) else [], db)
+    return {"valid_for_issuance": not errors, "errors": errors}
+
+
+def create_form_template(*, template: schemas.FormCreate, db: Session):
+    new_template = models.FormTemplate(**validate_form_like_payload(template, models.FormTemplate, db))
+    db.add(new_template)
+    db.commit()
+    db.refresh(new_template)
+    return new_template
+
+
+def update_form(*, form_id: int, form_update: schemas.FormUpdate, db: Session):
+    campaigns = campaign_service.campaigns_referencing_form(form_id, db)
+    for campaign in campaigns:
+        campaign_service.require_mutable_campaign_configuration(campaign)
+        if campaign.status == models.CampaignStatus.ACTIVE.value and db.query(models.FilledForm.id).filter(
+            models.FilledForm.campaign_id == campaign.id, models.FilledForm.form_id == form_id,
+            campaign_service.unissued_snapshot_filter(),
+        ).first() is not None:
+            raise HTTPException(status_code=409, detail="Issue planned active campaign assignments before editing their source form")
+    form = db.query(models.Form).filter(models.Form.id == form_id).first()
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    if form.archived_at is not None:
+        raise HTTPException(status_code=409, detail="Restore this form before editing it")
+    values = validate_form_like_payload(form_update, models.Form, db, form_id)
+    form.name = values["name"]
+    form.description = values["description"]
+    form.questions = values["questions"]
+    db.flush()
+    for campaign in campaigns:
+        campaign_service.validate_scheduled_campaign(campaign, db)
+    db.commit()
+    db.refresh(form)
+    return schemas.FormResponse.model_validate(form).model_copy(update={"used_in_campaigns": bool(campaigns)})
+
+
+def update_form_template(*, template_id: int, template_update: schemas.FormUpdate, db: Session):
+    template = db.query(models.FormTemplate).filter(models.FormTemplate.id == template_id).first()
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    values = validate_form_like_payload(template_update, models.FormTemplate, db, template_id)
+    template.name = values["name"]
+    template.description = values["description"]
+    template.questions = values["questions"]
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+def delete_form(*, form_id: int, db: Session):
+    """Unused forms are deleted. Forms that only finished campaigns refer to are archived, so their history stays."""
+    form = db.query(models.Form).filter(models.Form.id == form_id).with_for_update().first()
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    campaigns = campaign_service.campaigns_referencing_form(form_id, db)
+    running = [campaign for campaign in campaigns
+               if not campaign.is_archived and campaign.status != models.CampaignStatus.CLOSED.value]
+    if running:
+        names = ", ".join(f"“{campaign.name}”" for campaign in running[:3]) + (" and others" if len(running) > 3 else "")
+        raise HTTPException(status_code=409, detail=f"This form is used by {names}. Remove it from "
+                            f"{'that campaign' if len(running) == 1 else 'those campaigns'} first, or wait until "
+                            f"{'it closes' if len(running) == 1 else 'they close'}.")
+    if campaigns:
+        if form.archived_at is None:
+            form.archived_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"deleted": False, "archived": True}
+    db.delete(form)
+    db.commit()
+    return {"deleted": True, "archived": False}
+
+
+def restore_form(*, form_id: int, db: Session):
+    form = db.query(models.Form).filter(models.Form.id == form_id).first()
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    form.archived_at = None
+    db.commit()
+    db.refresh(form)
+    return schemas.FormResponse.model_validate(form).model_copy(
+        update={"used_in_campaigns": form.id in campaign_service.forms_used_by_campaigns(db)})
+
+
+def delete_form_template(*, template_id: int, db: Session):
+    template = db.query(models.FormTemplate).filter(models.FormTemplate.id == template_id).first()
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    db.delete(template)
+    db.commit()
+    return {"deleted": True}

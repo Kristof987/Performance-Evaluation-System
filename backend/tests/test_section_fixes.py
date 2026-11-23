@@ -7,7 +7,7 @@ from fastapi import HTTPException
 import models
 from services import reporting_service
 from database import SessionLocal
-from main import reject_newly_archived_sections
+from services.form_service import reject_newly_archived_sections
 
 
 @pytest.fixture

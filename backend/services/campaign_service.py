@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 import models
 from services import campaign_lifecycle, form_service, people_service
+from sqlalchemy import or_
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 def assignment_is_immutable(assignment):
@@ -108,3 +110,34 @@ def get_campaign_assigned_group_ids(campaign_id: int, db: Session):
         .filter(models.campaign_company_groups.c.campaign_id == campaign_id)
         .all()
     ]
+
+
+def require_mutable_campaign_configuration(campaign: models.Campaign) -> None:
+    if campaign.is_archived:
+        raise HTTPException(status_code=409, detail="Archived campaign configuration cannot be changed")
+    if campaign.status in {models.CampaignStatus.PAUSED.value, models.CampaignStatus.REVIEW.value,
+                           models.CampaignStatus.CLOSED.value}:
+        raise HTTPException(status_code=409, detail="Campaign configuration is locked in this lifecycle status")
+
+
+def unissued_snapshot_filter():
+    # Older planned rows may contain JSON null; new rows use SQL NULL.
+    return or_(models.FilledForm.form_snapshot.is_(None), models.FilledForm.form_snapshot == JSONB.NULL)
+
+
+def campaigns_referencing_form(form_id: int, db: Session) -> list[models.Campaign]:
+    ids = {row[0] for model in (models.CampaignEvaluationRule, models.CampaignEmployeeSelfEvaluation, models.FilledForm)
+           for row in db.query(model.campaign_id).filter(model.form_id == form_id).distinct().all()}
+    return [db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().one()
+            for campaign_id in sorted(ids)]
+
+
+def forms_used_by_campaigns(db: Session, campaign_id: int | None = None) -> set[int]:
+    """Form ids referred to by campaign rules, self-evaluations or assignments (optionally of one campaign)."""
+    used: set[int] = set()
+    for model in (models.CampaignEvaluationRule, models.CampaignEmployeeSelfEvaluation, models.FilledForm):
+        query = db.query(model.form_id).filter(model.form_id.isnot(None))
+        if campaign_id is not None:
+            query = query.filter(model.campaign_id == campaign_id)
+        used.update(form_id for (form_id,) in query.distinct())
+    return used
