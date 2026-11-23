@@ -5,7 +5,7 @@ import pytest
 
 import models
 from database import SessionLocal
-from main import validate_campaign_configuration
+from services.campaign_service import validate_campaign_configuration
 
 
 @pytest.fixture

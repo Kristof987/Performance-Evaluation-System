@@ -9,7 +9,7 @@ from services import reporting_service
 import schemas
 from services import workspace_settings_service as service
 from database import SessionLocal
-from main import set_group_leaders
+from services.people_service import set_group_leaders
 
 
 @pytest.fixture

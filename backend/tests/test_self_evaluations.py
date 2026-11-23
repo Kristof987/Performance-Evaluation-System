@@ -7,13 +7,8 @@ from fastapi import HTTPException
 import models
 import schemas
 from database import SessionLocal
-from main import (
-    get_campaign_self_evaluations,
-    update_campaign_self_evaluations,
-    issue_activation_snapshots,
-    update_campaign_evaluation_matrix,
-    validate_campaign_configuration,
-)
+from main import get_campaign_self_evaluations, update_campaign_self_evaluations, issue_activation_snapshots, update_campaign_evaluation_matrix
+from services.campaign_service import validate_campaign_configuration
 
 
 class CampaignSelfEvaluationTests(unittest.TestCase):

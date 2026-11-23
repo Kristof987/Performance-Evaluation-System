@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from openpyxl import Workbook
 
 from services import people_import_service
-from main import EMPLOYEE_IMPORT_HEADERS, GROUP_IMPORT_HEADERS
+from services.people_service import EMPLOYEE_IMPORT_HEADERS, GROUP_IMPORT_HEADERS
 
 
 def workbook_bytes(rows, *, data_sheet_first=True, active_instructions=False):

@@ -11,7 +11,8 @@ from integrations import auth0_management as service
 import models
 import schemas
 from database import SessionLocal
-from main import app, create_people_employee, resend_employee_invitation, update_people_employee
+from main import app
+from api.people import create_people_employee, resend_employee_invitation, update_people_employee
 from services.account_service import record_sign_in, sign_in_status
 
 

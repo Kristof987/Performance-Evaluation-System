@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from main import _validate_structured_question, form_issuance_errors
+from services.form_service import _validate_structured_question, form_issuance_errors
 
 
 def scale(**extra):

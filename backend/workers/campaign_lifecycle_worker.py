@@ -87,6 +87,7 @@ def serve(stop: Event, validate_configuration, issue_snapshots):
 
 
 if __name__ == "__main__":
-    from main import issue_activation_snapshots, validate_campaign_configuration
+    from main import issue_activation_snapshots
+    from services.campaign_service import validate_campaign_configuration
 
     serve(Event(), validate_campaign_configuration, issue_activation_snapshots)
