@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 
 import models
 from database import SessionLocal
-from main import app, get_current_user, get_db
+from api.dependencies import get_current_user, get_db
+from main import app
 
 
 class AccountSettingsTests(unittest.TestCase):

@@ -9,7 +9,8 @@ from PIL import Image
 import models
 from services import profile_photo_service as service
 from database import SessionLocal
-from main import app, get_current_user, get_db
+from api.dependencies import get_current_user, get_db
+from main import app
 
 
 @pytest.fixture

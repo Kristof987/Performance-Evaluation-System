@@ -122,6 +122,7 @@ def test_auth_me_tells_every_user_whether_ai_is_on(monkeypatch):
     from fastapi.testclient import TestClient
 
     import main
+    from api import dependencies
     from services import workspace_settings_service
 
     db = SessionLocal()
@@ -129,8 +130,8 @@ def test_auth_me_tells_every_user_whether_ai_is_on(monkeypatch):
         user = db.query(models.User).filter(models.User.is_active.is_(True)).first()
         if user is None:
             pytest.skip("No active user in the test database")
-        main.app.dependency_overrides[main.get_current_user] = lambda: user
-        main.app.dependency_overrides[main.get_db] = lambda: db
+        main.app.dependency_overrides[dependencies.get_current_user] = lambda: user
+        main.app.dependency_overrides[dependencies.get_db] = lambda: db
         monkeypatch.setattr(main, "record_sign_in", lambda *_args: None)
         for enabled in (True, False):
             monkeypatch.setattr(workspace_settings_service, "ai_enabled", lambda _db, value=enabled: value)

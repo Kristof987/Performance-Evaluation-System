@@ -13,7 +13,8 @@ import schemas
 from services import workspace_settings_service as service
 from services.ai_workflow_service import capabilities
 from database import SessionLocal
-from main import app, require_permission
+from api.dependencies import require_permission
+from main import app
 
 
 @pytest.fixture
