@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFormAssignmentProgress, getMatrixReadiness } from './campaign-readiness.ts';
 
-const pair = (evaluatorRoleId, evaluateeRoleId) => ({ evaluatorRoleId, evaluateeRoleId });
+const pair = (evaluatorRoleId, evaluateeRoleId, required = true) => ({ evaluatorRoleId, evaluateeRoleId, required });
 const rules = {
   forms: [{ id: 11, name: 'Review' }],
   groups: [
@@ -33,6 +33,14 @@ test('unknown or removed forms are incomplete; only current selected groups coun
   const oneGroup = getFormAssignmentProgress({ ...rules, groups: rules.groups.slice(0, 1) }, { '1:3:3': 11, '1:3:4': 11, '1:4:3': 11 });
   assert.equal(oneGroup.required, 3);
   assert.equal(oneGroup.complete, true);
+});
+
+test('only role pairs that selected evaluations use need a questionnaire', () => {
+  const withUnused = { ...rules, groups: [{ ...rules.groups[0], rolePairs: [...rules.groups[0].rolePairs, pair(4, 4, false)] }, rules.groups[1]] };
+  const progress = getFormAssignmentProgress(withUnused, { '1:3:3': 11, '1:3:4': 11, '1:4:3': 11, '2:4:4': 11 });
+  assert.equal(progress.groups[0].available, 4);
+  assert.equal(progress.groups[0].required, 3);
+  assert.equal(progress.complete, true);
 });
 
 test('unsaved group or rule changes block otherwise complete matrices', () => {

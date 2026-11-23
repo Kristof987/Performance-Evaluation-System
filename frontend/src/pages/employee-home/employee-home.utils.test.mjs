@@ -5,22 +5,29 @@ import { dashboardWork, evaluationStatus, evaluationTitle } from './employee-hom
 const task = (id, changes = {}) => ({
   id, evaluatorId: 1, evaluateeId: 2, evaluateeName: 'Sarah Mitchell',
   campaignId: 10, campaignName: 'Third review', campaignStartDate: '2026-10-01',
-  campaignIsActive: true, dueDate: '2026-10-20', finishDate: null,
+  campaignStatus: 'active', campaignEndAt: '2999-12-31T23:59:59Z', dueDate: '2026-10-20', finishDate: null,
   statusName: 'Not started', answeredCount: 0, formName: 'Probe form',
   ...changes,
 });
 
-test('actionable KPIs share ongoing scope and nearest outstanding deadline', () => {
+test('actionable KPIs share running campaigns and the nearest outstanding deadline', () => {
   const items = [task(1), task(2, { statusName: 'In progress', dueDate: '2026-10-11' }),
     task(3, { finishDate: '2026-10-08', dueDate: '2026-10-10' }),
-    task(4, { campaignStartDate: '2026-11-01', dueDate: '2026-11-20' }),
-    task(5, { campaignIsActive: false }), task(6, { campaignStartDate: '2026-09-01', dueDate: '2026-09-30' })];
-  const work = dashboardWork(items, '2026-10-09');
-  assert.deepEqual(work.actionable.map((item) => item.id), [2, 1]);
+    task(4, { campaignStatus: 'scheduled', campaignStartDate: '2026-11-01', dueDate: '2026-11-20' }),
+    task(5, { campaignStatus: 'paused' }), task(6, { campaignStatus: 'review', dueDate: '2026-10-15' })];
+  const work = dashboardWork(items);
+  // Drafts with a deadline come first, then the remaining work by deadline; paused campaigns are not actionable.
+  assert.deepEqual(work.actionable.map((item) => item.id), [2, 6, 1]);
   assert.equal(work.completed.length, 1);
   assert.equal(work.nextDeadline.id, 2);
   assert.deepEqual(work.upcoming.map((item) => item.id), [4]);
   assert.deepEqual(work.history.map((item) => item.id), [3]);
+});
+
+test('overdue work is listed first and is not offered as the next deadline', () => {
+  const work = dashboardWork([task(1), task(2, { campaignStatus: 'review', campaignEndAt: '2000-01-01T00:00:00Z', dueDate: '2000-01-01' })]);
+  assert.deepEqual(work.actionable.map((item) => item.id), [2, 1]);
+  assert.equal(work.nextDeadline.id, 1);
 });
 
 test('identity and status use persisted evaluator, evaluatee and completion', () => {
@@ -32,11 +39,11 @@ test('identity and status use persisted evaluator, evaluatee and completion', ()
 });
 
 test('distinct FilledForm IDs remain separate even with identical titles', () => {
-  assert.deepEqual(dashboardWork([task(8), task(7)], '2026-10-09').actionable.map((item) => item.id), [7, 8]);
+  assert.deepEqual(dashboardWork([task(8), task(7)]).actionable.map((item) => item.id), [7, 8]);
 });
 
 test('completed history excludes in-progress and not-started work', () => {
-  const work = dashboardWork([task(1), task(2, { answeredCount: 1 }), task(3, { finishDate: '2026-10-08' })], '2026-10-09');
+  const work = dashboardWork([task(1), task(2, { answeredCount: 1 }), task(3, { finishDate: '2026-10-08' })]);
   assert.deepEqual(work.history.map((item) => item.id), [3]);
   assert.deepEqual(work.actionable.map((item) => item.id), [2, 1]);
 });

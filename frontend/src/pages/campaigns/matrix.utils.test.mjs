@@ -17,11 +17,11 @@ const rules = { forms: [{ id: 5, name: 'Review' }], groups: [
   { groupId: 2, rolePairs: [{ evaluatorRoleId: 20, evaluateeRoleId: 10, formId: 5 }] },
 ] };
 
-test('diagonal requires a dedicated configured form; issued work stays locked', () => {
+test('pairs can be planned before questionnaires are chosen; issued work stays locked', () => {
   assert.equal(matrixCell(group, rules, 1, 2).editable, true);
   assert.equal(matrixCell(group, rules, 2, 1).editable, true);
-  assert.equal(matrixCell(group, rules, 2, 2).editable, false);
-  assert.match(matrixCell(group, rules, 2, 2).reason, /Self-evaluations/);
+  // A self pair without a self-evaluation form can be planned; the missing form is flagged, not blocked.
+  assert.equal(matrixCell(group, rules, 2, 2).editable, true);
   assert.equal(matrixCell(group, rules, 1, 1, { 1: 5 }).editable, true);
   assert.equal(matrixCell(group, rules, 1, 3).editable, false);
   assert.equal(matrixCell(group, rules, 1, 3).issued, true);
@@ -59,9 +59,11 @@ test('each self-evaluation toggles independently; issued cells stay locked witho
 
 test('shared participant diagonal selection synchronizes across groups without editing issued cells', () => {
   const second = { ...group, groupId: 2, assignments: [] };
-  assert.deepEqual(synchronizeSelfPair([group, second], {}, 1, true), { '2:1:1': true, '1:1:1': true });
+  // A self-evaluation exists once: choosing it in one group clears it in the others.
+  assert.deepEqual(synchronizeSelfPair([group, second], {}, 1, 1, true), { '1:1:1': true, '2:1:1': false });
+  assert.deepEqual(synchronizeSelfPair([group, second], { '1:1:1': true }, 2, 1, true), { '1:1:1': false, '2:1:1': true });
   const issued = { ...group, assignments: [{ evaluatorId: 1, evaluateeId: 1, issued: true }] };
-  assert.deepEqual(synchronizeSelfPair([issued, second], { '1:1:1': true, '2:1:1': true }, 1, false), { '1:1:1': true, '2:1:1': false });
+  assert.deepEqual(synchronizeSelfPair([issued, second], { '1:1:1': true, '2:1:1': true }, 2, 1, false), { '1:1:1': true, '2:1:1': false });
   const effective = matrixGroupWithSelfLocks({ groups: [issued, second] }, second);
   assert.equal(matrixCell(effective, rules, 1, 1, { 1: 5 }).editable, false);
   assert.equal(clearMatrixPairs(effective, rules, { '2:1:1': true }, { 1: 5 })['2:1:1'], true);

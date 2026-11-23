@@ -1,3 +1,4 @@
+from copy import deepcopy
 from uuid import uuid4
 
 import pytest
@@ -142,7 +143,8 @@ def test_template_to_form_clone_deep_copies_choice_options():
             db,
         )
 
-        form_questions = db.query(models.Form).filter(models.Form.id == form.id).one().questions
+        # Like the API, send a new JSON document: editing the loaded list in place would hide the change from the ORM.
+        form_questions = deepcopy(db.query(models.Form).filter(models.Form.id == form.id).one().questions)
         form_questions[0]["options"][0]["label"] = "Changed in form"
         update_form(
             form.id,

@@ -1,71 +1,85 @@
-import unittest
+"""Matrix saving through the database: planning without forms, rule-driven forms, and issued work kept intact."""
 from datetime import date
 from uuid import uuid4
 
+import pytest
 from fastapi import HTTPException
 
 import models
 import schemas
 from database import SessionLocal
-from main import build_campaign_evaluation_matrix, update_campaign_evaluation_matrix
+from main import (
+    build_campaign_evaluation_matrix,
+    issue_activation_snapshots,
+    update_campaign_evaluation_matrix,
+    validate_campaign_configuration,
+)
 
 
-class MatrixReadinessDatabaseTests(unittest.TestCase):
-    def test_save_requires_complete_rules_and_preserves_issued_form(self):
-        db = SessionLocal()
-        # Exercise the real query/save path in one transaction; never commit test records.
-        db.commit = db.flush
-        suffix = uuid4().hex
-        try:
-            role = models.CompanyRole(name=f"Matrix role {suffix}")
-            system_role = models.SystemRole(name=f"Matrix system role {suffix}")
-            group = models.CompanyGroup(name=f"Matrix group {suffix}")
-            form = models.Form(name=f"Matrix form {suffix}", questions=[])
-            replacement = models.Form(name=f"Matrix replacement {suffix}", questions=[])
-            db.add_all([role, system_role, group, form, replacement])
-            db.flush()
-            user = models.User(username=f"matrix-{suffix}", email=f"matrix-{suffix}@example.com", password_hash="test", company_role_id=role.id, system_role_id=system_role.id, is_active=True)
-            db.add(user)
-            db.flush()
-            campaign = models.Campaign(name=f"Matrix campaign {suffix}", start_date=date.today(), is_active=True, created_by=user.id)
-            db.add(campaign)
-            db.flush()
-            db.execute(models.user_company_groups.insert().values(user_id=user.id, company_group_id=group.id))
-            db.execute(models.campaign_company_groups.insert().values(campaign_id=campaign.id, company_group_id=group.id))
-            db.flush()
-
-            payload = schemas.CampaignEvaluationMatrixUpdate(assignments=[
-                schemas.CampaignEvaluationMatrixUpdateItem(company_group_id=group.id, evaluator_id=user.id, evaluatee_id=user.id)
-            ])
-            with self.assertRaises(HTTPException) as error:
-                update_campaign_evaluation_matrix(campaign.id, payload, db)
-            self.assertEqual(error.exception.status_code, 409)
-            self.assertEqual(error.exception.detail["missing"], 1)
-            self.assertEqual(db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign.id).count(), 0)
-
-            rule = models.CampaignEvaluationRule(campaign_id=campaign.id, company_group_id=group.id, evaluator_role_id=role.id, evaluatee_role_id=role.id, form_id=form.id)
-            db.add(rule)
-            db.add(models.CampaignEmployeeSelfEvaluation(campaign_id=campaign.id, employee_id=user.id, form_id=form.id))
-            db.flush()
-            result = update_campaign_evaluation_matrix(campaign.id, payload, db)
-            self.assertEqual(result["created_count"], 1)
-            issued = db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign.id).one()
-            self.assertEqual(issued.form_id, form.id)
-            self.assertEqual(build_campaign_evaluation_matrix(campaign.id, db)["groups"][0]["assignments"][0]["form_id"], form.id)
-
-            rule.form_id = replacement.id
-            db.flush()
-            result = update_campaign_evaluation_matrix(campaign.id, payload, db)
-            self.assertEqual(result["created_count"], 0)
-            db.refresh(issued)
-            self.assertEqual(issued.form_id, form.id)
-            self.assertEqual(db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign.id).count(), 1)
-            with self.assertRaises(HTTPException):
-                update_campaign_evaluation_matrix(campaign.id, schemas.CampaignEvaluationMatrixUpdate(assignments=[]), db)
-        finally:
-            db.rollback()
-            db.close()
+@pytest.fixture
+def db():
+    session = SessionLocal()
+    # Exercise the real query/save path in one transaction; never commit test records.
+    session.commit = session.flush
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
 
 
-if __name__ == '__main__':
-    unittest.main()
+def add(db, item):
+    db.add(item)
+    db.flush()
+    return item
+
+
+def test_plan_follows_rules_and_issued_form_survives_rule_change(db):
+    suffix = uuid4().hex[:8]
+    role = add(db, models.CompanyRole(name=f"Matrix role {suffix}"))
+    system_role = db.query(models.SystemRole).first() or add(db, models.SystemRole(name=f"System {suffix}"))
+    group = add(db, models.CompanyGroup(name=f"Matrix group {suffix}"))
+    question = [{"id": "q", "text": "Feedback", "type": "Text", "required": True}]
+    form = add(db, models.Form(name=f"Matrix form {suffix}", questions=question))
+    replacement = add(db, models.Form(name=f"Matrix replacement {suffix}", questions=question))
+    actor = add(db, models.User(username=f"hr-{suffix}", email=f"hr-{suffix}@example.com", password_hash="",
+                                system_role_id=system_role.id, is_active=True))
+    people = [add(db, models.Employee(full_name=f"Person {index} {suffix}", company_role_id=role.id, is_active=True))
+              for index in range(2)]
+    campaign = add(db, models.Campaign(name=f"Matrix campaign {suffix}", start_date=date.today(), created_by=actor.id))
+    db.execute(models.campaign_company_groups.insert().values(campaign_id=campaign.id, company_group_id=group.id))
+    for person in people:
+        db.execute(models.employee_company_groups.insert().values(employee_id=person.id, company_group_id=group.id))
+    db.flush()
+    payload = schemas.CampaignEvaluationMatrixUpdate(assignments=[
+        schemas.CampaignEvaluationMatrixUpdateItem(company_group_id=group.id, evaluator_id=people[0].id, evaluatee_id=people[1].id)
+    ])
+
+    # Without a rule the pair can still be planned, but scheduling reports the missing questionnaire.
+    assert update_campaign_evaluation_matrix(campaign.id, payload, db, manager=actor)["created_count"] == 1
+    planned = db.query(models.FilledForm).filter_by(campaign_id=campaign.id).one()
+    assert planned.form_id is None
+    assert any("needs a saved questionnaire" in error for error in validate_campaign_configuration(campaign, db))
+
+    # Saving the rule assigns its form to the planned pair.
+    rule = add(db, models.CampaignEvaluationRule(campaign_id=campaign.id, company_group_id=group.id,
+                                                 evaluator_role_id=role.id, evaluatee_role_id=role.id, form_id=form.id))
+    assert update_campaign_evaluation_matrix(campaign.id, payload, db, manager=actor)["created_count"] == 0
+    db.refresh(planned)
+    assert planned.form_id == form.id
+    assert build_campaign_evaluation_matrix(campaign.id, db)["groups"][0]["assignments"][0]["form_id"] == form.id
+    assert not any("questionnaire" in error for error in validate_campaign_configuration(campaign, db))
+
+    # Once issued, a later rule change does not rewrite the questionnaire someone is already filling in.
+    assert issue_activation_snapshots(campaign, db) == []
+    db.flush()
+    rule.form_id = replacement.id
+    db.flush()
+    assert update_campaign_evaluation_matrix(campaign.id, payload, db, manager=actor)["created_count"] == 0
+    db.refresh(planned)
+    assert planned.form_id == form.id
+    assert planned.form_snapshot["form_id"] == form.id
+    # Issued work cannot be dropped from the plan.
+    with pytest.raises(HTTPException) as error:
+        update_campaign_evaluation_matrix(campaign.id, schemas.CampaignEvaluationMatrixUpdate(assignments=[]), db, manager=actor)
+    assert error.value.status_code == 409
