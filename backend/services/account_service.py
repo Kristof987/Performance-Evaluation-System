@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 import models
 from integrations import auth0_management
 from services import workspace_settings_service
-from services.business_calendar import BUSINESS_TIMEZONE
+from business_calendar import BUSINESS_TIMEZONE
 
 
 def record_sign_in(user: models.User, db: Session) -> None:

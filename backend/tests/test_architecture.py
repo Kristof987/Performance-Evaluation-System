@@ -5,7 +5,7 @@
     services/      business logic
     integrations/  external systems (Auth0, SMTP)
     workers/       background processes
-    models, database, schemas: the data layer
+    models, database, schemas, business_calendar: the data layer and shared helpers
 
 Dependencies point downwards only. The business logic and the integrations must work without
 the HTTP layer (the worker uses them directly), and nothing may depend on the application
@@ -19,13 +19,13 @@ BACKEND = Path(__file__).resolve().parent.parent
 # package -> top-level modules it must never import
 FORBIDDEN = {
     "services": {"api", "main", "workers", "scripts"},
-    "integrations": {"api", "main", "workers", "scripts"},
+    "integrations": {"api", "main", "services", "workers", "scripts"},
     "workers": {"api", "main"},
     "scripts": {"api", "main"},
     "api": {"main", "workers", "scripts"},
 }
-DATA_LAYER = ("models.py", "database.py", "schemas.py")
-DATA_LAYER_FORBIDDEN = {"api", "main", "workers", "scripts"}
+DATA_LAYER = ("models.py", "database.py", "schemas.py", "business_calendar.py")
+DATA_LAYER_FORBIDDEN = {"api", "main", "services", "integrations", "workers", "scripts"}
 
 
 def imported_roots(path: Path) -> set[str]:

@@ -14,6 +14,7 @@ from integrations import auth0_management
 from services import (
     account_service,
     campaign_service,
+    invitation_service,
     people_import_service,
     workspace_settings_service,
 )
@@ -216,7 +217,7 @@ def create_people_employee(*, employee: schemas.PeopleEmployeeCreate, db: Sessio
     except Exception:
         db.rollback()
         raise
-    new_user = auth0_management.invite_user(new_user, actor, db)
+    new_user = invitation_service.invite_user(new_user, actor, db)
     counts = group_member_counts([group.id for group in groups], db)
 
     return {
@@ -378,7 +379,7 @@ def resend_employee_invitation(*, employee_id: int, db: Session, actor: models.U
         raise HTTPException(status_code=409, detail="Inactive employees cannot be invited")
     if not auth0_management.password_reset_available():
         raise HTTPException(status_code=503, detail="Sign-in invitations are not configured on the server")
-    user = auth0_management.invite_user(person.user, actor, db, enforce_cooldown=True)
+    user = invitation_service.invite_user(person.user, actor, db, enforce_cooldown=True)
     group_ids = [group_id for (group_id,) in db.query(models.employee_company_groups.c.company_group_id)
                  .filter(models.employee_company_groups.c.employee_id == person.id)]
     groups = db.query(models.CompanyGroup).filter(models.CompanyGroup.id.in_(group_ids)) \
@@ -671,7 +672,7 @@ def import_people_employees(*, file: UploadFile, db: Session, actor: models.User
     # Employees are already saved; a failed invitation can be resent from the People page.
     invitations_sent, invitation_errors = 0, []
     for row_number, new_user in created:
-        invited = auth0_management.invite_user(new_user, actor, db)
+        invited = invitation_service.invite_user(new_user, actor, db)
         if invited.invitation_status == "sent":
             invitations_sent += 1
         elif invited.invitation_status == "failed":

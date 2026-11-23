@@ -543,7 +543,7 @@ class User(Base):
         nullable=True,
     )
 
-    # Sign-in invitation sent through Auth0; see auth0_management.invite_user.
+    # Sign-in invitation sent through Auth0; see services.invitation_service.invite_user.
     invitation_status = Column(String(16), nullable=False, default="not_sent", server_default="not_sent")
     invitation_sent_at = Column(DateTime(timezone=True), nullable=True)
     invitation_error = Column(String(64), nullable=True)

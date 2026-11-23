@@ -10,7 +10,6 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-from services import workspace_settings_service
 
 
 def domain_url() -> str:
@@ -59,7 +58,6 @@ def send_password_reset(user_id: int, subject: str | None, email: str, db: Sessi
     })
 
 
-INVITATION_COOLDOWN_SECONDS = 60
 _RETRYABLE_PASSWORD_CODES = {"invalid_password", "password_strength_error", "password_dictionary_error",
                              "password_no_user_info_error", "password_leaked"}
 _EXISTING_ACCOUNT_CODES = {"invalid_signup", "user_exists", "username_exists"}
@@ -76,7 +74,7 @@ def _generated_password() -> str:
     return secrets.token_urlsafe(30) + "Aa1!"
 
 
-def _signup(email: str) -> str:
+def create_login(email: str) -> str:
     """Create the Auth0 database user and return its subject (auth0|...)."""
     for attempt in range(2):
         try:
@@ -108,7 +106,7 @@ def _signup(email: str) -> str:
     raise InvitationFailure("signup_rejected")
 
 
-def _send_set_password_email(email: str) -> None:
+def send_set_password_email(email: str) -> None:
     try:
         provider_request("POST", f"{domain_url()}/dbconnections/change_password", json={
             "client_id": os.environ["AUTH0_CLIENT_ID"], "email": email,
@@ -116,38 +114,3 @@ def _send_set_password_email(email: str) -> None:
         })
     except HTTPException:
         raise InvitationFailure("email_failed") from None
-
-
-def invite_user(user: models.User, actor: models.User, db: Session, *, enforce_cooldown: bool = False) -> models.User:
-    """Create the employee's Auth0 login, link it and send the "set your password" email.
-
-    Failures are stored on the user instead of raised, so creating the employee always succeeds.
-    """
-    user = db.query(models.User).filter(models.User.id == user.id).populate_existing().with_for_update().one()
-    now = datetime.now(timezone.utc)
-    if (enforce_cooldown and user.invitation_status == "sent" and user.invitation_sent_at is not None
-            and (now - user.invitation_sent_at).total_seconds() < INVITATION_COOLDOWN_SECONDS):
-        raise HTTPException(status_code=429, detail="Wait 60 seconds before sending another invitation",
-                            headers={"Retry-After": str(INVITATION_COOLDOWN_SECONDS)})
-    name = user.employee.full_name if user.employee else user.username
-    if not password_reset_available():
-        user.invitation_status, user.invitation_error = "not_sent", "not_configured"
-        db.commit()
-        return user
-    try:
-        if user.auth0_user_id is None:
-            user.auth0_user_id = _signup(user.email)
-            db.flush()  # Keep the link even if the email below fails; a resend then only emails.
-        elif not user.auth0_user_id.startswith("auth0|"):
-            raise InvitationFailure("external_identity")
-        _send_set_password_email(user.email)
-        user.invitation_status, user.invitation_sent_at, user.invitation_error = "sent", now, None
-        workspace_settings_service.record_audit(db, "accounts", actor, f"Sign-in invitation sent to {name}",
-                                                {"user_id": user.id})
-    except InvitationFailure as failure:
-        user.invitation_status, user.invitation_error = "failed", failure.code
-        workspace_settings_service.record_audit(db, "accounts", actor,
-                                                f"Sign-in invitation to {name} failed ({failure.code})",
-                                                {"user_id": user.id, "error": failure.code})
-    db.commit()
-    return user

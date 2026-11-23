@@ -124,7 +124,7 @@ def test_auth_me_tells_every_user_whether_ai_is_on(monkeypatch):
     import main
     from api import dependencies
     from services import account_service
-    from services.business_calendar import BUSINESS_TIMEZONE
+    from business_calendar import BUSINESS_TIMEZONE
     from services import workspace_settings_service
 
     db = SessionLocal()

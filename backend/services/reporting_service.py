@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 import models
 from services import campaign_lifecycle
 from services import workspace_settings_service
-from services.business_calendar import business_date
+from business_calendar import business_date
 
 
 COMPLETED_STATUSES = {"completed", "submitted"}

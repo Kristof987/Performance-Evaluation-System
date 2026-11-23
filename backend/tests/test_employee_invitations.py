@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from integrations import auth0_management as service
+from services import invitation_service
 import models
 import schemas
 from database import SessionLocal
@@ -68,7 +69,7 @@ def test_invitation_creates_links_and_emails(db, configured):
     user, actor = make_user(db), make_user(db)
     with patch.object(service.httpx.Client, "post", return_value=response(200, {"_id": "abc123"})) as signup, \
             patch.object(service.httpx.Client, "request", return_value=response(200)) as email:
-        service.invite_user(user, actor, db)
+        invitation_service.invite_user(user, actor, db)
     assert (user.invitation_status, user.invitation_error) == ("sent", None)
     assert user.auth0_user_id == "auth0|abc123"
     assert user.invitation_sent_at is not None
@@ -89,7 +90,7 @@ def test_existing_auth0_account_fails_without_email(db, configured):
     user, actor = make_user(db), make_user(db)
     with patch.object(service.httpx.Client, "post", return_value=response(400, {"code": "invalid_signup"})), \
             patch.object(service.httpx.Client, "request") as email:
-        service.invite_user(user, actor, db)
+        invitation_service.invite_user(user, actor, db)
     assert (user.invitation_status, user.invitation_error, user.auth0_user_id) == ("failed", "account_exists", None)
     email.assert_not_called()
 
@@ -99,7 +100,7 @@ def test_password_policy_rejection_is_retried_once(db, configured):
     replies = [response(400, {"code": "invalid_password"}), response(200, {"_id": "retry"})]
     with patch.object(service.httpx.Client, "post", side_effect=replies) as signup, \
             patch.object(service.httpx.Client, "request", return_value=response(200)):
-        service.invite_user(user, actor, db)
+        invitation_service.invite_user(user, actor, db)
     assert signup.call_count == 2
     assert user.invitation_status == "sent"
 
@@ -107,7 +108,7 @@ def test_password_policy_rejection_is_retried_once(db, configured):
 def test_timeout_is_stored_as_generic_failure(db, configured):
     user, actor = make_user(db), make_user(db)
     with patch.object(service.httpx.Client, "post", side_effect=httpx.ConnectTimeout("secret detail")):
-        service.invite_user(user, actor, db)
+        invitation_service.invite_user(user, actor, db)
     assert (user.invitation_status, user.invitation_error) == ("failed", "provider_unavailable")
 
 
@@ -115,11 +116,11 @@ def test_email_failure_keeps_link_and_resend_only_emails(db, configured):
     user, actor = make_user(db), make_user(db)
     with patch.object(service.httpx.Client, "post", return_value=response(200, {"_id": "kept"})), \
             patch.object(service.httpx.Client, "request", return_value=response(500)):
-        service.invite_user(user, actor, db)
+        invitation_service.invite_user(user, actor, db)
     assert (user.invitation_status, user.invitation_error, user.auth0_user_id) == ("failed", "email_failed", "auth0|kept")
     with patch.object(service.httpx.Client, "post") as signup, \
             patch.object(service.httpx.Client, "request", return_value=response(200)):
-        service.invite_user(user, actor, db)
+        invitation_service.invite_user(user, actor, db)
     signup.assert_not_called()
     assert user.invitation_status == "sent"
 
@@ -127,7 +128,7 @@ def test_email_failure_keeps_link_and_resend_only_emails(db, configured):
 def test_not_configured_skips_auth0(db, not_configured):
     user, actor = make_user(db), make_user(db)
     with patch.object(service.httpx.Client, "post") as signup:
-        service.invite_user(user, actor, db)
+        invitation_service.invite_user(user, actor, db)
     signup.assert_not_called()
     assert (user.invitation_status, user.invitation_error) == ("not_sent", "not_configured")
 
@@ -138,12 +139,12 @@ def test_resend_cooldown(db, configured):
     user.invitation_sent_at = datetime.now(timezone.utc)
     db.flush()
     with pytest.raises(HTTPException) as error:
-        service.invite_user(user, actor, db, enforce_cooldown=True)
+        invitation_service.invite_user(user, actor, db, enforce_cooldown=True)
     assert error.value.status_code == 429
     user.invitation_sent_at = datetime.now(timezone.utc) - timedelta(seconds=61)
     db.flush()
     with patch.object(service.httpx.Client, "request", return_value=response(200)):
-        service.invite_user(user, actor, db, enforce_cooldown=True)
+        invitation_service.invite_user(user, actor, db, enforce_cooldown=True)
     assert user.invitation_status == "sent"
 
 
