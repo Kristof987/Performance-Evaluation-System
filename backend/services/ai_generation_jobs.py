@@ -16,12 +16,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import models
-import reporting_service
-import workspace_settings_service
-from ai_analysis_service import build_employee_analysis_context
-from ai_generation_service import AnalysisGenerationError, model_override
-from ai_workflow_service import _writable, generate as generate_employee
-from ai_aggregate_workflow_service import _context as aggregate_context, _writable as aggregate_writable, generate as generate_aggregate
+from services import reporting_service
+from services import workspace_settings_service
+from services.ai_analysis_service import build_employee_analysis_context
+from services.ai_generation_service import AnalysisGenerationError, model_override
+from services.ai_workflow_service import _writable, generate as generate_employee
+from services.ai_aggregate_workflow_service import _context as aggregate_context, _writable as aggregate_writable, generate as generate_aggregate
 from database import SessionLocal
 
 

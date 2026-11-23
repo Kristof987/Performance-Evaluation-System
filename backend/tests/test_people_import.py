@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from openpyxl import Workbook
 
-import people_import_service
+from services import people_import_service
 from main import EMPLOYEE_IMPORT_HEADERS, GROUP_IMPORT_HEADERS
 
 

@@ -17,31 +17,31 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, aliased
 
 from database import engine, Base, SessionLocal
-from auth0 import bearer_scheme, get_verified_auth0_sub
-from business_calendar import BUSINESS_TIMEZONE, business_today as campaign_today, business_date, campaign_instant
-import campaign_lifecycle
-import campaign_reminder_service
-import email_service
+from integrations.auth0 import bearer_scheme, get_verified_auth0_sub
+from services.business_calendar import BUSINESS_TIMEZONE, business_today as campaign_today, business_date, campaign_instant
+from services import campaign_lifecycle
+from services import campaign_reminder_service
+from integrations import email_service
 import models
-import form_snapshot_service
-import reporting_service
-import answers_service
-import people_import_service
-import form_import_service
-import report_dashboard_service
-import question_analytics_service
-import evaluation_quality_service
-import ai_workflow_service
-import ai_aggregate_workflow_service
-import ai_generation_jobs
-import ai_form_generation_service
-from ai_analysis_models import EmployeeAIAnalysis
-from ai_generation_service import AnalysisGenerationError
+from services import form_snapshot_service
+from services import reporting_service
+from services import answers_service
+from services import people_import_service
+from services import form_import_service
+from services import report_dashboard_service
+from services import question_analytics_service
+from services import evaluation_quality_service
+from services import ai_workflow_service
+from services import ai_aggregate_workflow_service
+from services import ai_generation_jobs
+from services import ai_form_generation_service
+from services.ai_analysis_models import EmployeeAIAnalysis
+from services.ai_generation_service import AnalysisGenerationError
 import schemas
-import auth0_management
-import preferences_service
-import workspace_settings_service
-import profile_photo_service
+from integrations import auth0_management
+from services import preferences_service
+from services import workspace_settings_service
+from services import profile_photo_service
 
 #Base.metadata.create_all(bind=engine)
 

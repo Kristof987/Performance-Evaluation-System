@@ -6,12 +6,12 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-import ai_generation_service
+from services import ai_generation_service
 import models
-import reporting_service
+from services import reporting_service
 import schemas
-import workspace_settings_service as service
-from ai_workflow_service import capabilities
+from services import workspace_settings_service as service
+from services.ai_workflow_service import capabilities
 from database import SessionLocal
 from main import app, require_permission
 

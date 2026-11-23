@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-import auth0_management as service
+from integrations import auth0_management as service
 import models
 import schemas
 from database import SessionLocal

@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 import models
-import reporting_service
+from services import reporting_service
 from database import SessionLocal
 from main import reject_newly_archived_sections
 
@@ -54,7 +54,7 @@ def test_reports_use_the_issued_section_name(db, monkeypatch):
     ]}
     row = (SimpleNamespace(id=1, form_snapshot=snapshot, finish_date=object()), None, "Completed")
     evaluation = SimpleNamespace(section_ids=frozenset({item.id, other.id}))
-    import section_scoring_service
+    from services import section_scoring_service
     monkeypatch.setattr(section_scoring_service, "score_evaluation", lambda *_args, **_kwargs: evaluation)
     monkeypatch.setattr(reporting_service, "status_key", lambda *_args: "completed")
     _scored, names = reporting_service._section_report_data([row], db)

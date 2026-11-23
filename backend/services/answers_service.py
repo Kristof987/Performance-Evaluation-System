@@ -14,10 +14,10 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-import reporting_service
-from form_snapshot_service import snapshot_form_name
-from question_analytics_service import _options
-from section_scoring_service import RATING_TYPES, _rating_range
+from services import reporting_service
+from services.form_snapshot_service import snapshot_form_name
+from services.question_analytics_service import _options
+from services.section_scoring_service import RATING_TYPES, _rating_range
 
 ANSWER_STATUSES = (models.CampaignStatus.ACTIVE, models.CampaignStatus.REVIEW,
                    models.CampaignStatus.PAUSED, models.CampaignStatus.CLOSED)

@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-import workspace_settings_service
+from services import workspace_settings_service
 
 
 def domain_url() -> str:

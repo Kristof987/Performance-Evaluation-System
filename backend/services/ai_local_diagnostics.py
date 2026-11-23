@@ -96,8 +96,8 @@ def replay(name: str) -> dict:
     """Validate the captured response and registry offline; no DB or provider calls."""
     from decimal import Decimal
 
-    from ai_analysis_models import GeneratedAnalysis
-    from ai_generation_service import (AnalysisGenerationError, _AuthorizedFact, _Statistic,
+    from services.ai_analysis_models import GeneratedAnalysis
+    from services.ai_generation_service import (AnalysisGenerationError, _AuthorizedFact, _Statistic,
                                        _failure_detail, _resolve_generated_analysis, _verify_with_comparisons)
 
     artifact = load(name)

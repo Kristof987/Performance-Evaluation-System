@@ -12,8 +12,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-import reporting_service
-from section_scoring_service import RATING_TYPES, _rating_range, normalize_rating
+from services import reporting_service
+from services.section_scoring_service import RATING_TYPES, _rating_range, normalize_rating
 
 
 @dataclass(frozen=True)

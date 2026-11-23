@@ -5,9 +5,9 @@ import pytest
 from fastapi import HTTPException
 
 import models
-import reporting_service
+from services import reporting_service
 import schemas
-import workspace_settings_service as service
+from services import workspace_settings_service as service
 from database import SessionLocal
 from main import set_group_leaders
 

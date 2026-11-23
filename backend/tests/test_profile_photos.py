@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import models
-import profile_photo_service as service
+from services import profile_photo_service as service
 from database import SessionLocal
 from main import app, get_current_user, get_db
 

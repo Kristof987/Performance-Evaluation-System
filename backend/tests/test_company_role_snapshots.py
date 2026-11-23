@@ -5,8 +5,8 @@ import pytest
 from fastapi import HTTPException
 
 import models
-import reporting_service
-import section_scoring_service as scoring
+from services import reporting_service
+from services import section_scoring_service as scoring
 from database import SessionLocal
 from main import delete_company_role, ensure_group_membership_mutable, get_or_create_company_role, snapshot_assignment_roles
 

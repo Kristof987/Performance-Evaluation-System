@@ -14,7 +14,7 @@ from typing import Collection, Literal, Mapping, Sequence
 from sqlalchemy.orm import Session
 
 import models
-import reporting_service
+from services import reporting_service
 
 
 RATING_TYPES = {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}
@@ -177,7 +177,7 @@ def score_evaluation(assignment: models.FilledForm, *, status_name: str | None =
     """A draft or a record without an issued v2 snapshot has no Section score."""
     if reporting_service.status_key(status_name, assignment.finish_date) != "completed":
         return None
-    from question_analytics_service import _definition
+    from services.question_analytics_service import _definition
 
     ratings = extract_section_ratings(assignment.form_snapshot, assignment.answers)
     by_section: dict[int, list[float]] = defaultdict(list)

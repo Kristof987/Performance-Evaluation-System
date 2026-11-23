@@ -8,11 +8,11 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-import campaign_lifecycle
+from services import campaign_lifecycle
 import models
-import question_analytics_service
-import reporting_service
-import section_scoring_service
+from services import question_analytics_service
+from services import reporting_service
+from services import section_scoring_service
 
 TREND_LENGTH = 6
 

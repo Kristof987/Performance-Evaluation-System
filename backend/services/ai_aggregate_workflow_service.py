@@ -7,19 +7,19 @@ from fastapi import HTTPException
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-import ai_trace
-import ai_workflow_service
+from services import ai_trace
+from services import ai_workflow_service
 import models
-import workspace_settings_service
-import reporting_service
-from ai_aggregate_service import (
+from services import workspace_settings_service
+from services import reporting_service
+from services.ai_aggregate_service import (
     build_campaign_analysis_context, build_group_analysis_context, build_role_analysis_context,
 )
-from ai_analysis_models import AggregateAnalysisContext, EmployeeAIAnalysis
-from ai_generation_service import (
+from services.ai_analysis_models import AggregateAnalysisContext, EmployeeAIAnalysis
+from services.ai_generation_service import (
     AnalysisGenerationError, generate_aggregate_ai_analysis_from_context, validate_aggregate_ai_analysis,
 )
-from ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, _requires_fact_contract, _requires_unified_facts, APPROVE, GENERATE, capabilities, has_permission, visible_versions
+from services.ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, _requires_fact_contract, _requires_unified_facts, APPROVE, GENERATE, capabilities, has_permission, visible_versions
 
 
 def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,

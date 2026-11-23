@@ -12,9 +12,9 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-import email_service
+from integrations import email_service
 import models
-import reporting_service
+from services import reporting_service
 from database import SessionLocal
 
 
@@ -197,7 +197,7 @@ def send_manual(campaign: models.Campaign, actor: models.User, employee_ids: lis
         status = _deliver(db, campaign, employee, user, count, kind="manual", actor=actor,
                           dedupe_key=f"manual:{campaign.id}:{employee.id}:{uuid4().hex}")
         result["sent" if status == "sent" else "failed"] += 1
-    import workspace_settings_service
+    from services import workspace_settings_service
 
     workspace_settings_service.record_audit(db, "notifications", actor, f"Reminder emails sent for {campaign.name}",
                                             {"campaign_id": campaign.id, **result})

@@ -4,8 +4,8 @@ from uuid import uuid4
 import pytest
 
 import models
-import report_dashboard_service
-import reporting_service
+from services import report_dashboard_service
+from services import reporting_service
 from database import SessionLocal
 
 
@@ -368,7 +368,7 @@ def test_team_lead_campaign_views_stay_inside_led_groups(db, permissions, monkey
 
 def test_team_scores_withhold_a_combination_that_isolates_one_led_group():
     from itertools import count
-    from section_scoring_service import EvaluationSections
+    from services.section_scoring_service import EvaluationSections
 
     ids = count(1)
 

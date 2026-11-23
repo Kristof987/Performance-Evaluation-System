@@ -17,10 +17,10 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-import question_analytics_service
-import reporting_service
-import section_scoring_service
-from ai_analysis_models import (
+from services import question_analytics_service
+from services import reporting_service
+from services import section_scoring_service
+from services.ai_analysis_models import (
     CampaignAnalysisMetadata, DataQualityWarning, EmployeeAnalysisContext,
     EvaluationSource, EvaluatorCategoryComparison, EvidenceReference,
     OverallStatistics, QualitativeEvidence, QuantitativeStatistics,

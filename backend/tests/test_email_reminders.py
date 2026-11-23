@@ -4,8 +4,8 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-import campaign_reminder_service as reminders
-import email_service
+from services import campaign_reminder_service as reminders
+from integrations import email_service
 import models
 from database import SessionLocal
 
@@ -125,7 +125,7 @@ def test_nothing_is_claimed_without_smtp(db, monkeypatch):
 
 
 def set_defaults(db, days, launch=True):
-    import workspace_settings_service
+    from services import workspace_settings_service
 
     row = workspace_settings_service._locked_row(db)
     row.default_reminder_days, row.default_launch_email = days, launch

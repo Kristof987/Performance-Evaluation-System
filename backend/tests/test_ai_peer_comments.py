@@ -3,12 +3,12 @@ from uuid import uuid4
 
 import pytest
 
-import ai_generation_service
+from services import ai_generation_service
 import models
-import reporting_service
-from ai_analysis_models import (EmployeeAIAnalysis, GeneratedAnalysis, GeneratedFinding, GeneratedTheme,
+from services import reporting_service
+from services.ai_analysis_models import (EmployeeAIAnalysis, GeneratedAnalysis, GeneratedFinding, GeneratedTheme,
                                 TranslatedAnalysis, TranslatedFinding)
-from ai_analysis_service import build_employee_analysis_context, redact_names
+from services.ai_analysis_service import build_employee_analysis_context, redact_names
 from database import SessionLocal
 
 

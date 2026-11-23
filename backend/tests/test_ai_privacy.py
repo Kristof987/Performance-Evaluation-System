@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import ai_generation_service
-import ai_workflow_service
+from services import ai_generation_service
+from services import ai_workflow_service
 
 
 class _StopAfterCall(Exception):
@@ -64,7 +64,7 @@ def test_drafts_are_only_visible_to_people_who_generate_or_approve(monkeypatch):
 
 # --- Traceability ---------------------------------------------------------------------------
 
-import ai_trace
+from services import ai_trace
 import models
 from database import SessionLocal
 
@@ -122,7 +122,7 @@ def test_auth_me_tells_every_user_whether_ai_is_on(monkeypatch):
     from fastapi.testclient import TestClient
 
     import main
-    import workspace_settings_service
+    from services import workspace_settings_service
 
     db = SessionLocal()
     try:

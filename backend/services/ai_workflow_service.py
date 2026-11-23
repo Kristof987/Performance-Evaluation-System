@@ -8,13 +8,13 @@ from fastapi import HTTPException
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-import ai_trace
+from services import ai_trace
 import models
-import reporting_service
-import workspace_settings_service
-from ai_analysis_models import EmployeeAIAnalysis, EmployeeAnalysisContext
-from ai_analysis_service import build_employee_analysis_context
-from ai_generation_service import (
+from services import reporting_service
+from services import workspace_settings_service
+from services.ai_analysis_models import EmployeeAIAnalysis, EmployeeAnalysisContext
+from services.ai_analysis_service import build_employee_analysis_context
+from services.ai_generation_service import (
     AnalysisGenerationError, _prompt_data, _verify_analysis,
     generate_employee_ai_analysis_from_context,
 )

@@ -4,8 +4,8 @@ from itertools import count
 
 import pytest
 
-import reporting_service
-import section_scoring_service as scoring
+from services import reporting_service
+from services import section_scoring_service as scoring
 
 SECTION = 1
 CAMPAIGN = 7

@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import models
-import preferences_service
+from services import preferences_service
 from database import SessionLocal
 from main import app, get_current_user, get_db
 

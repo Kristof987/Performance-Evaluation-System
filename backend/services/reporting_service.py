@@ -9,9 +9,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
-import campaign_lifecycle
-import workspace_settings_service
-from business_calendar import business_date
+from services import campaign_lifecycle
+from services import workspace_settings_service
+from services.business_calendar import business_date
 
 
 COMPLETED_STATUSES = {"completed", "submitted"}
@@ -194,7 +194,7 @@ def build_written_feedback(campaign_id: int, question_key: str | None, evaluatio
     Identity-hidden presentation does not make raw prose anonymous: its content
     and comparison across campaign/employee views may reveal its author.
     """
-    import question_analytics_service
+    from services import question_analytics_service
 
     require_reports_access(None, actor, db)
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update(read=True).first()
@@ -303,7 +303,7 @@ UNNAMED_SECTION = "Unnamed section"
 
 
 def _section_report_data(rows: list[Any], db: Session):
-    import section_scoring_service
+    from services import section_scoring_service
 
     scored = [result for filled_form, _form, status in rows
               if (result := section_scoring_service.score_evaluation(filled_form, status_name=status)) is not None]
@@ -347,8 +347,8 @@ def _section_score_rows(aggregate, scored, names: dict[int, str]):
 
 
 def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
-    import section_scoring_service
-    from question_analytics_service import _definition
+    from services import section_scoring_service
+    from services.question_analytics_service import _definition
 
     campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
@@ -458,7 +458,7 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
 
 
 def build_section_cohort_comparison(campaign_id: int, section_id: int, actor: models.User, db: Session) -> dict[str, Any]:
-    import section_scoring_service
+    from services import section_scoring_service
 
     require_reports_access(campaign_id, actor, db)
     aggregate_access = aggregate_reporting_access(campaign_id, actor, db)
@@ -485,7 +485,7 @@ def build_section_cohort_comparison(campaign_id: int, section_id: int, actor: mo
 
 
 def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
-    import section_scoring_service
+    from services import section_scoring_service
 
     campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
@@ -543,7 +543,7 @@ def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> 
 
 
 def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: Session) -> dict[str, Any]:
-    import section_scoring_service
+    from services import section_scoring_service
 
     overview = build_groups_overview(campaign_id, actor, db)
     aggregate_access = aggregate_reporting_access(campaign_id, actor, db)
@@ -629,7 +629,7 @@ def normalize_perspective(perspective: str) -> str:
 
 def _role_slice(rows: list[Any], scored: list[Any], role_map: dict[int, int], role_id: int, evaluator: bool):
     """Peer assignments, scored evaluations and people on one side of the role at issuance."""
-    import section_scoring_service
+    from services import section_scoring_service
 
     role_rows = [row for row in rows if row[0].evaluator_id != row[0].evaluatee_id
                  and assignment_role_id(row[0], role_map, evaluator=evaluator) == role_id]
@@ -640,7 +640,7 @@ def _role_slice(rows: list[Any], scored: list[Any], role_map: dict[int, int], ro
 
 
 def build_roles_overview(campaign_id: int, actor: models.User, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
-    import section_scoring_service
+    from services import section_scoring_service
 
     campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
@@ -692,7 +692,7 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session, pers
 
 
 def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
-    import section_scoring_service
+    from services import section_scoring_service
 
     overview = build_roles_overview(campaign_id, actor, db, perspective)
     aggregate_access = aggregate_reporting_access(campaign_id, actor, db)
@@ -777,7 +777,7 @@ def employee_base_context(campaign_id: int, rows: list[Any], db: Session) -> tup
 
 
 def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
-    import section_scoring_service
+    from services import section_scoring_service
 
     campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
@@ -799,7 +799,7 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
         peer_assigned_by_employee[filled_form.evaluatee_id].append(row)
         if status_key(row[2], filled_form.finish_date) == "completed":
             peer_completed_by_employee[filled_form.evaluatee_id].append(row)
-    import report_dashboard_service
+    from services import report_dashboard_service
 
     scored, section_names = _section_report_data(rows, db)
     previous_campaign, previous_scores = report_dashboard_service.previous_employee_scores(campaign, actor, db, set(participant_ids))
@@ -882,7 +882,7 @@ def build_section_self_peer_comparison(employee_result, names: dict[int, str]) -
 
 
 def build_employee_history(employee_id: int, actor: models.User, db: Session) -> list[dict[str, Any]]:
-    import section_scoring_service
+    from services import section_scoring_service
 
     campaigns = (db.query(models.Campaign)
                  .filter(models.Campaign.status.in_(REPORTABLE_CAMPAIGN_STATUSES))
@@ -921,7 +921,7 @@ def build_employee_history(employee_id: int, actor: models.User, db: Session) ->
 
 
 def build_employee_report_detail(campaign_id: int, employee_id: int, actor: models.User, db: Session) -> dict[str, Any]:
-    import section_scoring_service
+    from services import section_scoring_service
 
     campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
@@ -964,7 +964,7 @@ def build_employee_report_detail(campaign_id: int, employee_id: int, actor: mode
         availability = "suppressed"
     else:
         availability = "available"
-    import report_dashboard_service
+    from services import report_dashboard_service
 
     previous_campaign, previous_scores = report_dashboard_service.previous_employee_scores(campaign, actor, db, {employee_id})
     previous = previous_scores.get(employee_id)

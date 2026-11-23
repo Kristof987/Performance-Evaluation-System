@@ -10,8 +10,8 @@ from openai import APIError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError
 from sqlalchemy.orm import Session
 
-import ai_generation_service
-import ai_trace
+from services import ai_generation_service
+from services import ai_trace
 import models
 import schemas
 

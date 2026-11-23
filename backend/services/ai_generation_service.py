@@ -21,10 +21,10 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 import models
-import ai_local_diagnostics
-import ai_trace
-from ai_analysis_models import AggregateAnalysisContext, AnalysisFinding, AnalysisTheme, EmployeeAIAnalysis, EmployeeAnalysisContext, GeneratedAnalysis, QuantitativeStatistics, TranslatedAnalysis
-from ai_analysis_service import build_employee_analysis_context
+from services import ai_local_diagnostics
+from services import ai_trace
+from services.ai_analysis_models import AggregateAnalysisContext, AnalysisFinding, AnalysisTheme, EmployeeAIAnalysis, EmployeeAnalysisContext, GeneratedAnalysis, QuantitativeStatistics, TranslatedAnalysis
+from services.ai_analysis_service import build_employee_analysis_context
 
 
 logger = logging.getLogger(__name__)

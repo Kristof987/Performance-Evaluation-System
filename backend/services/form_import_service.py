@@ -11,8 +11,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-import people_import_service
-import workspace_settings_service
+from services import people_import_service
+from services import workspace_settings_service
 
 FORM_HEADERS = ["Form Name", "Form Description"]
 QUESTION_HEADERS = ["Section", "Question Text", "Question Type", "Required", "Help Text",

@@ -12,9 +12,9 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-import question_analytics_service
-import reporting_service
-from ai_analysis_models import AggregateAnalysisContext, AggregateEvidence, AggregateStatistic
+from services import question_analytics_service
+from services import reporting_service
+from services.ai_analysis_models import AggregateAnalysisContext, AggregateEvidence, AggregateStatistic
 
 
 def _fingerprint(db: Session, campaign_id: int, report: dict, questions: list[dict]) -> str:

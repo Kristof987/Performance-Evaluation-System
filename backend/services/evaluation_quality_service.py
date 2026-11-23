@@ -12,10 +12,10 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-import campaign_lifecycle
-import question_analytics_service
-import reporting_service
-from section_scoring_service import normalize_rating
+from services import campaign_lifecycle
+from services import question_analytics_service
+from services import reporting_service
+from services.section_scoring_service import normalize_rating
 
 
 # Descriptive engineering heuristics, not statistical significance, confidence,

@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 import models
-import workspace_settings_service
+from services import workspace_settings_service
 
 
 def prompt_version(name: str, text: str) -> str:

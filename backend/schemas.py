@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from business_calendar import business_date
+from services.business_calendar import business_date
 from models import CampaignStatus
 
 

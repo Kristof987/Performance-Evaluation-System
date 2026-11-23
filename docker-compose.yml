@@ -53,7 +53,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
-    command: ["python", "-m", "campaign_lifecycle_worker"]
+    command: ["python", "-m", "workers.campaign_lifecycle_worker"]
     restart: unless-stopped
     volumes:
       - ./backend:/app

@@ -4,9 +4,9 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-import answers_service
+from services import answers_service
 import models
-import reporting_service
+from services import reporting_service
 from database import SessionLocal
 
 

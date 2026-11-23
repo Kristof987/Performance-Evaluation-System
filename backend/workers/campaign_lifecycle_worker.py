@@ -6,8 +6,8 @@ from threading import Event
 
 from sqlalchemy import and_, or_
 
-import campaign_lifecycle
-import campaign_reminder_service
+from services import campaign_lifecycle
+from services import campaign_reminder_service
 from database import SessionLocal
 from models import Campaign, CampaignOperationAudit, CampaignStatus
 
