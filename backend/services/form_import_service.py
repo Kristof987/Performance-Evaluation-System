@@ -7,7 +7,6 @@ editor can create them for someone allowed to manage sections.
 from typing import Any, BinaryIO
 from uuid import uuid4
 
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models

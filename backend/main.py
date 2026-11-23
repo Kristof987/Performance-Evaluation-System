@@ -4,22 +4,22 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api import (
+    ai_analysis,
+    auth,
+    campaign_emails,
+    campaign_setup,
+    campaigns,
+    dashboard,
+    evaluations,
+    forms,
+    me,
+    people,
+    reports,
+    sections,
+    workspace,
+)
 from services import ai_generation_jobs
-from api import auth as auth_router
-from api import me as me_router
-from api import workspace as workspace_router
-from api import people as people_router
-from api import forms as forms_router
-from api import sections as sections_router
-from api import campaign_emails as campaign_emails_router
-from api import campaigns as campaigns_router
-from api import campaign_setup as campaign_setup_router
-from api import dashboard as dashboard_router
-from api import evaluations as evaluations_router
-from api import ai_analysis as ai_analysis_router
-from api import reports as reports_router
-
-#Base.metadata.create_all(bind=engine)
 
 
 @asynccontextmanager
@@ -52,31 +52,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# The order matters: FastAPI matches routes in registration order, so a more
+# specific path must be included before a router with an overlapping pattern.
+ROUTERS = (
+    auth,
+    me,
+    workspace,
+    people,
+    forms,
+    sections,
+    campaign_emails,
+    campaigns,
+    campaign_setup,
+    dashboard,
+    evaluations,
+    ai_analysis,
+    reports,
+)
 
-
-
-app.include_router(auth_router.router)
-app.include_router(me_router.router)
-app.include_router(workspace_router.router)
-
-
-app.include_router(people_router.router)
-
-
-app.include_router(forms_router.router)
-app.include_router(sections_router.router)
-
-
-app.include_router(campaign_emails_router.router)
-app.include_router(campaigns_router.router)
-
-
-app.include_router(campaign_setup_router.router)
-
-
-app.include_router(dashboard_router.router)
-app.include_router(evaluations_router.router)
-
-
-app.include_router(ai_analysis_router.router)
-app.include_router(reports_router.router)
+for module in ROUTERS:
+    app.include_router(module.router)
