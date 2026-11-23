@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from main import validate_matrix_issued_assignments
+from services.campaign_setup_service import validate_matrix_issued_assignments
 
 
 def issued():

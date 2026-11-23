@@ -8,7 +8,7 @@ from fastapi import HTTPException
 import models
 import schemas
 from database import SessionLocal
-from main import build_campaign_evaluation_matrix
+from services.campaign_setup_service import build_campaign_evaluation_matrix
 from api.campaigns import get_campaign_completion_status
 
 
