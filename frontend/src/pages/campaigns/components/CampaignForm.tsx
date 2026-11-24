@@ -78,11 +78,12 @@ export default function CampaignForm({
            type="datetime-local"
            step="60"
            value={form.endLocal}
-           disabled={campaign ? campaign.status !== 'draft' && campaign.status !== 'scheduled' : false}
+           disabled={campaign ? campaign.status !== 'draft' && campaign.status !== 'scheduled' && campaign.status !== 'active' : false}
            min={form.startLocal}
            onChange={(event) => updateForm('endLocal', event.target.value)}
         />
         <span className="campaign-field-help">Budapest time (Europe/Budapest). Times skipped or repeated by daylight saving are not accepted.</span>
+        {campaign?.status === 'active' && <span className="campaign-field-help">The campaign is running: the deadline can only be moved later. Filling ends at the deadline.</span>}
       </label>
 
       <label className="form-field campaign-field-wide">

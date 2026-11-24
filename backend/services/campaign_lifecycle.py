@@ -46,8 +46,19 @@ def validate_date_edit(
     campaign: Campaign, start: datetime, end: datetime | None, *, now: datetime,
     validate_configuration: Callable[[Campaign, datetime, datetime | None], Sequence[str]] | None = None,
 ) -> None:
-    """Validate edits to draft or scheduled campaign dates."""
+    """Validate date edits: any date before activation, only a later deadline while active."""
     status = CampaignStatus(campaign.status)
+    if status == CampaignStatus.ACTIVE:
+        # Review ends filling for good, so a later deadline is how HR gives people more time.
+        if _instant(start) != _instant(campaign.start_date):
+            raise CampaignLifecycleError("The start of an active campaign cannot change")
+        if end is None:
+            raise CampaignLifecycleError("Active campaigns require an end timestamp")
+        if _instant(end) <= _instant(now):
+            raise CampaignLifecycleError("The new deadline must be in the future")
+        if campaign.end_date is not None and _instant(end) < _instant(campaign.end_date):
+            raise CampaignLifecycleError("The deadline of an active campaign can only be extended")
+        return
     if status not in {CampaignStatus.DRAFT, CampaignStatus.SCHEDULED}:
         raise CampaignLifecycleError(f"Dates cannot be changed in {status.value}")
     validate_dates(start, end)

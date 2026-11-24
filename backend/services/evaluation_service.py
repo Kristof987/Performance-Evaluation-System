@@ -22,9 +22,11 @@ def issued_employee_questions(filled_form: models.FilledForm) -> list[dict]:
 
 
 def questionnaire_can_edit(campaign: models.Campaign, filled_form: models.FilledForm, now: datetime) -> bool:
+    """Filling ends at the deadline; Review is for discussing stable results, so it never reopens."""
     return (filled_form.finish_date is None
-            and campaign.status in {models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value}
+            and campaign.status == models.CampaignStatus.ACTIVE.value
             and not campaign.is_archived and campaign.start_date <= now
+            and (campaign.end_date is None or now < campaign.end_date)
             and isinstance(filled_form.form_snapshot, (dict, list)))
 
 

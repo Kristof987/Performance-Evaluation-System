@@ -623,15 +623,12 @@ def issue_ready_campaign_evaluations(*, campaign_id: int, db: Session, manager: 
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    if campaign.is_archived or campaign.status not in {
-        models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value,
-    } or campaign.legacy_issuance_blocked:
-        raise HTTPException(status_code=409, detail="Only active or review campaigns with verified provenance can issue planned evaluations")
+    if (campaign.is_archived or campaign.status != models.CampaignStatus.ACTIVE.value
+            or campaign.legacy_issuance_blocked):
+        raise HTTPException(status_code=409, detail="Only active campaigns with verified provenance can issue planned evaluations")
     now = datetime.now(timezone.utc)
-    if campaign.status == models.CampaignStatus.ACTIVE.value and (
-        campaign.start_date > now or campaign.end_date is not None and campaign.end_date <= now
-    ):
-        raise HTTPException(status_code=409, detail="The active campaign window has ended; move to Review before issuing")
+    if campaign.start_date > now or campaign.end_date is not None and campaign.end_date <= now:
+        raise HTTPException(status_code=409, detail="The campaign deadline has passed; extend it before issuing new evaluations")
 
     planned = db.query(models.FilledForm).filter(
         models.FilledForm.campaign_id == campaign_id, campaign_service.unissued_snapshot_filter(),

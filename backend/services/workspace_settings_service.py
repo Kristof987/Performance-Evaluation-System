@@ -321,7 +321,7 @@ def audit_log(db: Session, *, category: str | None, campaign_id: int | None,
         if campaign_id is not None:
             query = query.filter(models.CampaignOperationAudit.campaign_id == campaign_id)
         labels = {"snapshot_issuance": "Questionnaires issued", "transition_failure": "Status change failed",
-                  "delete": "Campaign deleted"}
+                  "delete": "Campaign deleted", "deadline_extension": "Deadline extended"}
         for row in query.order_by(models.CampaignOperationAudit.occurred_at.desc()).limit(window):
             summary = labels.get(row.category, row.category)
             if row.category == "snapshot_issuance":

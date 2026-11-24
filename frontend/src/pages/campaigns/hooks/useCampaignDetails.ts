@@ -1055,7 +1055,7 @@ export function useCampaignDetails(id: string | undefined) {
 
   async function handleIssuePlanned() {
     if (!id || !campaign || isIssuingPlanned || isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || isSavingSetup || !canManageCampaigns || campaign.isArchived ||
-        (campaign.status !== 'active' && campaign.status !== 'review')) return;
+        campaign.status !== 'active') return;
     if (hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges) {
       setIssuanceMessage('Save or discard staged setup changes before issuing planned evaluations.');
       return;

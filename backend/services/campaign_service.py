@@ -260,7 +260,9 @@ def campaign_payload(campaign: models.Campaign, today: date, issued: int = 0, su
 
 
 def require_mutable_campaign_plan(campaign: models.Campaign) -> None:
-    if campaign.is_archived or campaign.status == models.CampaignStatus.CLOSED.value:
+    # New pairs could never be issued once filling has ended in Review.
+    if (campaign.is_archived or campaign.status in {models.CampaignStatus.REVIEW.value, models.CampaignStatus.CLOSED.value}
+            or campaign.paused_from_status == models.CampaignStatus.REVIEW.value):
         raise HTTPException(status_code=409, detail="Campaign plan is locked in this lifecycle status")
 
 
@@ -273,10 +275,9 @@ def ensure_campaign_issued(campaign_id: int, db: Session, *, commit: bool = True
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     now = datetime.now(timezone.utc)
     if (campaign is None or campaign.legacy_issuance_blocked
-            or campaign.status not in {models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value}
+            or campaign.status != models.CampaignStatus.ACTIVE.value
             or campaign.is_archived or campaign.start_date > now
-            or (campaign.status == models.CampaignStatus.ACTIVE.value
-                and campaign.end_date is not None and campaign.end_date <= now)):
+            or (campaign.end_date is not None and campaign.end_date <= now)):
         return []
 
     errors = issue_activation_snapshots(campaign, db, actor_user_id=actor_user_id, require_all=False)
@@ -693,7 +694,8 @@ def create_campaign(*, campaign: schemas.CampaignCreate, db: Session, actor: mod
     return campaign_payload(new_campaign, campaign_today())
 
 
-def update_campaign(*, campaign_id: int, campaign_update: schemas.CampaignUpdate, db: Session):
+def update_campaign(*, campaign_id: int, campaign_update: schemas.CampaignUpdate, db: Session,
+                    actor: models.User | None = None):
     if not campaign_update.name.strip():
         raise HTTPException(status_code=400, detail="Campaign name is required")
     campaign = (
@@ -772,6 +774,12 @@ def update_campaign(*, campaign_id: int, campaign_update: schemas.CampaignUpdate
         and end_at < campaign.end_date
     ):
         raise HTTPException(status_code=400, detail="End date cannot be moved earlier after questionnaires have been issued")
+
+    if campaign.status == models.CampaignStatus.ACTIVE.value and end_at != campaign.end_date:
+        db.add(models.CampaignOperationAudit(
+            campaign_id=campaign.id, category="deadline_extension", actor_user_id=actor.id if actor else None,
+            is_automatic=False, occurred_at=datetime.now(timezone.utc),
+            previous_status=campaign.status, resulting_status=campaign.status))
 
     campaign.name = campaign_update.name.strip()
     campaign.description = campaign_update.description

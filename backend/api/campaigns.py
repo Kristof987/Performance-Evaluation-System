@@ -117,4 +117,4 @@ def create_campaign(campaign: schemas.CampaignCreate, db: Session = Depends(get_
 @router.put("/campaigns/{campaign_id}", response_model=schemas.CampaignResponse)
 def update_campaign(campaign_id: int, campaign_update: schemas.CampaignUpdate, db: Session = Depends(get_db),
                      manager: models.User = Depends(require_permission("campaigns.manage"))):
-    return campaign_service.update_campaign(campaign_id=campaign_id, campaign_update=campaign_update, db=db)
+    return campaign_service.update_campaign(campaign_id=campaign_id, campaign_update=campaign_update, db=db, actor=manager)

@@ -99,19 +99,35 @@ def test_rejects_other_people_and_invalid_answers(db):
         expect(400, world.save, [answer])
 
 
-@pytest.mark.parametrize("change", ["paused", "draft", "archived", "not_started_yet"])
+@pytest.mark.parametrize("change", ["paused", "draft", "review", "archived", "not_started_yet", "deadline_passed"])
 def test_only_available_while_the_campaign_runs(db, change):
     world = World(db)
     if change == "archived":
         world.campaign.is_archived = True
     elif change == "not_started_yet":
         world.campaign.start_date = datetime.now(timezone.utc) + timedelta(days=1)
+    elif change == "deadline_passed":
+        world.campaign.end_date = datetime.now(timezone.utc) - timedelta(minutes=1)
     else:
         world.campaign.status = change
     db.flush()
     with pytest.raises(HTTPException) as error:
         world.save([])
     assert error.value.status_code in {403, 404}
+
+
+def test_review_keeps_submitted_answers_readable_and_hides_unfinished_ones(db):
+    world = World(db)
+    world.save([{"question_id": "required", "value": "Fine"}], submit=True)
+    world.campaign.status = "review"
+    db.flush()
+    evaluation = world.get()["evaluation"]
+    assert evaluation["finish_date"] is not None and evaluation["can_edit"] is False
+
+    unfinished = World(db)
+    unfinished.campaign.status = "review"
+    db.flush()
+    expect(404, unfinished.get)
 
 
 def test_issued_snapshot_survives_later_form_edits(db):

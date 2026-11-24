@@ -696,7 +696,8 @@ class CampaignOperationAudit(Base):
     issued_count = Column(Integer, nullable=False, default=0, server_default="0")
 
     __table_args__ = (
-        CheckConstraint("category IN ('snapshot_issuance', 'transition_failure', 'delete')", name="ck_campaign_operation_category"),
+        CheckConstraint("category IN ('snapshot_issuance', 'transition_failure', 'delete', 'deadline_extension')",
+                        name="ck_campaign_operation_category"),
         CheckConstraint("issued_count >= 0", name="ck_campaign_operation_issued_count"),
     )
 

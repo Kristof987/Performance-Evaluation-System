@@ -224,8 +224,8 @@ export default function EmployeeQuestionnaire() {
              written peer comments; every summary is reviewed by an authorized person and is not used on its own for employment decisions.
            </p>}
            {visibleQuestionnaire.evaluation.finishDate !== null && <InlineMessage tone="info" className="employee-questionnaire-inline">This questionnaire has already been submitted.</InlineMessage>}
-           {visibleQuestionnaire.evaluation.campaignStatus === 'review' && visibleQuestionnaire.evaluation.finishDate === null && <InlineMessage tone="info" className="employee-questionnaire-inline">This campaign is in review. You can still save and submit your issued evaluation{evaluationOverdue(visibleQuestionnaire.evaluation) ? ' after the deadline (overdue).' : '.'}</InlineMessage>}
-           {visibleQuestionnaire.evaluation.campaignStatus === 'active' && evaluationOverdue(visibleQuestionnaire.evaluation) && <InlineMessage tone="warning" className="employee-questionnaire-inline">Overdue: the deadline has passed, but you can still save and submit this evaluation.</InlineMessage>}
+           {visibleQuestionnaire.evaluation.campaignStatus === 'review' && visibleQuestionnaire.evaluation.finishDate === null && <InlineMessage tone="info" className="employee-questionnaire-inline">This campaign is in review, so filling has ended.</InlineMessage>}
+           {visibleQuestionnaire.evaluation.campaignStatus === 'active' && evaluationOverdue(visibleQuestionnaire.evaluation) && <InlineMessage tone="warning" className="employee-questionnaire-inline">The deadline has passed, so this evaluation can no longer be saved or submitted.</InlineMessage>}
           <section className="card employee-questionnaire-progress" aria-label="Questionnaire completion progress">
             <div><strong>{answeredCount} of {questionCount} questions answered</strong><span>{progress}% complete</span></div>
             <div className="employee-questionnaire-progress-bar" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Questionnaire completion"><span style={{ width: `${progress}%` }} /></div>
