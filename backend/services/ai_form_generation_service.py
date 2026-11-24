@@ -6,10 +6,10 @@ from uuid import uuid4
 from typing import Callable, Literal
 
 from fastapi import HTTPException
-from openai import APIError, APITimeoutError, OpenAI, RateLimitError
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from sqlalchemy.orm import Session
 
+from integrations import llm
 from services import ai_generation_service
 from services import ai_trace
 from services import workspace_settings_service
@@ -109,53 +109,45 @@ def generate(request: schemas.FormAIGenerateRequest, db: Session,
     sections = db.query(models.Section).filter(models.Section.scope_key == "default",
                                                 models.Section.is_archived.is_(False)).order_by(models.Section.name).all()
     try:
-        key, model, timeout, configured_tokens = ai_generation_service._configuration(
-            workspace_settings_service.ai_model(db))
-    except ai_generation_service.AnalysisGenerationError:
+        llm_settings = ai_generation_service._settings(workspace_settings_service.ai_model(db))
+        provider = llm.provider_for(llm_settings)
+    except (ai_generation_service.AnalysisGenerationError, llm.LLMError):
         raise HTTPException(status_code=503, detail="AI generation is not configured") from None
     minimum, maximum = _RANGES[request.length]
     prompt = {"description": description, "evaluation_type": request.evaluation_type,
               "language": request.language or "Use the description's language",
               "question_count": {"minimum": minimum, "maximum": maximum},
               "available_sections": [item.name for item in sections][:100]}
-    try:
-        # The user waits for the draft, so only one automatic retry of transient failures.
-        client = OpenAI(api_key=key, timeout=timeout, max_retries=FORM_RETRIES)
-    except Exception:
-        raise HTTPException(status_code=503, detail="AI generation is unavailable; please retry") from None
     feedback: str | None = None
-    trace = ai_trace.GenerationTrace(model=model, prompt_name="form-generation", prompt_text="",
-                                     parameters={"max_output_tokens": configured_tokens, "retries": FORM_RETRIES,
-                                                 **ai_generation_service.sampling_options(model, FORM_TEMPERATURE)})
+    trace = ai_trace.GenerationTrace(model=llm_settings.model, prompt_name="form-generation", prompt_text="",
+                                     parameters={"provider": provider.name, "max_output_tokens": llm_settings.max_output_tokens,
+                                                 "retries": FORM_RETRIES, **provider.sampling(FORM_TEMPERATURE)})
     for _attempt in range(3):
         messages = [{"role": "developer", "content": _INSTRUCTIONS}]
         if feedback:
             messages.append({"role": "developer", "content": "The previous draft did not pass validation: " + feedback[:600]
                              + ". Generate a complete corrected draft with the SAME original description, language, evaluation type and question count range."})
-        messages.append({"role": "user", "content": json.dumps(prompt, ensure_ascii=False)})
+        instructions = [message["content"] for message in messages]
         try:
-            result = client.responses.parse(model=model, input=messages, store=False,
-                                            **ai_generation_service.sampling_options(model, FORM_TEMPERATURE),
-                                            text_format=_Generated, max_output_tokens=configured_tokens)
-            trace.prompt_text = "\n\n".join(message["content"] for message in messages if message["role"] == "developer")
-            trace.add_usage(result)
-            generated = _Generated.model_validate(result.output_parsed)
-        except APITimeoutError:
-            raise HTTPException(status_code=504, detail="AI generation timed out; please retry") from None
-        except RateLimitError:
-            raise HTTPException(status_code=429, detail="AI generation is temporarily rate limited") from None
-        except ValidationError as error:
-            locations = [".".join(str(part) for part in item["loc"] if isinstance(part, (str, int)))
-                         for item in error.errors()[:3]]
-            feedback = "Structured fields are missing or have invalid types at: " + ", ".join(locations)
+            # The user waits for the draft, so only one automatic retry of transient failures.
+            result = provider.generate_structured(instructions=instructions,
+                                                  user=json.dumps(prompt, ensure_ascii=False), schema=_Generated,
+                                                  temperature=FORM_TEMPERATURE, retries=FORM_RETRIES)
+            trace.prompt_text = "\n\n".join(instructions)
+            trace.add_result(result)
+            if result.parsed is None:
+                raise llm.LLMError("refused")
+            generated = result.parsed
+        except llm.LLMError as error:
+            if error.category == "timeout":
+                raise HTTPException(status_code=504, detail="AI generation timed out; please retry") from None
+            if error.category == "rate_limited":
+                raise HTTPException(status_code=429, detail="AI generation is temporarily rate limited") from None
+            if error.category not in {"invalid_output", "refused"}:
+                raise HTTPException(status_code=503, detail="AI provider is unavailable; please retry") from None
+            feedback = ("Structured fields are missing or have invalid types at: " + ", ".join(error.detail) if error.detail
+                        else "Return all required structured fields with valid types and one of the supported question types")
             continue
-        except (ValueError, TypeError):
-            feedback = "Return all required structured fields with valid types and one of the supported question types"
-            continue
-        except APIError:
-            raise HTTPException(status_code=503, detail="AI provider is unavailable; please retry") from None
-        except Exception:
-            raise HTTPException(status_code=503, detail="AI generation is unavailable; please retry") from None
         try:
             draft = _normalize(generated, minimum, maximum, sections)
             if validate_draft is not None:

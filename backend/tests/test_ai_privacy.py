@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from integrations.llm import openai_provider
 from services import ai_generation_service
 from services import ai_workflow_service
 
@@ -25,7 +26,7 @@ def test_analysis_requests_are_not_stored_at_the_provider(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_ANALYSIS_MODEL", "test-model")
-    monkeypatch.setattr(ai_generation_service, "OpenAI", FakeClient)
+    monkeypatch.setattr(openai_provider, "OpenAI", FakeClient)
     with pytest.raises(Exception):
         ai_generation_service._request_analysis({"scope": "employee", "facts": []})
     client, request = calls
@@ -39,7 +40,7 @@ def test_analysis_requests_are_not_stored_at_the_provider(monkeypatch):
     ("GPT-5-mini", False),
 ])
 def test_temperature_only_for_models_that_accept_it(model, has_temperature):
-    assert ("temperature" in ai_generation_service.sampling_options(model, 0.2)) is has_temperature
+    assert ("temperature" in openai_provider.sampling_options(model, 0.2)) is has_temperature
 
 
 @pytest.mark.parametrize(("model", "pinned"), [
@@ -87,15 +88,17 @@ def test_request_records_model_prompt_parameters_and_tokens(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_ANALYSIS_MODEL", "gpt-4.1-2025-04-14")
-    monkeypatch.setattr(ai_generation_service, "OpenAI", FakeClient)
+    monkeypatch.setattr(openai_provider, "OpenAI", FakeClient)
     trace = ai_trace.GenerationTrace(model="", prompt_name="employee-analysis", prompt_text="")
     for _attempt in range(2):  # a first try and a correction both count
         with pytest.raises(ai_generation_service.AnalysisGenerationError):
             ai_generation_service._request_analysis({"scope": "employee", "facts": []}, instructions="Rules.", trace=trace)
     assert trace.model == "gpt-4.1-2025-04-14"
     assert trace.prompt_text == "Rules."
-    assert trace.parameters == {"max_output_tokens": 2048, "retries": 2, "temperature": 0.2}
-    assert trace.usage == {"input_tokens": 2400, "output_tokens": 600, "attempts": 2}
+    assert trace.parameters == {"provider": "openai", "max_output_tokens": 2048, "retries": 2, "temperature": 0.2}
+    assert {key: trace.usage[key] for key in ("input_tokens", "output_tokens", "attempts")} == {
+        "input_tokens": 2400, "output_tokens": 600, "attempts": 2}
+    assert isinstance(trace.usage["latency_ms"], int)
 
 
 def test_prompt_text_is_stored_once_and_audit_keeps_metadata_only():

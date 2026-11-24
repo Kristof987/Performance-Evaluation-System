@@ -1,6 +1,5 @@
 """Workspace-wide settings: privacy thresholds, AI features, permission grants and the audit log."""
 
-import os
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -9,7 +8,7 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
-from integrations import email_service
+from integrations import email_service, llm
 
 
 SCOPE = "default"
@@ -358,8 +357,8 @@ def ai_workspace_status(db: Session) -> schemas.AIWorkspaceStatus:
     settings = get_settings(db)
     return schemas.AIWorkspaceStatus(
         **settings.model_dump(),
-        default_model=os.getenv("OPENAI_ANALYSIS_MODEL", "").strip() or None,
-        api_key_configured=bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        default_model=llm.configured_model(),
+        api_key_configured=llm.api_key_configured(),
     )
 
 

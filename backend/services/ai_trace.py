@@ -1,4 +1,4 @@
-"""What produced each AI result: model, prompt version, parameters and token usage.
+"""What produced each AI result: provider, model, prompt version, parameters, token usage and time.
 
 A prompt's version is a hash of the exact text sent, so it changes by itself whenever the
 prompt changes. The full text is kept once per version so any result can be traced back to it.
@@ -24,19 +24,18 @@ class GenerationTrace:
     prompt_name: str
     prompt_text: str
     parameters: dict = field(default_factory=dict)
-    usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "attempts": 0})
+    usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "attempts": 0, "latency_ms": 0})
 
     @property
     def prompt_version(self) -> str:
         return prompt_version(self.prompt_name, self.prompt_text)
 
-    def add_usage(self, response) -> None:
-        usage = getattr(response, "usage", None)
+    def add_result(self, result) -> None:
+        """Count one provider call (an llm.StructuredResult) toward the totals."""
         self.usage["attempts"] += 1
-        for key in ("input_tokens", "output_tokens"):
-            value = getattr(usage, key, None)
-            if isinstance(value, int):
-                self.usage[key] += value
+        self.usage["input_tokens"] += result.input_tokens
+        self.usage["output_tokens"] += result.output_tokens
+        self.usage["latency_ms"] = self.usage.get("latency_ms", 0) + result.latency_ms
 
 
 def register_prompt(db: Session, trace: GenerationTrace) -> str:

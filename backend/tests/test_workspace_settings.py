@@ -192,10 +192,10 @@ def test_ai_switch_and_capabilities(db):
 def test_model_override_wins_over_environment(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_ANALYSIS_MODEL", "env-model")
-    assert ai_generation_service._configuration()[1] == "env-model"
+    assert ai_generation_service._settings().model == "env-model"
     with ai_generation_service.model_override("workspace-model"):
-        assert ai_generation_service._configuration()[1] == "workspace-model"
-    assert ai_generation_service._configuration("explicit-model")[1] == "explicit-model"
+        assert ai_generation_service._settings().model == "workspace-model"
+    assert ai_generation_service._settings("explicit-model").model == "explicit-model"
 
 
 def test_workspace_routes_require_authentication():

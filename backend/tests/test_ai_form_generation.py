@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from database import SessionLocal
+from integrations.llm import openai_provider
 from services import ai_form_generation_service as generation
 from services import workspace_settings_service
 import schemas
@@ -54,7 +55,7 @@ def provider(monkeypatch):
             return SimpleNamespace(output_parsed=draft(), usage=SimpleNamespace(input_tokens=10, output_tokens=20))
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr(generation, "OpenAI", FakeClient)
+    monkeypatch.setattr(openai_provider, "OpenAI", FakeClient)
     monkeypatch.setattr(workspace_settings_service, "ai_model", lambda _db: "workspace-model")
     return calls
 

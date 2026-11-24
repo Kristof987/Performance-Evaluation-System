@@ -36,6 +36,12 @@ services:
       APP_TIMEZONE: Europe/Budapest
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_ANALYSIS_MODEL: ${OPENAI_ANALYSIS_MODEL}
+      # Optional: another provider (openai | openai_compatible | anthropic | gemini); empty keeps OpenAI.
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_JSON_MODE: ${AI_JSON_MODE:-}
       COMPASS_RUNTIME_ENV: local
       COMPASS_AI_DIAGNOSTICS: "1"
       SMTP_HOST: mailpit

@@ -7,8 +7,6 @@ Evidence IDs are citations, never credentials for retrieving the underlying answ
 import json
 import hashlib
 import logging
-import math
-import os
 import re
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -16,10 +14,10 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
-from openai import APIError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from integrations import llm
 import models
 from services import ai_local_diagnostics
 from services import ai_trace
@@ -409,14 +407,15 @@ def model_override(model: str | None):
         _model_override.reset(token)
 
 
-# Reasoning models (o-series, GPT-5 family) reject sampling parameters such as temperature.
-_REASONING_MODEL = re.compile(r"^(?:o\d|gpt-5)", re.I)
 _DATED_MODEL = re.compile(r"-\d{4}-\d{2}-\d{2}$")
 
-
-def sampling_options(model: str, temperature: float) -> dict[str, float]:
-    """A low temperature keeps repeated runs on the same facts close, where the model supports it."""
-    return {} if _REASONING_MODEL.match(model.strip()) else {"temperature": temperature}
+# Provider failures, as the analysis workflow names them.
+_LLM_ERRORS = {
+    "not_configured": "analysis_not_configured", "invalid_configuration": "invalid_analysis_configuration",
+    "timeout": "analysis_timeout", "rate_limited": "analysis_rate_limited",
+    "unavailable": "analysis_provider_unavailable", "invalid_output": "invalid_analysis_output",
+    "refused": "analysis_refused_or_empty",
+}
 
 
 def is_pinned_model(model: str) -> bool:
@@ -424,19 +423,29 @@ def is_pinned_model(model: str) -> bool:
     return bool(_DATED_MODEL.search(model.strip()))
 
 
-def _configuration(model: str | None = None) -> tuple[str, str, float, int]:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    model = (model or _model_override.get() or os.getenv("OPENAI_ANALYSIS_MODEL", "")).strip()
-    if not key or not model:
-        raise AnalysisGenerationError("analysis_not_configured")
+def _settings(model: str | None = None) -> llm.LLMSettings:
+    """The active provider's settings; the workspace may choose the model within that provider."""
     try:
-        timeout = float(os.getenv("OPENAI_ANALYSIS_TIMEOUT_SECONDS", "30"))
-        max_tokens = int(os.getenv("OPENAI_ANALYSIS_MAX_OUTPUT_TOKENS", "2048"))
-    except ValueError:
-        raise AnalysisGenerationError("invalid_analysis_configuration") from None
-    if not math.isfinite(timeout) or not 5 <= timeout <= 120 or not 256 <= max_tokens <= 4096:
-        raise AnalysisGenerationError("invalid_analysis_configuration")
-    return key, model, timeout, max_tokens
+        return llm.settings(model or _model_override.get())
+    except llm.LLMError as error:
+        raise AnalysisGenerationError(_LLM_ERRORS[error.category]) from None
+
+
+def _call_model(llm_settings: llm.LLMSettings, instructions: list[str], user: str, schema, *,
+                temperature: float, retries: int, trace: ai_trace.GenerationTrace | None = None):
+    """One structured call through the active provider; the trace records what produced it."""
+    try:
+        provider = llm.provider_for(llm_settings)
+        result = provider.generate_structured(instructions=instructions, user=user, schema=schema,
+                                              temperature=temperature, retries=retries)
+    except llm.LLMError as error:
+        raise AnalysisGenerationError(_LLM_ERRORS[error.category]) from None
+    if trace is not None:
+        trace.model = result.model
+        trace.parameters = {"provider": result.provider, "max_output_tokens": llm_settings.max_output_tokens,
+                            "retries": retries, **provider.sampling(temperature)}
+        trace.add_result(result)
+    return result
 
 
 def _released(statistics: QuantitativeStatistics) -> dict[str, Any] | None:
@@ -912,7 +921,7 @@ ANALYSIS_RETRIES = 2
 def _request_analysis(payload: dict[str, Any], *, correction_category: str | None = None,
                       instructions: str = _INSTRUCTIONS,
                       trace: ai_trace.GenerationTrace | None = None) -> tuple[GeneratedAnalysis, str]:
-    key, model, timeout, max_tokens = _configuration()
+    llm_settings = _settings()
     serialized = json.dumps(payload, ensure_ascii=False)
     if len(serialized.encode("utf-8")) > 100_000:
         raise AnalysisGenerationError("analysis_context_too_large")
@@ -935,41 +944,14 @@ def _request_analysis(payload: dict[str, Any], *, correction_category: str | Non
             "Omit unsupported findings; the overall finding must cite a valid fact."
             + consistency_guidance
         )})
-    try:
-        # Runs in the background worker, so transient timeouts and rate limits can be retried with backoff.
-        client = OpenAI(api_key=key, timeout=timeout, max_retries=ANALYSIS_RETRIES)
-        response = client.responses.parse(
-            model=model,
-            input=[*messages, {"role": "user", "content": serialized}],
-            text_format=GeneratedAnalysis,
-            max_output_tokens=max_tokens,
-            **sampling_options(model, ANALYSIS_TEMPERATURE),
-            store=False,  # Evaluation data must not be kept as application state at the provider.
-        )
-        if trace is not None:
-            trace.model = model
-            trace.prompt_text = "\n\n".join(message["content"] for message in messages)
-            trace.parameters = {"max_output_tokens": max_tokens, "retries": ANALYSIS_RETRIES,
-                                **sampling_options(model, ANALYSIS_TEMPERATURE)}
-            trace.add_usage(response)
-        parsed = response.output_parsed
-    except APITimeoutError:
-        raise AnalysisGenerationError("analysis_timeout") from None
-    except RateLimitError:
-        raise AnalysisGenerationError("analysis_rate_limited") from None
-    except (ValidationError, ValueError):
-        raise AnalysisGenerationError("invalid_analysis_output") from None
-    except APIError:
-        raise AnalysisGenerationError("analysis_provider_unavailable") from None
-    except Exception:
-        # SDK parsing and transport failures must not expose HR data or provider messages.
-        raise AnalysisGenerationError("analysis_provider_unavailable") from None
-    if parsed is None:
+    if trace is not None:
+        trace.prompt_text = "\n\n".join(message["content"] for message in messages)
+    # Runs in the background worker, so transient timeouts and rate limits can be retried with backoff.
+    result = _call_model(llm_settings, [message["content"] for message in messages], serialized, GeneratedAnalysis,
+                         temperature=ANALYSIS_TEMPERATURE, retries=ANALYSIS_RETRIES, trace=trace)
+    if result.parsed is None:
         raise AnalysisGenerationError("analysis_refused_or_empty")
-    try:
-        return GeneratedAnalysis.model_validate(parsed), model
-    except (ValidationError, ValueError):
-        raise AnalysisGenerationError("invalid_analysis_output") from None
+    return result.parsed, llm_settings.model
 
 
 def _log_validation_failure(error: AnalysisGenerationError, analysis: GeneratedAnalysis,
@@ -1149,24 +1131,22 @@ def translate_analysis(analysis: EmployeeAIAnalysis, language: str, *, comments:
     """
     if language not in LANGUAGE_NAMES:
         return analysis
-    key, model, timeout, max_tokens = _configuration()
+    llm_settings = _settings()
     instructions = _TRANSLATION_INSTRUCTIONS.format(language=LANGUAGE_NAMES[language])
     for _attempt in range(2):
         try:
-            client = OpenAI(api_key=key, timeout=timeout, max_retries=ANALYSIS_RETRIES)
-            response = client.responses.parse(
-                model=model,
-                input=[{"role": "developer", "content": instructions},
-                       {"role": "user", "content": json.dumps(_translation_payload(analysis), ensure_ascii=False)}],
-                text_format=TranslatedAnalysis, max_output_tokens=max_tokens,
-                **sampling_options(model, ANALYSIS_TEMPERATURE), store=False)
+            result = llm.provider_for(llm_settings).generate_structured(
+                instructions=[instructions], user=json.dumps(_translation_payload(analysis), ensure_ascii=False),
+                schema=TranslatedAnalysis, temperature=ANALYSIS_TEMPERATURE, retries=ANALYSIS_RETRIES)
             if trace is not None:
-                trace.add_usage(response)
-            if response.output_parsed is None:
+                trace.add_result(result)
+            if result.parsed is None:
                 continue
-            return _apply_translation(analysis, TranslatedAnalysis.model_validate(response.output_parsed), language, comments or [])
+            return _apply_translation(analysis, result.parsed, language, comments or [])
         except AnalysisGenerationError as error:
             logger.warning("AI analysis translation rejected: category=%s", error.category)
+        except llm.LLMError as error:
+            logger.warning("AI analysis translation failed: category=%s", error.category)
         except Exception:
             logger.warning("AI analysis translation failed: category=provider_or_output")
     return analysis
