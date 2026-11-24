@@ -809,7 +809,8 @@ export default function People() {
   const canManageGroups = permissions.includes('groups.manage');
   const canManageEmployees = permissions.includes('employees.manage') && canManageGroups;
   const canAssignRoles = permissions.includes('roles.assign');
-  const canImportEmployees = canManageEmployees && canAssignRoles;
+  // The System Role column is optional; only filling it in with another role needs roles.assign.
+  const canImportEmployees = canManageEmployees;
   const currentUser = auth0User;
   const confirm = useConfirm();
   const toast = useToast();
@@ -2327,7 +2328,7 @@ export default function People() {
             >
               <ImportPanel
                 title="Upload Excel file"
-                description="Use the .xlsx template: name, email, company role and system role, one employee per row. Its Instructions sheet explains each column. Up to 1000 rows, 2 MB."
+                description={`Use the .xlsx template: name, email, company role and system role, one employee per row. ${canAssignRoles ? 'Leave the system role empty to add people as Employee.' : 'Leave the system role empty: people are added as Employee, and only users allowed to assign roles can choose another one.'} Its Instructions sheet explains each column. Up to 1000 rows, 2 MB.`}
                 file={employeeImportFile}
                 message={employeeImportMessage}
                 errors={employeeImportErrors}

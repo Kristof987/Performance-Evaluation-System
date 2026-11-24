@@ -22,6 +22,9 @@ from services import (
 email_validator = TypeAdapter(schemas.EmailStr)
 
 
+# New people get this system role unless someone allowed to assign roles chooses another.
+DEFAULT_SYSTEM_ROLE = "Employee"
+
 EMPLOYEE_IMPORT_HEADERS = [
     "Employee Name",
     "Employee Email Address",
@@ -188,7 +191,7 @@ def create_people_employee(*, employee: schemas.PeopleEmployeeCreate, db: Sessio
     used = {username for (username,) in db.query(models.User.username).all()}
     try:
         company_role = get_or_create_company_role(role_name, db)
-        system_role = db.query(models.SystemRole).filter(models.SystemRole.name == "Employee").first()
+        system_role = db.query(models.SystemRole).filter(models.SystemRole.name == DEFAULT_SYSTEM_ROLE).first()
         if system_role is None:
             raise HTTPException(status_code=500, detail="Employee system role is unavailable")
         new_user = models.User(
@@ -603,9 +606,16 @@ def import_people_employees(*, file: UploadFile, db: Session, actor: models.User
         for (email,) in db.query(models.User.email).all()
     }
     actor_permissions = workspace_settings_service.role_permissions(db, actor.system_role_id)
-    # Importing must not hand out more access than the importer holds.
-    system_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()
-                    if workspace_settings_service.role_permissions(db, role.id) <= actor_permissions}
+    all_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()}
+    default_role = all_roles.get(DEFAULT_SYSTEM_ROLE.casefold())
+    if default_role is None:
+        raise HTTPException(status_code=500, detail="Employee system role is unavailable")
+    # Like adding one person, an empty System Role means Employee. Any other role is a role
+    # assignment, so it needs roles.assign and never more access than the importer holds.
+    can_assign = "roles.assign" in actor_permissions
+    system_roles = {name: role for name, role in all_roles.items()
+                    if can_assign and workspace_settings_service.role_permissions(db, role.id) <= actor_permissions}
+    system_roles[DEFAULT_SYSTEM_ROLE.casefold()] = default_role
 
     for row_number, values in import_rows:
         name = str(values[0]).strip() if values[0] is not None else ""
@@ -625,9 +635,12 @@ def import_people_employees(*, file: UploadFile, db: Session, actor: models.User
         if company_role_name == "":
             errors.append(f"Row {row_number}: Employee Company Role is required.")
         if system_role_name == "":
-            errors.append(f"Row {row_number}: Employee System Role is required.")
+            system_role_name = DEFAULT_SYSTEM_ROLE
+        elif system_role_name.casefold() not in all_roles:
+            errors.append(f"Row {row_number}: Employee System Role “{system_role_name}” does not exist.")
         elif system_role_name.casefold() not in system_roles:
-            errors.append(f"Row {row_number}: Employee System Role must be an existing system role you are allowed to assign.")
+            errors.append(f"Row {row_number}: You are not allowed to assign the “{system_role_name}” system role. "
+                          f"Leave the column empty to add the employee as {DEFAULT_SYSTEM_ROLE}.")
 
         email_key = email.lower()
         if email_key != "" and email_key in seen_emails:

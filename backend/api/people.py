@@ -97,6 +97,5 @@ def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get
 
 @router.post("/people/employees/import", response_model=schemas.PeopleEmployeeImportResponse)
 def import_people_employees(file: UploadFile = File(...), db: Session = Depends(get_db),
-                            actor: models.User = Depends(require_permission("employees.manage")),
-                            _role_assigner: models.User = Depends(require_permission("roles.assign"))):
+                            actor: models.User = Depends(require_permission("employees.manage"))):
     return people_service.import_people_employees(file=file, db=db, actor=actor)
