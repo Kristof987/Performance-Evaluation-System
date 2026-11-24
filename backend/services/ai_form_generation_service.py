@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from services import ai_generation_service
 from services import ai_trace
+from services import workspace_settings_service
 import models
 import schemas
 
