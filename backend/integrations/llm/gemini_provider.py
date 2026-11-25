@@ -1,10 +1,29 @@
 """Google Gemini through the google-genai SDK, with a JSON schema for the response."""
+import logging
 import time
 
 from google import genai
 from google.genai import errors, types
 
 from integrations.llm.base import LLMError, LLMSettings, StructuredResult, validated
+
+logger = logging.getLogger(__name__)
+
+# Gemini compiles the response schema into a decoding constraint and rejects one that grows too large
+# ("too many states for serving"); length and count limits on nested arrays are what make it grow.
+# They are left out of the request only: validated() still enforces every limit on the response.
+_SIZE_LIMITS = frozenset({"maxLength", "minLength", "maxItems", "minItems"})
+# The request itself is wrong (schema, key, permission, model name): retrying cannot help.
+_CONFIGURATION_CODES = frozenset({400, 401, 403, 404})
+
+
+def serving_schema(schema: object) -> object:
+    """The response schema without length and count limits, at every level."""
+    if isinstance(schema, dict):
+        return {key: serving_schema(value) for key, value in schema.items() if key not in _SIZE_LIMITS}
+    if isinstance(schema, list):
+        return [serving_schema(item) for item in schema]
+    return schema
 
 
 class GeminiProvider:
@@ -28,14 +47,19 @@ class GeminiProvider:
                 config=types.GenerateContentConfig(
                     system_instruction="\n\n".join(instructions),
                     response_mime_type="application/json",
-                    response_json_schema=schema.model_json_schema(),
+                    response_json_schema=serving_schema(schema.model_json_schema()),
                     max_output_tokens=self.settings.max_output_tokens,
                     **self.sampling(temperature),
                 ),
             )
         except errors.APIError as error:
+            # Only the code and status name are logged: the message may echo the evaluation data sent.
+            logger.warning("Gemini request failed: code=%s status=%s model=%s",
+                           error.code, getattr(error, "status", None), self.settings.model)
             if error.code == 429:
                 raise LLMError("rate_limited") from None
+            if error.code in _CONFIGURATION_CODES:
+                raise LLMError("invalid_configuration") from None
             raise LLMError("timeout" if error.code in (408, 504) else "unavailable") from None
         except Exception as error:
             # The SDK's transport raises its HTTP library's timeout types.

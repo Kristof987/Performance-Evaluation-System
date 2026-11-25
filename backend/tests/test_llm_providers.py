@@ -3,7 +3,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from integrations import llm
 from integrations.llm import anthropic_provider, gemini_provider, openai_compatible, openai_provider
@@ -154,6 +154,8 @@ def test_json_object_mode_puts_the_schema_in_the_instructions(monkeypatch):
     (None, "I can't help with that", "stop", "refused"),
     ("", None, "stop", "refused"),
     ('{"verdict": "ok"', None, "length", "invalid_output"),
+    (None, None, "length", "invalid_output"),  # a reasoning model that thought until the limit
+    ("", None, "length", "invalid_output"),
     ('{"verdict": "ok", "score": "high"}', None, "stop", "invalid_output"),
 ])
 def test_compatible_server_failures_are_categorised(monkeypatch, content, refusal, finish, category):
@@ -267,6 +269,9 @@ def test_gemini_asks_for_json_that_follows_the_schema(monkeypatch):
     ({"error": FakeGeminiAPIError(429)}, "rate_limited"),
     ({"error": FakeGeminiAPIError(504)}, "timeout"),
     ({"error": FakeGeminiAPIError(500)}, "unavailable"),
+    ({"error": FakeGeminiAPIError(400)}, "invalid_configuration"),  # e.g. a schema Gemini cannot serve
+    ({"error": FakeGeminiAPIError(403)}, "invalid_configuration"),
+    ({"error": FakeGeminiAPIError(404)}, "invalid_configuration"),
     ({"error": type("ReadTimeout", (Exception,), {})()}, "timeout"),
     ({"text": None, "block": "SAFETY"}, "refused"),
     ({"text": '{"verdict"', "finish": "MAX_TOKENS"}, "invalid_output"),
@@ -275,6 +280,48 @@ def test_gemini_asks_for_json_that_follows_the_schema(monkeypatch):
 def test_gemini_failures_are_categorised(monkeypatch, options, category):
     gemini_sdk(monkeypatch, **options)
     fails_with(category, llm.provider_for(settings("gemini")))
+
+
+class Limited(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[str] = Field(max_length=2)
+    label: str = Field(min_length=1, max_length=5)
+
+
+def test_gemini_gets_the_schema_without_size_limits_but_the_response_is_still_checked(monkeypatch):
+    calls = gemini_sdk(monkeypatch, text=json.dumps({"items": ["a", "b", "c"], "label": "ok"}))
+    provider = llm.provider_for(settings("gemini"))
+    with pytest.raises(llm.LLMError) as error:
+        provider.generate_structured(instructions=["x"], user="y", schema=Limited, temperature=0.2, retries=0)
+    sent = json.dumps(calls[1]["config"].response_json_schema)
+    assert not any(word in sent for word in ("maxItems", "minItems", "maxLength", "minLength"))
+    assert error.value.category == "invalid_output"  # three items: the limit still applies to the answer
+
+
+def test_the_analysis_schemas_lose_only_their_size_limits():
+    from services.ai_analysis_models import GeneratedAnalysis
+    original = GeneratedAnalysis.model_json_schema()
+    relaxed = gemini_provider.serving_schema(original)
+    assert relaxed["required"] == original["required"] and relaxed["$defs"].keys() == original["$defs"].keys()
+    assert "maxItems" not in json.dumps(relaxed) and "enum" in json.dumps(relaxed)
+
+
+@pytest.mark.parametrize("status, category", [(400, "invalid_configuration"), (401, "invalid_configuration"),
+                                              (404, "invalid_configuration"), (503, "unavailable")])
+def test_compatible_server_status_errors_are_categorised(monkeypatch, status, category):
+    import httpx
+    from openai import APIStatusError
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kwargs):
+            request = httpx.Request("POST", "https://x/chat/completions")
+            raise APIStatusError("failed", response=httpx.Response(status, request=request), body=None)
+
+    monkeypatch.setattr(openai_compatible, "OpenAI", FakeClient)
+    fails_with(category, llm.provider_for(settings("openai_compatible", base_url="https://x")))
 
 
 def test_unknown_providers_are_rejected():

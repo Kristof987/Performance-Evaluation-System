@@ -5,12 +5,17 @@ the schema itself and asking for a plain JSON object with the schema in the inst
 Either way the answer is validated against our own schema.
 """
 import json
+import logging
 import time
 
-from openai import APIError, APITimeoutError, OpenAI, RateLimitError
+from openai import APIError, APIStatusError, APITimeoutError, OpenAI, RateLimitError
 from openai.lib._pydantic import to_strict_json_schema
 
 from integrations.llm.base import LLMError, LLMSettings, StructuredResult, validated
+
+logger = logging.getLogger(__name__)
+# The request itself is wrong (format, key, permission, model name): retrying cannot help.
+_CONFIGURATION_CODES = frozenset({400, 401, 403, 404})
 
 
 class OpenAICompatibleProvider:
@@ -48,16 +53,21 @@ class OpenAICompatibleProvider:
             raise LLMError("timeout") from None
         except RateLimitError:
             raise LLMError("rate_limited") from None
+        except APIStatusError as error:
+            # Only the status code is logged: the server's message may echo the evaluation data sent.
+            logger.warning("OpenAI-compatible request failed: code=%s model=%s", error.status_code, self.settings.model)
+            raise LLMError("invalid_configuration" if error.status_code in _CONFIGURATION_CODES else "unavailable") from None
         except APIError:
             raise LLMError("unavailable") from None
         except Exception:
             raise LLMError("unavailable") from None
         choice = response.choices[0] if response.choices else None
         message = choice.message if choice is not None else None
+        # Checked first: a reasoning model can spend the whole budget thinking and return no content at all.
+        if choice is not None and choice.finish_reason == "length":
+            raise LLMError("invalid_output", ["output was cut off at the token limit"])
         if message is None or getattr(message, "refusal", None) or not message.content:
             raise LLMError("refused")
-        if choice.finish_reason == "length":
-            raise LLMError("invalid_output", ["output was cut off at the token limit"])
         usage = response.usage
         return StructuredResult(
             parsed=validated(schema, message.content), provider=self.name, model=self.settings.model,
