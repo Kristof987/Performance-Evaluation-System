@@ -26,17 +26,6 @@ def get_report_campaigns(requester_user_id: int | None = Query(default=None), db
     return reporting_service.list_report_campaigns(actor, db)
 
 
-@router.get("/reports/campaigns/{campaign_id}/overview", response_model=schemas.CampaignReportOverviewResponse)
-def get_campaign_report_overview(
-    campaign_id: int,
-    requester_user_id: int | None = Query(default=None),
-    db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
-):
-    reject_conflicting_requester(requester_user_id, actor)
-    return reporting_service.build_campaign_report_overview(campaign_id, actor, db)
-
-
 @router.get("/reports/campaigns/{campaign_id}/dashboard", response_model=schemas.CampaignDashboardResponse)
 def get_campaign_report_dashboard(
     campaign_id: int,
@@ -73,18 +62,6 @@ def get_campaign_evaluation_quality(
 ):
     reject_conflicting_requester(requester_user_id, actor)
     return evaluation_quality_service.build_evaluation_quality(campaign_id, actor, db)
-
-
-@router.get("/reports/campaigns/{campaign_id}/sections/{section_id}/comparison", response_model=schemas.ReportSectionCohortComparison)
-def get_report_section_cohort_comparison(
-    campaign_id: int,
-    section_id: int,
-    requester_user_id: int | None = Query(default=None),
-    db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
-):
-    reject_conflicting_requester(requester_user_id, actor)
-    return reporting_service.build_section_cohort_comparison(campaign_id, section_id, actor, db)
 
 
 @router.get("/reports/campaigns/{campaign_id}/rating-distribution", response_model=schemas.ReportRatingDistributionResponse)

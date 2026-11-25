@@ -43,13 +43,6 @@ def iter_snapshot_questions(structure: list[dict[str, Any]]):
             yield item
 
 
-def snapshot_questions(filled_form: models.FilledForm, form: models.Form | None = None) -> list[dict[str, Any]]:
-    snapshot = filled_form.form_snapshot if isinstance(filled_form.form_snapshot, dict) else None
-    if snapshot is not None:
-        return snapshot["questions"] if isinstance(snapshot.get("questions"), list) else []
-    return form.questions if form is not None and isinstance(form.questions, list) else []
-
-
 def snapshot_form_name(filled_form: models.FilledForm, form: models.Form) -> str:
     snapshot = filled_form.form_snapshot if isinstance(filled_form.form_snapshot, dict) else None
     name = snapshot.get("form_name") if snapshot is not None else None

@@ -7,165 +7,9 @@ from business_calendar import business_date
 from models import CampaignStatus
 
 
-class FormStatusCreate(BaseModel):
-    name: str
-
-class CampaignEvaluationRuleCreate(BaseModel):
-    campaign_id: int
-    company_group_id: int
-    evaluator_role_id: int
-    evaluatee_role_id: int
-    form_id: int
-
-class CampaignEvaluationRuleCreate(BaseModel):
-    campaign_id: int
-    company_group_id: int
-    evaluator_role_id: int
-    evaluatee_role_id: int
-    form_id: int
-
-
-class CampaignEvaluationRuleResponse(BaseModel):
-    id: int
-    campaign_id: int
-    company_group_id: int
-    evaluator_role_id: int
-    evaluatee_role_id: int
-    form_id: int
-    updated_at: datetime
-
-    model_config = {
-        "from_attributes": True
-    }
-
-class CampaignEvaluationRuleResponse(BaseModel):
-    id: int
-    campaign_id: int
-    company_group_id: int
-    evaluator_role_id: int
-    evaluatee_role_id: int
-    form_id: int
-    updated_at: datetime
-
-    model_config = {
-        "from_attributes": True
-    }
-
-class FormStatusResponse(BaseModel):
-    id: int
-    name: str
-
-    model_config = {
-        "from_attributes": True
-    }
-
-
-class FilledFormCreate(BaseModel):
-    campaign_id: int
-    company_group_id: int | None = None
-    evaluator_id: int
-    evaluatee_id: int
-    form_id: int
-    status_id: int
-    finish_date: date | None = None
-    answers: list[dict[str, Any]]
-
-
-class FilledFormResponse(BaseModel):
-    id: int
-    campaign_id: int
-    company_group_id: int | None = None
-    evaluator_id: int
-    evaluatee_id: int
-    form_id: int
-    status_id: int
-    finish_date: date | None
-    answers: list[dict[str, Any]]
-    created_at: datetime
-
-    model_config = {
-        "from_attributes": True
-    }
-
-# --------------------
-# Company Role
-# --------------------
-
-class CompanyRoleCreate(BaseModel):
-    name: str
-    description: str | None = None
-
-
-class CompanyRoleResponse(BaseModel):
-    id: int
-    name: str
-    description: str | None
-
-    model_config = {
-        "from_attributes": True
-    }
-
-
-# --------------------
-# System Permission
-# --------------------
-
-class SystemPermissionCreate(BaseModel):
-    name: str
-    description: str | None = None
-
-
-class SystemPermissionResponse(BaseModel):
-    id: int
-    name: str
-    description: str | None
-
-    model_config = {
-        "from_attributes": True
-    }
-
-
-# --------------------
-# System Role
-# --------------------
-
-class SystemRoleCreate(BaseModel):
-    name: str
-    description: str | None = None
-
-
-class SystemRoleResponse(BaseModel):
-    id: int
-    name: str
-    description: str | None
-
-    model_config = {
-        "from_attributes": True
-    }
-
-
 # --------------------
 # User
 # --------------------
-
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    employee_id: int | None = None
-    full_name: str | None = None
-    email: EmailStr
-    company_role_id: int | None = None
-    role_name: str | None = None
-    system_role_id: int
-    profile_image_url: str | None = None
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-    last_login: datetime | None
-
-    model_config = {
-        "from_attributes": True
-    }
 
 
 class AuthEmployeeResponse(BaseModel):
@@ -753,61 +597,6 @@ class EvaluationQualityResponse(BaseModel):
     coverage: EvaluationQualityCoverage
 
 
-class ReportKpiSummary(BaseModel):
-    total_evaluations: int
-    completed_evaluations: int
-    completion_rate: int
-    submitted_evaluations: int
-    employees_evaluated: int
-    overall_score: float | None = None
-    overall_score_label: str
-    overall_score_context: str
-    overall_score_scale: str | None = None
-    overall_availability: Literal["available", "no_data", "suppressed"]
-
-
-class ReportSectionScore(BaseModel):
-    id: int
-    name: str
-    average_score: float | None = None
-    availability: Literal["available", "no_data", "suppressed"]
-    evaluatee_count: int
-    evaluator_count: int
-    question_count: int = 0
-
-
-class ReportGroupSummary(BaseModel):
-    group_id: int
-    group_name: str
-    employee_count: int
-    total_evaluations: int
-    completed_evaluations: int
-    completion_rate: int
-    average_score: float | None = None
-    score_availability: Literal["available", "no_data", "suppressed"]
-    average_score_context: str
-
-
-class ReportEmployeeOverview(BaseModel):
-    participating_employees: int
-    employees_with_completed_peer_feedback: int
-    employees_awaiting_peer_feedback: int
-    configured_self_evaluations: int
-    completed_self_evaluations: int
-
-
-class ReportDataNotes(BaseModel):
-    completed_definition: str
-    answer_storage: str
-    question_identity: str
-    historical_versions: str
-    section_policy: str
-    self_evaluation_policy: str
-    participant_deduplication: str
-    group_attribution: str
-    confidentiality: str
-
-
 class DashboardScore(BaseModel):
     score: float | None = None
     availability: Literal["available", "no_data", "suppressed"]
@@ -875,27 +664,6 @@ class CampaignDashboardResponse(BaseModel):
     roles: list[DashboardGroup] = []
     raters: list[DashboardRater] = []
     trend: list[DashboardTrendPoint]
-
-
-class CampaignReportOverviewResponse(BaseModel):
-    campaign: ReportCampaignOption
-    kpis: ReportKpiSummary
-    sections: list[ReportSectionScore]
-    groups: list[ReportGroupSummary]
-    employees: ReportEmployeeOverview
-    notes: ReportDataNotes
-
-
-class ReportSectionCohortScore(BaseModel):
-    id: int
-    name: str
-    average_score: float
-
-
-class ReportSectionCohortComparison(BaseModel):
-    section_id: int
-    groups: list[ReportSectionCohortScore]
-    roles: list[ReportSectionCohortScore]
 
 
 class ReportQuestionBucket(BaseModel):
@@ -1081,10 +849,6 @@ class SectionResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
-
-class CompanyGroupCreate(BaseModel):
-    name: str
-    description: str | None = None
 
 
 class CompanyGroupResponse(BaseModel):
@@ -1274,11 +1038,6 @@ class FormTemplateResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
-
-
-class FormValidationResponse(BaseModel):
-    valid_for_issuance: bool
-    errors: list[str] = Field(default_factory=list)
 
 
 class FormAIGenerateRequest(BaseModel):

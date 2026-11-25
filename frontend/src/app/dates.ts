@@ -10,9 +10,9 @@ import { usePreferences } from '../pages/settings/preferences-context';
  * - The user's date format (locale or ISO) and language preferences apply everywhere.
  */
 
-export const DEFAULT_TIME_ZONE = 'Europe/Budapest';
+const DEFAULT_TIME_ZONE = 'Europe/Budapest';
 
-export type DateSettings = { timeZone: string; iso: boolean; language: 'en' | 'hu' };
+type DateSettings = { timeZone: string; iso: boolean; language: 'en' | 'hu' };
 
 export const defaultDateSettings: DateSettings = { timeZone: DEFAULT_TIME_ZONE, iso: false, language: 'en' };
 
@@ -39,7 +39,7 @@ function parts(date: Date, timeZone: string) {
 }
 
 /** The calendar day ("YYYY-MM-DD") a value falls on in the business time zone. */
-export function calendarDay(value: string | Date, settings: DateSettings = defaultDateSettings): string | null {
+function calendarDay(value: string | Date, settings: DateSettings = defaultDateSettings): string | null {
   if (typeof value === 'string' && DAY_ONLY.test(value)) return value;
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) return null;
@@ -48,18 +48,12 @@ export function calendarDay(value: string | Date, settings: DateSettings = defau
 }
 
 /** Today in the business time zone. */
-export function businessToday(settings: DateSettings = defaultDateSettings): string {
+function businessToday(settings: DateSettings = defaultDateSettings): string {
   return calendarDay(new Date(), settings) ?? new Date().toISOString().slice(0, 10);
 }
 
-/** Whole calendar days from `from` to `to` (both "YYYY-MM-DD"); negative when `to` is earlier. */
-export function daysBetween(from: string, to: string): number {
-  const toUtc = (day: string) => { const [y, m, d] = day.split('-').map(Number); return Date.UTC(y, m - 1, d); };
-  return Math.round((toUtc(to) - toUtc(from)) / 86_400_000);
-}
-
 /** A calendar day: "18 Nov 2026", or "2026-11-18" with the ISO preference. Timestamps become their business day. */
-export function formatDay(value: string | null | undefined, settings: DateSettings = defaultDateSettings,
+function formatDay(value: string | null | undefined, settings: DateSettings = defaultDateSettings,
   { year = true, weekday = false, month = 'short' }: DayOptions = {}, empty = '—'): string {
   if (!value) return empty;
   const day = calendarDay(value, settings);
@@ -87,7 +81,7 @@ export function formatDateTime(value: string | null | undefined, settings: DateS
 }
 
 /** The current user's date settings: business time zone plus their format and language preferences. */
-export function useDateSettings(): DateSettings {
+function useDateSettings(): DateSettings {
   const { state } = useAppAuth();
   const { preferences } = usePreferences();
   const timeZone = state.status === 'authenticated' ? state.user.timezone ?? DEFAULT_TIME_ZONE : DEFAULT_TIME_ZONE;

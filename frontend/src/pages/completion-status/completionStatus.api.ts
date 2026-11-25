@@ -44,7 +44,7 @@ export type CompletionStatusResponse = {
   duplicate_assignment_count: number;
 };
 
-export type CompletionStatusQuery = {
+type CompletionStatusQuery = {
   search: string;
   status: string;
   overdueOnly: boolean;

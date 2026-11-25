@@ -307,14 +307,6 @@ def create_form(*, form: schemas.FormCreate, db: Session):
     return new_form
 
 
-def get_form_issuance_validation(*, form_id: int, db: Session):
-    form = db.query(models.Form).filter(models.Form.id == form_id).first()
-    if form is None:
-        raise HTTPException(status_code=404, detail="Form not found")
-    errors = form_issuance_errors(form.questions if isinstance(form.questions, list) else [], db)
-    return {"valid_for_issuance": not errors, "errors": errors}
-
-
 def create_form_template(*, template: schemas.FormCreate, db: Session):
     new_template = models.FormTemplate(**validate_form_like_payload(template, models.FormTemplate, db))
     db.add(new_template)

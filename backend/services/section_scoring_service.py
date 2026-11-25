@@ -11,7 +11,6 @@ from math import isfinite
 from statistics import mean
 from typing import Collection, Literal, Mapping, Sequence
 
-from sqlalchemy.orm import Session
 
 import models
 from services import reporting_service
@@ -198,15 +197,6 @@ def score_evaluation(assignment: models.FilledForm, *, status_name: str | None =
         {section_id: frozenset(keys) for section_id, keys in question_keys.items()},
         getattr(assignment, "evaluator_company_role_id", None), getattr(assignment, "evaluatee_company_role_id", None),
     )
-
-
-def load_submitted_evaluations(campaign_id: int, actor: models.User, db: Session) -> list[EvaluationSections]:
-    """Authorized, campaign-scoped loader; no public scoring endpoint is added."""
-    reporting_service.require_reports_access(campaign_id, actor, db)
-    rows = db.query(models.FilledForm, models.FormStatus.name).join(
-        models.FormStatus, models.FormStatus.id == models.FilledForm.status_id,
-    ).filter(models.FilledForm.campaign_id == campaign_id).all()
-    return [scored for assignment, status in rows if (scored := score_evaluation(assignment, status_name=status)) is not None]
 
 
 def _reviewer_sections(evaluations: Sequence[EvaluationSections], evaluatee_id: int) -> tuple[dict[int, dict[int, float]], dict[int, dict[int, float]]]:

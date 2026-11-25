@@ -10,7 +10,7 @@ export type WorkspaceSettings = {
   api_key_configured: boolean;
 };
 
-export type WorkspaceSettingsUpdate = Partial<Pick<WorkspaceSettings,
+type WorkspaceSettingsUpdate = Partial<Pick<WorkspaceSettings,
   'min_individual_peer_reviewers' | 'min_aggregate_evaluatees' | 'ai_enabled' | 'ai_model'>>;
 
 export type PermissionMatrix = {

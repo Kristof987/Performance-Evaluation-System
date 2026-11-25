@@ -43,13 +43,6 @@ def test_temperature_only_for_models_that_accept_it(model, has_temperature):
     assert ("temperature" in openai_provider.sampling_options(model, 0.2)) is has_temperature
 
 
-@pytest.mark.parametrize(("model", "pinned"), [
-    ("gpt-4.1-2025-04-14", True), ("gpt-4.1", False), ("o3-2025-04-16", True), ("gpt-4o-latest", False),
-])
-def test_dated_snapshots_count_as_pinned(model, pinned):
-    assert ai_generation_service.is_pinned_model(model) is pinned
-
-
 def test_drafts_are_only_visible_to_people_who_generate_or_approve(monkeypatch):
     draft, approved = SimpleNamespace(status="draft"), SimpleNamespace(status="approved")
     granted: set[str] = set()

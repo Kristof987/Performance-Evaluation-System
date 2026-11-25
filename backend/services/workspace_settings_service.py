@@ -276,9 +276,6 @@ def update_permission_matrix(actor: models.User, update: schemas.PermissionMatri
     return permission_matrix(db)
 
 
-AUDIT_CATEGORIES = ("lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts", "notifications")
-
-
 def audit_log(db: Session, *, category: str | None, campaign_id: int | None,
               limit: int, offset: int) -> schemas.AuditLogResponse:
     """Merge every audit source, newest first. Each source is capped at offset+limit rows."""
@@ -377,10 +374,3 @@ def put_workspace_reminder_defaults(*, update: schemas.WorkspaceReminderDefaults
     return {"default_reminder_days": days, "default_launch_email": update.default_launch_email,
             "email_configured": email_service.configured()}
 
-
-def get_ai_prompt_version(*, version: str, db: Session):
-    """The exact prompt text behind a prompt version shown on AI analyses and in the audit log."""
-    prompt = db.get(models.AIPromptVersion, version)
-    if prompt is None:
-        raise HTTPException(status_code=404, detail="Prompt version not found")
-    return {"version": prompt.version, "name": prompt.name, "content": prompt.content, "created_at": prompt.created_at}

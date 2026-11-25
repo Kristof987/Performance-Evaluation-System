@@ -45,14 +45,14 @@ export type EmployeeFormValues = {
   groupIds: number[];
 };
 
-export type EmployeeImportResult = {
+type EmployeeImportResult = {
   createdCount: number;
   errors: string[];
   invitationsSent: number;
   invitationErrors: string[];
 };
 
-export type GroupImportResult = {
+type GroupImportResult = {
   createdCount: number;
   errors: string[];
 };

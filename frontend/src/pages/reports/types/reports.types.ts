@@ -42,13 +42,6 @@ export type WrittenFeedbackResponse = {
   responses: string[];
 };
 
-export type WrittenFeedbackIndex = {
-  evaluation_type: 'peer' | 'self';
-  scope: 'campaign' | 'employee';
-  questions: Array<{ key: string; text: string; section_id: number | null; section_name: string; response_count: number }>;
-  evaluatees: Array<{ evaluatee_id: number; evaluatee_name: string }>;
-};
-
 export type RatingDistribution = {
   section_id: number | null;
   availability: 'available' | 'no_data' | 'suppressed';
@@ -104,21 +97,6 @@ export type EvaluationQualityReport = {
   };
 };
 
-export type ReportSectionComparison = { section_id: number; groups: Array<{ id: number; name: string; average_score: number }>; roles: Array<{ id: number; name: string; average_score: number }> };
-
-export type ReportKpiSummary = {
-  total_evaluations: number;
-  completed_evaluations: number;
-  completion_rate: number;
-  submitted_evaluations: number;
-  employees_evaluated: number;
-  overall_score: number | null;
-  overall_score_label: string;
-  overall_score_context: string;
-  overall_score_scale: string | null;
-  overall_availability: 'available' | 'no_data' | 'suppressed';
-};
-
 export type ReportSectionScore = {
   id: number;
   name: string;
@@ -128,25 +106,6 @@ export type ReportSectionScore = {
   evaluator_count: number;
   question_count?: number;
 };
-
-export type ReportGroupSummary = {
-  group_id: number;
-  group_name: string;
-  employee_count: number;
-  total_evaluations: number;
-  completed_evaluations: number;
-  completion_rate: number | null;
-  description?: string | null;
-  average_score: number | null;
-  score_availability: 'available' | 'no_data' | 'suppressed';
-  average_score_context: string;
-};
-
-export type GroupsReportGroupSummary = ReportGroupSummary & {
-  score_availability?: 'available' | 'no_data' | 'suppressed';
-  reportable_sections: number;
-};
-
 
 export type GroupReportDetail = {
   campaign: ReportCampaignOption;
@@ -249,36 +208,6 @@ export type EmployeeReportDetail = {
   notes: Record<string, string>;
 };
 export type EmployeeBenchmark = { overall: number | null; sections: Record<string, number | null> };
-
-export type ReportEmployeeOverview = {
-  participating_employees: number;
-  employees_with_completed_peer_feedback: number;
-  employees_awaiting_peer_feedback: number;
-  configured_self_evaluations: number;
-  completed_self_evaluations: number;
-};
-
-export type ReportDataNotes = Record<
-  | 'completed_definition'
-  | 'answer_storage'
-  | 'question_identity'
-  | 'historical_versions'
-  | 'section_policy'
-  | 'self_evaluation_policy'
-  | 'participant_deduplication'
-  | 'group_attribution'
-  | 'confidentiality',
-  string
->;
-
-export type CampaignReportOverview = {
-  campaign: ReportCampaignOption;
-  kpis: ReportKpiSummary;
-  sections: ReportSectionScore[];
-  groups: ReportGroupSummary[];
-  employees: ReportEmployeeOverview;
-  notes: ReportDataNotes;
-};
 
 export type ScoreAvailability = 'available' | 'no_data' | 'suppressed';
 export type DashboardScore = { score: number | null; availability: ScoreAvailability };

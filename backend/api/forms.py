@@ -70,12 +70,6 @@ def create_form(form: schemas.FormCreate, db: Session = Depends(get_db),
     return form_service.create_form(form=form, db=db)
 
 
-@router.get("/forms/{form_id}/validation", response_model=schemas.FormValidationResponse)
-def get_form_issuance_validation(form_id: int, db: Session = Depends(get_db),
-                                 _reader: models.User = Depends(require_permission("forms.read"))):
-    return form_service.get_form_issuance_validation(form_id=form_id, db=db)
-
-
 @router.post("/form-templates", response_model=schemas.FormTemplateResponse)
 def create_form_template(template: schemas.FormCreate, db: Session = Depends(get_db),
                          _manager: models.User = Depends(require_permission("forms.manage"))):

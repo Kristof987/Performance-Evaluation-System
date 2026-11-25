@@ -86,7 +86,7 @@ function mapIssuedBlocks(questions: Array<IssuedBlock | FormQuestion>): IssuedBl
     : { type: 'question' as const, question: item as FormQuestion });
 }
 
-export type EmployeeDashboardHistoryItem = {
+type EmployeeDashboardHistoryItem = {
   id: number;
   title: string;
   subtitle: string;
@@ -94,7 +94,7 @@ export type EmployeeDashboardHistoryItem = {
   occurredAt: string | null;
 };
 
-export type EmployeeDashboard = {
+type EmployeeDashboard = {
   currentDate: string;
   evaluations: AssignedEvaluation[];
   restrictedCampaigns: Array<{ campaignId: number; campaignName: string; status: 'paused' | 'closed' }>;

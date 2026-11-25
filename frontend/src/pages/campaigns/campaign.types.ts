@@ -93,7 +93,7 @@ export type CampaignRuleForm = {
   name: string;
 };
 
-export type CampaignRolePairRule = {
+type CampaignRolePairRule = {
   evaluatorRoleId: number;
   evaluatorRoleName: string;
   evaluateeRoleId: number;

@@ -17,7 +17,7 @@ import LoadError from '../../components/feedback/LoadError';
 import LoadingState from '../../components/feedback/LoadingState';
 import { useDates } from '../../app/dates';
 
-export function reportAvailability(campaign: ReportCampaignOption) {
+function reportAvailability(campaign: ReportCampaignOption) {
   if (campaign.campaign_status === 'review' || campaign.campaign_status === 'closed') return null;
   if (campaign.is_archived) return 'This paused campaign is archived. Its results are unavailable.';
   switch (campaign.campaign_status) {

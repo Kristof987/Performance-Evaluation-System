@@ -65,13 +65,6 @@ def delete_system_role(role_id: int, db: Session = Depends(get_db),
     return workspace_settings_service.delete_system_role(actor, role_id, db)
 
 
-@router.get("/workspace/ai-prompts/{version}")
-def get_ai_prompt_version(version: str, db: Session = Depends(get_db),
-                          _auditor: models.User = Depends(require_permission("audit.read"))):
-    """The exact prompt text behind a prompt version shown on AI analyses and in the audit log."""
-    return workspace_settings_service.get_ai_prompt_version(version=version, db=db)
-
-
 @router.get("/workspace/audit", response_model=schemas.AuditLogResponse)
 def get_audit_log(
     category: Literal["lifecycle", "archive", "operation", "privacy", "ai", "permissions", "accounts", "notifications"] | None = Query(default=None),

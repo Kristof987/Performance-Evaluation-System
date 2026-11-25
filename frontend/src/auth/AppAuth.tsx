@@ -6,7 +6,7 @@ import type { AccessTokenGetter } from './authenticated-api';
 type LinkedUser = AuthMe & { employee: NonNullable<AuthMe['employee']> };
 
 /** Auth0 is the only sign-in method; there is no other identity mode. */
-export type AppAuthState =
+type AppAuthState =
   | { status: 'loading'; mode: 'auth0' }
   | { status: 'unauthenticated'; mode: 'auth0' }
   | { status: 'unlinked'; mode: 'auth0' }

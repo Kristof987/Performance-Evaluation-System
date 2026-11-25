@@ -1,4 +1,4 @@
-export type HrInsightTip = {
+type HrInsightTip = {
   id: string;
   category: string;
   title: string;

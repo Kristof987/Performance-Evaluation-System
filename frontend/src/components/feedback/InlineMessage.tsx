@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
 import './feedback.css';
 
-export type InlineMessageTone = 'success' | 'error' | 'warning' | 'info';
+type InlineMessageTone = 'success' | 'error' | 'warning' | 'info';
 
 const ICONS = { success: CheckCircle2, error: AlertCircle, warning: AlertTriangle, info: Info };
 

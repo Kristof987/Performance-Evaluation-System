@@ -1,6 +1,6 @@
 import { Bell, Bot, EyeOff, KeyRound, Mail, Palette, ScrollText, ShieldCheck, UserRound, type LucideIcon } from 'lucide-react';
 
-export type SettingsSection = 'profile' | 'security' | 'notifications' | 'appearance'
+type SettingsSection = 'profile' | 'security' | 'notifications' | 'appearance'
   | 'privacy' | 'emails' | 'ai' | 'permissions' | 'audit';
 
 type Item = { id: SettingsSection; label: string; description: string; icon: LucideIcon; anyOf?: string[] };

@@ -15,14 +15,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from pydantic import ValidationError
-from sqlalchemy.orm import Session
 
 from integrations import llm
-import models
 from services import ai_local_diagnostics
 from services import ai_trace
 from services.ai_analysis_models import AggregateAnalysisContext, AnalysisFinding, AnalysisTheme, EmployeeAIAnalysis, EmployeeAnalysisContext, GeneratedAnalysis, QuantitativeStatistics, TranslatedAnalysis
-from services.ai_analysis_service import build_employee_analysis_context
 
 
 logger = logging.getLogger(__name__)
@@ -425,8 +422,6 @@ def model_override(model: str | None):
         _model_override.reset(token)
 
 
-_DATED_MODEL = re.compile(r"-\d{4}-\d{2}-\d{2}$")
-
 # Provider failures, as the analysis workflow names them.
 _LLM_ERRORS = {
     "not_configured": "analysis_not_configured", "invalid_configuration": "invalid_analysis_configuration",
@@ -434,11 +429,6 @@ _LLM_ERRORS = {
     "unavailable": "analysis_provider_unavailable", "invalid_output": "invalid_analysis_output",
     "refused": "analysis_refused_or_empty",
 }
-
-
-def is_pinned_model(model: str) -> bool:
-    """Dated snapshots never change; aliases such as 'gpt-4.1' may move to a newer model."""
-    return bool(_DATED_MODEL.search(model.strip()))
 
 
 def _settings(model: str | None = None) -> llm.LLMSettings:
@@ -1059,13 +1049,6 @@ def _capture_rejection(error: AnalysisGenerationError, analysis: GeneratedAnalys
         ai_local_diagnostics.capture(job_id, attempt, artifact)
     except (OSError, RuntimeError, ValueError):
         logger.warning("AI local diagnostic capture unavailable: job_id=%s attempt=%d", job_id, attempt)
-
-
-def generate_employee_ai_analysis(db: Session, campaign_id: int, employee_id: int, *,
-                                  actor: models.User) -> EmployeeAIAnalysis:
-    """Build an authorized Phase 1 context and return a verified, non-persisted analysis."""
-    context = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-    return generate_employee_ai_analysis_from_context(context)[0]
 
 
 def _generate_with_facts(registry: dict[str, _AuthorizedFact], scope: str,

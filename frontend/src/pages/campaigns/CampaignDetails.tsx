@@ -920,5 +920,3 @@ export function CampaignDetails() {
     </CampaignPage>
   );
 }
-
-export default CampaignDetails;

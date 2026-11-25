@@ -20,7 +20,7 @@ export type CampaignEmailOverview = {
   now: string;
 };
 
-export type ManualReminderResult = { sent: number; failed: number; skipped_recently_reminded: number };
+type ManualReminderResult = { sent: number; failed: number; skipped_recently_reminded: number };
 
 async function request<T>(getAccessToken: AccessTokenGetter, path: string, init: RequestInit = {}): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, path, init);

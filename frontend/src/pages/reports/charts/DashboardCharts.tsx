@@ -35,7 +35,7 @@ function axisProps(theme: ChartTheme) {
   return { stroke: theme.axis, tick: { fill: theme.textSecondary, fontSize: 11 }, tickLine: false };
 }
 
-export type ScoreBarRow = { id: number; name: string; score: number | null; previous?: number | null; muted?: boolean };
+type ScoreBarRow = { id: number; name: string; score: number | null; previous?: number | null; muted?: boolean };
 
 /** Horizontal score bars; the bar colour follows the score, the dashed line marks the reference. */
 export function ScoreBars({ theme, rows, reference, referenceLabel, onSelect }: { theme: ChartTheme; rows: ScoreBarRow[]; reference?: number | null; referenceLabel?: string; onSelect?: (id: number) => void }) {
@@ -60,7 +60,7 @@ export function ScoreBars({ theme, rows, reference, referenceLabel, onSelect }: 
   </ResponsiveContainer>;
 }
 
-export type ComparedSeries = { id: number; name: string; color: string; values: Record<string, number | null> };
+type ComparedSeries = { id: number; name: string; color: string; values: Record<string, number | null> };
 
 /** One bar per compared group in each category; group colours come from the group, not its rank. */
 export function GroupedBars({ theme, categories, series, reference }: { theme: ChartTheme; categories: Array<{ id: number; name: string }>; series: ComparedSeries[]; reference?: number | null }) {

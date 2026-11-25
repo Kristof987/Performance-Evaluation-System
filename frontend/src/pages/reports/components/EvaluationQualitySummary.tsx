@@ -31,7 +31,7 @@ function EvaluationQualityStatus({ status }: { status: EvaluationQualityReport['
   return <span className={`quality-summary-status ${status === 'final' ? 'is-final' : ''}`}>{status === 'final' ? 'Final' : status === 'preliminary' ? 'Preliminary' : 'Unavailable'}</span>;
 }
 
-export function EvaluationQualityObservation({ finding, final }: { finding: EvaluationQualityFinding; final: boolean }) {
+function EvaluationQualityObservation({ finding, final }: { finding: EvaluationQualityFinding; final: boolean }) {
   const evidence = final ? Object.entries(finding.statistics) : [];
   return <li className="quality-summary-finding">
     <div className="quality-summary-finding-heading"><strong>{finding.title}</strong><span>{finding.scope === 'campaign' ? 'Campaign-wide' : finding.scope}</span></div>

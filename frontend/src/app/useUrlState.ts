@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 
 type Update<T> = T | ((current: T) => T);
 
-export type UrlField<T> = {
+type UrlField<T> = {
   key: string;
   defaultValue: T;
   parse: (raw: string) => T | null;

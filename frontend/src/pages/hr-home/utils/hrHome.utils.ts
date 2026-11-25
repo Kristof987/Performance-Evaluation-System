@@ -1,6 +1,4 @@
-import type { DashboardMetrics } from '../hrHome.types';
-
-export type TimeOfDay = 'morning' | 'afternoon' | 'evening';
+type TimeOfDay = 'morning' | 'afternoon' | 'evening';
 
 export function getTimeOfDay(): TimeOfDay {
   const currentHour = new Date().getHours();
@@ -34,6 +32,3 @@ export function formatStartsIn(value: string, today: string): string {
   return 'Already started';
 }
 
-export function areResultsReadyToPublish(metrics: DashboardMetrics): boolean {
-  return metrics.completion_rate === 100 && metrics.assignment_count > 0;
-}

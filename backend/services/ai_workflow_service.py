@@ -58,10 +58,6 @@ def visible_versions(records: list, actor: models.User, db: Session) -> list:
     return records if can_see_drafts(actor, db) else [record for record in records if record.status == "approved"]
 
 
-def can_manage(actor: models.User, db: Session) -> bool:
-    return has_permission(actor, db, GENERATE)
-
-
 def capabilities(actor: models.User, db: Session, *, archived: bool) -> dict:
     """Flags the Reports UI uses to show generate, edit and approve controls."""
     enabled = workspace_settings_service.ai_enabled(db)

@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { Preferences } from './settings.api';
 
-export type PreferenceState = {
+type PreferenceState = {
   preferences: Preferences;
   loading: boolean;
   error: string;

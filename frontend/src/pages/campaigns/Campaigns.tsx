@@ -67,4 +67,3 @@ export function Campaigns() {
     </CampaignPage>
   );
 }
-export default Campaigns;

@@ -1,5 +1,5 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, CampaignReportOverview, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, ReportCampaignOption, ReportQuestions, RolePerspective, WrittenFeedbackResponse } from '../types/reports.types';
+import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, ReportCampaignOption, ReportQuestions, RolePerspective, WrittenFeedbackResponse } from '../types/reports.types';
 
 async function requestReports<T>(getAccessToken: AccessTokenGetter, path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, `/reports${path}`, { signal });
@@ -17,15 +17,6 @@ export function fetchReportCampaigns(getAccessToken: AccessTokenGetter, signal: 
     '/campaigns',
     signal,
     'Campaigns could not be loaded.',
-  );
-}
-
-export function fetchCampaignReportOverview(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {
-  return requestReports<CampaignReportOverview>(
-    getAccessToken,
-    `/campaigns/${encodeURIComponent(campaignId)}/overview`,
-    signal,
-    'Campaign report could not be loaded.',
   );
 }
 
