@@ -545,58 +545,6 @@ class ReportCampaignOption(BaseModel):
         return business_date(value)
 
 
-class EvaluationQualityFinding(BaseModel):
-    category: Literal[
-        "uniform_rating_pattern", "higher_rating_tendency", "lower_rating_tendency",
-        "peer_rating_disagreement", "rating_distribution_concentration",
-    ]
-    title: str
-    description: str
-    scope: Literal["campaign"]
-    section_name: str | None
-    eligible_observations: int | None
-    statistics: dict[str, float]
-    method: str
-    rule: str
-    informational: Literal[True]
-
-
-class EvaluationQualityDistributionBucket(BaseModel):
-    label: str
-    count: int
-    percentage: float
-
-
-class EvaluationQualityStatistics(BaseModel):
-    mean_normalized: float | None
-    standard_deviation: float | None
-    maximum_percentage: float | None
-    modal_percentage: float | None
-    distribution: list[EvaluationQualityDistributionBucket]
-
-
-class EvaluationQualityCoverage(BaseModel):
-    status: Literal["no_completed", "insufficient", "analyzed"]
-    message: str
-    matched_observations: int | None
-    comparable_employees: int | None
-    detectors: dict[str, Literal["analyzed", "insufficient"]]
-
-
-class EvaluationQualityResponse(BaseModel):
-    campaign: ReportCampaignOption
-    analysis_status: Literal["preliminary", "final", "unavailable"]
-    data_status: Literal["no_data", "insufficient_data", "analyzed"]
-    completed_peer_reviews: int
-    assigned_peer_reviews: int
-    peer_reviews_analyzed: int
-    rating_observations: int | None
-    findings_count: int
-    findings_by_category: dict[str, list[EvaluationQualityFinding]]
-    statistics: EvaluationQualityStatistics
-    coverage: EvaluationQualityCoverage
-
-
 class DashboardScore(BaseModel):
     score: float | None = None
     availability: Literal["available", "no_data", "suppressed"]

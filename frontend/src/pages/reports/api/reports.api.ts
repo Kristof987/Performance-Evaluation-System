@@ -1,5 +1,5 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, EmployeeReportDetail, EmployeeReportsOverview, EvaluationQualityReport, GroupReportDetail, ReportCampaignOption, ReportQuestions, RolePerspective, WrittenFeedbackResponse } from '../types/reports.types';
+import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, EmployeeReportDetail, EmployeeReportsOverview, GroupReportDetail, ReportCampaignOption, ReportQuestions, RolePerspective, WrittenFeedbackResponse } from '../types/reports.types';
 
 async function requestReports<T>(getAccessToken: AccessTokenGetter, path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, `/reports${path}`, { signal });
@@ -31,10 +31,6 @@ export function fetchSectionQuestions(getAccessToken: AccessTokenGetter, campaig
 
 export function fetchCampaignRatingDistribution(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {
   return requestReports<CampaignRatingDistribution>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/rating-distribution`, signal, 'Rating distribution could not be loaded.');
-}
-
-export function fetchEvaluationQuality(getAccessToken: AccessTokenGetter, campaignId: number, signal: AbortSignal) {
-  return requestReports<EvaluationQualityReport>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/evaluation-quality`, signal, 'Evaluation quality analysis could not be loaded.');
 }
 
 export function fetchReportQuestions(getAccessToken: AccessTokenGetter, campaignId: number, scope: { group_id?: number; role_id?: number; employee_id?: number; perspective?: RolePerspective }, evaluationType: 'peer' | 'self', signal: AbortSignal) {

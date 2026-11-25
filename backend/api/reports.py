@@ -1,4 +1,4 @@
-"""Campaign reports: overview, sections, questions, groups, roles, employees, answers and evaluation quality."""
+"""Campaign reports: overview, sections, questions, groups, roles, employees and answers."""
 
 from typing import Literal
 
@@ -10,7 +10,6 @@ import schemas
 from api.dependencies import get_db, reject_conflicting_requester, require_permission
 from services import (
     answers_service,
-    evaluation_quality_service,
     question_analytics_service,
     report_dashboard_service,
     reporting_service,
@@ -51,17 +50,6 @@ def get_campaign_section_questions(
     selected = list(dict.fromkeys(int(value) for value in group_ids.split(",") if value))
     roles = list(dict.fromkeys(int(value) for value in role_ids.split(",") if value))
     return report_dashboard_service.build_section_questions(campaign_id, section_id, selected, actor, db, role_ids=roles)
-
-
-@router.get("/reports/campaigns/{campaign_id}/evaluation-quality", response_model=schemas.EvaluationQualityResponse)
-def get_campaign_evaluation_quality(
-    campaign_id: int,
-    requester_user_id: int | None = Query(default=None),
-    db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
-):
-    reject_conflicting_requester(requester_user_id, actor)
-    return evaluation_quality_service.build_evaluation_quality(campaign_id, actor, db)
 
 
 @router.get("/reports/campaigns/{campaign_id}/rating-distribution", response_model=schemas.ReportRatingDistributionResponse)

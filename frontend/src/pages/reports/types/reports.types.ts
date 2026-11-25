@@ -51,52 +51,6 @@ export type RatingDistribution = {
 
 export type CampaignRatingDistribution = { campaign: RatingDistribution; sections: RatingDistribution[]; notes: string };
 
-export type EvaluationQualityCategory =
-  | 'uniform_rating_pattern'
-  | 'higher_rating_tendency'
-  | 'lower_rating_tendency'
-  | 'peer_rating_disagreement'
-  | 'rating_distribution_concentration';
-
-export type EvaluationQualityFinding = {
-  category: EvaluationQualityCategory;
-  title: string;
-  description: string;
-  scope: string;
-  section_name: string | null;
-  eligible_observations: number | null;
-  statistics: Record<string, number>;
-  method: string;
-  rule: string;
-  informational: boolean;
-};
-
-export type EvaluationQualityReport = {
-  campaign: ReportCampaignOption;
-  analysis_status: 'preliminary' | 'final' | 'unavailable';
-  data_status: 'no_data' | 'insufficient_data' | 'analyzed';
-  completed_peer_reviews: number;
-  assigned_peer_reviews: number;
-  peer_reviews_analyzed: number;
-  rating_observations: number | null;
-  findings_count: number;
-  findings_by_category: Partial<Record<EvaluationQualityCategory, EvaluationQualityFinding[]>>;
-  statistics: {
-    mean_normalized: number | null;
-    standard_deviation: number | null;
-    maximum_percentage: number | null;
-    modal_percentage: number | null;
-    distribution: Array<{ label: string; count: number; percentage: number }>;
-  };
-  coverage: {
-    status: 'no_completed' | 'insufficient' | 'analyzed';
-    message: string;
-    matched_observations: number | null;
-    comparable_employees: number | null;
-    detectors: Record<EvaluationQualityCategory, 'analyzed' | 'insufficient'>;
-  };
-};
-
 export type ReportSectionScore = {
   id: number;
   name: string;

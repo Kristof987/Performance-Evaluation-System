@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { csvScore } from './reportExport';
 import { fetchCampaignDashboard, fetchCampaignRatingDistribution } from './api/reports.api';
 import ReportsEmptyState from './components/ReportsEmptyState';
-import EvaluationQualitySummary from './components/EvaluationQualitySummary';
 import { DimensionSwitch, GroupToggles, MAX_COMPARED_GROUPS, SectionTabs } from './components/ReportFilterBar';
 import GroupPanel from './components/GroupPanel';
 import { GROUP_NOUN, reportScopeTitle, ROLE_NOUN, type Noun } from './reports.utils';
@@ -34,7 +33,7 @@ export default function CampaignOverviewPage() {
   const selectedCampaignId = Number(campaignId);
   const validCampaignId = Number.isSafeInteger(selectedCampaignId) && selectedCampaignId > 0;
 
-  return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null} allowQualityPreview>{(layoutState) => <OverviewContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layoutState} />}</ReportsLayout>;
+  return <ReportsLayout selectedCampaignId={validCampaignId ? selectedCampaignId : null}>{(layoutState) => <OverviewContent selectedCampaignId={selectedCampaignId} validCampaignId={validCampaignId} {...layoutState} />}</ReportsLayout>;
 }
 
 function OverviewContent({ selectedCampaignId, validCampaignId, getAccessToken, loadingCampaigns, campaignsError, campaigns, retryCampaigns }: {
@@ -51,17 +50,13 @@ function OverviewContent({ selectedCampaignId, validCampaignId, getAccessToken, 
   const [distributionFailed, setDistributionFailed] = useState(false);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const { state } = useAppAuth();
-  const qualityAuthorized = state.status === 'authenticated' && state.user.permissions.includes('reports.read') && state.user.permissions.includes('campaigns.manage');
-  const actorId = state.status === 'authenticated' ? state.user.id : null;
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId);
-  const qualityPreview = !!(qualityAuthorized && selectedCampaign && !selectedCampaign.is_archived && (selectedCampaign.campaign_status === 'active' || selectedCampaign.campaign_status === 'paused'));
   const tokenRef = useRef(getAccessToken);
   tokenRef.current = getAccessToken;
 
   useEffect(() => {
     const token = tokenRef.current;
-    if (!validCampaignId || !token || qualityPreview) return undefined;
+    if (!validCampaignId || !token) return undefined;
     const controller = new AbortController();
     setData(null);
     setDistribution(null);
@@ -74,19 +69,17 @@ function OverviewContent({ selectedCampaignId, validCampaignId, getAccessToken, 
       .then((result) => { if (!controller.signal.aborted) setDistribution(result); })
       .catch(() => { if (!controller.signal.aborted) setDistributionFailed(true); });
     return () => controller.abort();
-  }, [!!getAccessToken, reloadKey, selectedCampaignId, validCampaignId, qualityPreview]);
+  }, [!!getAccessToken, reloadKey, selectedCampaignId, validCampaignId]);
 
   if (!validCampaignId) return <ReportsEmptyState title="Campaign not found." message="Choose a valid campaign from the selector." />;
   if (loadingCampaigns) return <LoadingState variant="page" label="Loading campaigns" />;
   if (campaignsError) return <LoadError message={campaignsError} onRetry={retryCampaigns} />;
   if (!selectedCampaign) return <ReportsEmptyState title="Campaign unavailable." message="The selected campaign was deleted or is not accessible." />;
-  if (qualityPreview) return <div className="reports-overview reports-overview-dashboard"><p className="reports-dashboard-note">Campaign performance charts become available in Review. Completed peer evaluations can already be checked for campaign-level quality patterns.</p><EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} /></div>;
   if (error) return <LoadError message={error} onRetry={() => setReloadKey((value) => value + 1)} />;
   if (data === null || data.campaign.id !== selectedCampaignId) return <LoadingState variant="page" label="Loading campaign report" />;
 
   return <div className="reports-overview reports-overview-dashboard">
     <Dashboard getAccessToken={getAccessToken} data={data} distribution={distribution?.campaign ? distribution : null} distributionFailed={distributionFailed} onRetry={() => setReloadKey((value) => value + 1)} />
-    <EvaluationQualitySummary campaignId={selectedCampaignId} actorId={actorId} getAccessToken={getAccessToken} authorized={qualityAuthorized} />
   </div>;
 }
 

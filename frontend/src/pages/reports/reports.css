@@ -18,29 +18,6 @@
 .reports-card-action:hover { text-decoration: underline; }
 .reports-chart-notice, .reports-dashboard-note { color: var(--color-text-secondary); font-size: 12px; margin: 8px 0; }
 
-.quality-summary { padding: 15px 18px; }
-.quality-summary-heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: space-between; }
-.quality-summary-heading h2 { font-size: 15px; margin: 0 0 4px; }
-.quality-summary-heading p, .quality-summary-note { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; margin: 0; }
-.quality-summary-status { background: var(--color-primary-soft); border-radius: 6px; color: var(--color-primary); font-size: 11px; font-weight: 700; padding: 4px 8px; }
-.quality-summary-status.is-final { background: var(--color-success-bg); color: var(--color-success); }
-.quality-summary-note, .quality-summary-count { margin-top: 10px; }
-.quality-summary-count { color: var(--color-text-secondary); font-size: 12px; font-weight: 700; }
-.quality-summary-findings { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); list-style: none; margin: 10px 0 0; padding: 0; }
-.quality-summary-finding { border: 1px solid var(--color-border); border-radius: 8px; min-width: 0; padding: 10px 12px; }
-.quality-summary-finding-heading { align-items: baseline; display: flex; flex-wrap: wrap; gap: 4px 10px; justify-content: space-between; }
-.quality-summary-finding-heading strong { font-size: 12px; }
-.quality-summary-finding-heading span { color: var(--color-text-muted); font-size: 11px; }
-.quality-summary-finding p { color: var(--color-text-secondary); font-size: 12px; line-height: 1.45; margin: 6px 0 0; }
-.quality-summary details { color: var(--color-text-secondary); font-size: 11px; margin-top: 9px; }
-.quality-summary summary { cursor: pointer; }
-.quality-summary summary:focus-visible, .quality-summary-refresh:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-.quality-summary-evidence { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-.quality-summary-evidence span { background: var(--color-surface-subtle); border-radius: 4px; padding: 4px 6px; }
-.quality-summary-eligibility ul { display: grid; gap: 5px; list-style: none; margin: 8px 0 0; padding: 0; }
-.quality-summary-eligibility li { display: flex; flex-wrap: wrap; gap: 6px 20px; justify-content: space-between; }
-.quality-summary-refresh { font-size: 11px; margin-top: 10px; padding: 0; }
-@media (max-width: 650px) { .quality-summary-findings { grid-template-columns: 1fr; } }
 
 .reports-main {
   display: flex;

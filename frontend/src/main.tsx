@@ -32,11 +32,6 @@ import FeedbackProvider from './components/feedback/FeedbackProvider'
 import ErrorBoundary from './components/feedback/ErrorBoundary'
 import LoadingState from './components/feedback/LoadingState'
 
-function EvaluationQualityRedirect() {
-  const { campaignId } = useParams()
-  return <Navigate to={`/reports/campaigns/${campaignId}`} replace />
-}
-
 /** Detailed Results was retired: employee-scoped links open All Answers, the rest the Overview section. */
 function DetailedResultsRedirect() {
   const { campaignId } = useParams()
@@ -128,7 +123,6 @@ export default function AppRoutes() {
         <Route path="/reports/campaigns/:campaignId/answers" element={page(['All answers', 'Reports'], <AllAnswersPage />, ACCESS.campaignReports)} />
         <Route path="/reports/campaigns/:campaignId/detailed" element={<DetailedResultsRedirect />} />
         <Route path="/reports/campaigns/:campaignId/ai-analysis" element={page(['AI analysis', 'Reports'], <AIAnalysisPage />, ACCESS.campaignReports)} />
-        <Route path="/reports/campaigns/:campaignId/evaluation-quality" element={<EvaluationQualityRedirect />} />
         <Route path="/reports/campaigns/:campaignId/questions" element={page(['Question analytics', 'Reports'], <QuestionAnalyticsPage />, ACCESS.campaignReports)} />
         <Route path="/reports/campaigns/:campaignId/groups" element={page(['Groups', 'Reports'], <GroupsRolesPage />, ACCESS.reports)} />
         <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={page(['Group', 'Reports'], <GroupDetailPage />, ACCESS.reports)} />
