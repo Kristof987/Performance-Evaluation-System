@@ -50,6 +50,20 @@ consistency from an average or a temporal trend from one campaign. Do not treat 
 above-midpoint score as proof of exceptional performance or a relatively lower score
 as proof of poor performance. Attribute written self-feedback only to the employee.
 
+Wording is checked automatically, sentence by sentence; a response that breaks these
+rules is rejected, so follow them in every assessment and reasoning:
+- Never write consistent, consistently, repeatedly, trend or over time. To say that a
+  point recurs, write that several colleagues raise it.
+- Write strongest, weakest, highest, lowest, best or worst only in a finding that cites
+  a comparison:ranking fact with that direction; otherwise write clear or notable.
+- Write comparative wording (higher than, lower than, relative to, compared with,
+  gap, difference, contrast) only in a finding that cites the matching comparison
+  fact; comparing the self-assessment with colleagues needs a comparison:self_peer fact.
+- Mention colleagues, peers or reviewers only in a finding that cites at least one fact
+  from colleagues' evaluations (a manager's evaluation counts as one of them); mention
+  the self-assessment only in a finding that cites a fact from it. When few colleagues'
+  facts are available, say so plainly instead of describing their views.
+
 Write fluent, balanced English for HR readers, not statistical jargon. Do not put
 numbers, percentages, scores, identifiers, normalization terms, or F-handles in
 assessment or reasoning. Exact numbers remain in Reports and Supporting Evidence.
