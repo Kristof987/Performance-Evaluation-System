@@ -54,6 +54,10 @@ Wording is checked automatically, sentence by sentence; a response that breaks t
 rules is rejected, so follow them in every assessment and reasoning:
 - Never write consistent, consistently, repeatedly, trend or over time. To say that a
   point recurs, write that several colleagues raise it.
+- Never write digits, percent signs or the number words zero, two, three, four, five,
+  six, seven, eight, nine, ten or percent, not even for counting areas or people
+  ("two areas stand out" is rejected). Write "Communication and teamwork stand out",
+  "a few colleagues" or "several colleagues" instead.
 - Write strongest, weakest, highest, lowest, best or worst only in a finding that cites
   a comparison:ranking fact with that direction; otherwise write clear or notable.
 - Write comparative wording (higher than, lower than, relative to, compared with,
@@ -1178,8 +1182,34 @@ def generate_employee_ai_analysis_from_context(context: EmployeeAnalysisContext,
                                            lambda analysis: _verify_analysis(analysis, categories, context, statistics,
                                                                               require_fact_ids=True),
                                            categories=categories, statistics=statistics, job_id=job_id)
+    analysis = _with_data_limitations(analysis, context)
     comments = [text for text, _author in _peer_comments(context).values()]
     return translate_analysis(analysis, language, comments=comments, trace=trace), trace
+
+
+# Added by the backend, not the model, so that it can never be left out. The wording passes the same
+# prose checks as generated text (no peer or self-assessment terms, numbers or rankings), because an
+# approval verifies the saved analysis again.
+MAX_REASONING_LENGTH = next(item.max_length for item in AnalysisFinding.model_fields["reasoning"].metadata
+                            if getattr(item, "max_length", None))
+OTHERS_WITHHELD_NOTE = ("Evaluations from others are withheld in this review because too few were submitted "
+                        "to keep them anonymous, so this picture rests mainly on the employee's own evaluation.")
+
+
+def _with_data_limitations(analysis: EmployeeAIAnalysis, context: EmployeeAnalysisContext) -> EmployeeAIAnalysis:
+    """State it in the overall finding when nobody else's evaluation could be released to the model."""
+    withheld = any(warning.code == "insufficient_peer_reviewers" for warning in context.warnings)
+    released_from_others = any(reference.category == "peer" for reference in context.evidence_references)
+    if not withheld or released_from_others:
+        return analysis
+    overall = analysis.overall_assessment
+    room = MAX_REASONING_LENGTH - len(OTHERS_WITHHELD_NOTE) - 1
+    original = overall.reasoning.strip()
+    if len(original) > room:  # keep whole sentences within the stored limit
+        cut = original[:room]
+        original = cut[:max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? ")) + 1].strip()
+    reasoning = f"{original} {OTHERS_WITHHELD_NOTE}".strip()
+    return analysis.model_copy(update={"overall_assessment": overall.model_copy(update={"reasoning": reasoning})})
 
 
 def validate_aggregate_ai_analysis(context: AggregateAnalysisContext, analysis: EmployeeAIAnalysis, *,
