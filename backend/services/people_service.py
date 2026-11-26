@@ -16,6 +16,7 @@ from services import (
     campaign_service,
     invitation_service,
     people_import_service,
+    permissions,
     workspace_settings_service,
 )
 
@@ -605,7 +606,7 @@ def import_people_employees(*, file: UploadFile, db: Session, actor: models.User
         email.lower()
         for (email,) in db.query(models.User.email).all()
     }
-    actor_permissions = workspace_settings_service.role_permissions(db, actor.system_role_id)
+    actor_permissions = permissions.role_permissions(db, actor.system_role_id)
     all_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()}
     default_role = all_roles.get(DEFAULT_SYSTEM_ROLE.casefold())
     if default_role is None:
@@ -614,7 +615,7 @@ def import_people_employees(*, file: UploadFile, db: Session, actor: models.User
     # assignment, so it needs roles.assign and never more access than the importer holds.
     can_assign = "roles.assign" in actor_permissions
     system_roles = {name: role for name, role in all_roles.items()
-                    if can_assign and workspace_settings_service.role_permissions(db, role.id) <= actor_permissions}
+                    if can_assign and permissions.role_permissions(db, role.id) <= actor_permissions}
     system_roles[DEFAULT_SYSTEM_ROLE.casefold()] = default_role
 
     for row_number, values in import_rows:

@@ -8,7 +8,7 @@ from openpyxl import Workbook
 
 import models
 from database import SessionLocal
-from services import invitation_service, people_service, workspace_settings_service
+from services import invitation_service, people_service, permissions
 
 HR = {"employees.manage", "evaluations.submit", "settings.read"}
 ASSIGNER = HR | {"roles.assign", "reports.read_team"}
@@ -36,7 +36,7 @@ def roles(db, monkeypatch):
                by_name["Manager"].id: {"evaluations.submit", "settings.read", "reports.read_team"},
                by_name["Admin"].id: {"permissions.manage", "roles.assign", "employees.manage"},
                importer_role.id: set(HR)}
-    monkeypatch.setattr(workspace_settings_service, "role_permissions", lambda _db, role_id: granted.get(role_id, set()))
+    monkeypatch.setattr(permissions, "role_permissions", lambda _db, role_id: granted.get(role_id, set()))
     monkeypatch.setattr(invitation_service, "invite_user",
                         lambda user, _actor, _db: SimpleNamespace(invitation_status="sent", email=user.email))
     importer = models.User(username=f"importer-{uuid4().hex}", email=f"{uuid4().hex}@example.com",

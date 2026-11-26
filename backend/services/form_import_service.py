@@ -10,8 +10,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 import models
-from services import people_import_service
-from services import workspace_settings_service
+from services import people_import_service, permissions
 
 FORM_HEADERS = ["Form Name", "Form Description"]
 QUESTION_HEADERS = ["Section", "Question Text", "Question Type", "Required", "Help Text",
@@ -121,7 +120,7 @@ def parse_form_workbook(upload: BinaryIO, filename: str | None, actor: models.Us
         errors.append("The Questions sheet does not contain any questions.")
 
     catalog = {section.normalized_name: section for section in db.query(models.Section).filter(models.Section.scope_key == "default").all()}
-    can_create_sections = "sections.manage" in workspace_settings_service.role_permissions(db, actor.system_role_id)
+    can_create_sections = "sections.manage" in permissions.role_permissions(db, actor.system_role_id)
     blocks: list[dict[str, Any]] = []
     section_blocks: dict[str, dict[str, Any]] = {}
     for row_number, cells in question_rows:

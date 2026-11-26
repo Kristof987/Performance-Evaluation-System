@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from integrations import email_service, llm
-
+from services import permissions
 
 SCOPE = "default"
 DEFAULT_MIN_INDIVIDUAL_PEER_REVIEWERS = 2
@@ -45,15 +45,16 @@ def _row(db: Session) -> models.WorkspaceSettings | None:
     return db.get(models.WorkspaceSettings, SCOPE)
 
 
+def _default_row() -> models.WorkspaceSettings:
+    return models.WorkspaceSettings(scope_key=SCOPE, min_individual_peer_reviewers=DEFAULT_MIN_INDIVIDUAL_PEER_REVIEWERS,
+                                    min_aggregate_evaluatees=DEFAULT_MIN_AGGREGATE_EVALUATEES, ai_enabled=True)
+
+
 def get_settings(db: Session) -> schemas.WorkspaceSettingsResponse:
-    row = _row(db)
+    row = _row(db) or _default_row()  # A missing row means every default applies.
     return schemas.WorkspaceSettingsResponse(
-        min_individual_peer_reviewers=row.min_individual_peer_reviewers if row else DEFAULT_MIN_INDIVIDUAL_PEER_REVIEWERS,
-        min_aggregate_evaluatees=row.min_aggregate_evaluatees if row else DEFAULT_MIN_AGGREGATE_EVALUATEES,
-        ai_enabled=row.ai_enabled if row else True,
-        ai_model=row.ai_model if row else None,
-        updated_at=row.updated_at if row else None,
-    )
+        min_individual_peer_reviewers=row.min_individual_peer_reviewers, min_aggregate_evaluatees=row.min_aggregate_evaluatees,
+        ai_enabled=row.ai_enabled, ai_model=row.ai_model, updated_at=row.updated_at)
 
 
 def privacy_thresholds(db: Session) -> tuple[int, int]:
@@ -83,8 +84,7 @@ def record_audit(db: Session, category: str, actor: models.User, summary: str, d
 def _locked_row(db: Session) -> models.WorkspaceSettings:
     row = db.query(models.WorkspaceSettings).filter(models.WorkspaceSettings.scope_key == SCOPE).with_for_update().first()
     if row is None:
-        row = models.WorkspaceSettings(scope_key=SCOPE, min_individual_peer_reviewers=DEFAULT_MIN_INDIVIDUAL_PEER_REVIEWERS,
-                                       min_aggregate_evaluatees=DEFAULT_MIN_AGGREGATE_EVALUATEES, ai_enabled=True)
+        row = _default_row()
         db.add(row)
         db.flush()
     return row
@@ -101,15 +101,11 @@ def update_settings(actor: models.User, update: schemas.WorkspaceSettingsUpdate,
         setattr(row, name, value)
     row.updated_by_user_id = actor.id
     privacy = {name for name in changed if name.startswith("min_")}
-    if privacy:
-        record_audit(db, "privacy", actor, "Privacy thresholds changed: " + ", ".join(
-            f"{name} {previous[name]} → {changed[name]}" for name in sorted(privacy)),
-            {name: {"from": previous[name], "to": changed[name]} for name in privacy})
-    ai = set(changed) - privacy
-    if ai:
-        record_audit(db, "ai", actor, "AI settings changed: " + ", ".join(
-            f"{name} {previous[name]!r} → {changed[name]!r}" for name in sorted(ai)),
-            {name: {"from": previous[name], "to": changed[name]} for name in ai})
+    for category, label, names in (("privacy", "Privacy thresholds", privacy), ("ai", "AI settings", set(changed) - privacy)):
+        if names:
+            record_audit(db, category, actor, f"{label} changed: " + ", ".join(
+                f"{name} {previous[name]!r} → {changed[name]!r}" for name in sorted(names)),
+                {name: {"from": previous[name], "to": changed[name]} for name in names})
     db.commit()
     return get_settings(db)
 
@@ -117,18 +113,8 @@ def update_settings(actor: models.User, update: schemas.WorkspaceSettingsUpdate,
 BUILT_IN_ROLES = frozenset({"Admin", "HR", "Manager", "Employee"})
 
 
-def role_permissions(db: Session, role_id: int | None) -> set[str]:
-    if role_id is None:
-        return set()
-    return {name for (name,) in db.query(models.SystemPermission.name)
-            .join(models.system_role_permissions,
-                  models.system_role_permissions.c.permission_id == models.SystemPermission.id)
-            .filter(models.system_role_permissions.c.system_role_id == role_id).all()}
-
-
 def create_system_role(actor: models.User, create: schemas.SystemRoleCreate,
                        db: Session) -> schemas.PermissionMatrixResponse:
-    _locked_row(db)
     name = " ".join(create.name.split())
     if not name:
         raise HTTPException(status_code=400, detail="Role name is required")
@@ -138,7 +124,7 @@ def create_system_role(actor: models.User, create: schemas.SystemRoleCreate,
     if create.copy_from_role_id is not None:
         if db.get(models.SystemRole, create.copy_from_role_id) is None:
             raise HTTPException(status_code=400, detail="Unknown system role to copy")
-        granted = role_permissions(db, create.copy_from_role_id)
+        granted = permissions.role_permissions(db, create.copy_from_role_id)
     description = (create.description or "").strip() or None
     role = models.SystemRole(name=name, description=description)
     db.add(role)
@@ -154,7 +140,6 @@ def create_system_role(actor: models.User, create: schemas.SystemRoleCreate,
 
 
 def delete_system_role(actor: models.User, role_id: int, db: Session) -> schemas.PermissionMatrixResponse:
-    _locked_row(db)
     role = db.get(models.SystemRole, role_id)
     if role is None:
         raise HTTPException(status_code=404, detail="System role not found")
@@ -172,7 +157,6 @@ def delete_system_role(actor: models.User, role_id: int, db: Session) -> schemas
 
 def change_user_system_role(actor: models.User, user: models.User, role_id: int, db: Session) -> models.SystemRole:
     """Admins hand out roles; nobody can grant more than they hold or lock out permission management."""
-    _locked_row(db)
     role = db.get(models.SystemRole, role_id)
     if role is None:
         raise HTTPException(status_code=400, detail="Unknown system role")
@@ -180,20 +164,13 @@ def change_user_system_role(actor: models.User, user: models.User, role_id: int,
         raise HTTPException(status_code=409, detail="You cannot change your own system role")
     if user.system_role_id == role.id:
         return role
-    actor_permissions = role_permissions(db, actor.system_role_id)
-    current = role_permissions(db, user.system_role_id)
-    target = role_permissions(db, role.id)
+    actor_permissions = permissions.role_permissions(db, actor.system_role_id)
+    current = permissions.role_permissions(db, user.system_role_id)
+    target = permissions.role_permissions(db, role.id)
     if not (current | target) <= actor_permissions:
         raise HTTPException(status_code=403, detail="You can only assign roles whose permissions you also hold")
-    if "permissions.manage" in current and "permissions.manage" not in target:
-        managers = (db.query(models.User.id)
-                    .join(models.system_role_permissions,
-                          models.system_role_permissions.c.system_role_id == models.User.system_role_id)
-                    .join(models.SystemPermission,
-                          models.SystemPermission.id == models.system_role_permissions.c.permission_id)
-                    .filter(models.SystemPermission.name == "permissions.manage")
-                    .filter(models.User.is_active.is_(True), models.User.id != user.id).first())
-        if managers is None:
+    if ("permissions.manage" in current and "permissions.manage" not in target
+            and not permissions.other_active_holder(db, "permissions.manage", user.id)):
             raise HTTPException(status_code=409, detail="At least one active user must keep permission management")
     previous = db.get(models.SystemRole, user.system_role_id)
     user.system_role_id = role.id
@@ -220,15 +197,13 @@ def permission_matrix(db: Session) -> schemas.PermissionMatrixResponse:
         ) for role in roles],
         permissions=[schemas.PermissionMatrixPermission(
             name=permission.name,
-            description=permission.description or PERMISSION_DESCRIPTIONS.get(permission.name, permission.name),
+            description=PERMISSION_DESCRIPTIONS.get(permission.name, permission.name),
         ) for permission in permissions],
     )
 
 
 def update_permission_matrix(actor: models.User, update: schemas.PermissionMatrixUpdate,
                              db: Session) -> schemas.PermissionMatrixResponse:
-    # Serialize concurrent edits of the matrix behind one lock.
-    _locked_row(db)
     roles = {role.id: role for role in db.query(models.SystemRole).all()}
     permissions = {permission.name: permission.id for permission in db.query(models.SystemPermission).all()}
     requested: dict[int, set[str]] = {}
@@ -330,11 +305,10 @@ def audit_log(db: Session, *, category: str | None, campaign_id: int | None,
         query = db.query(models.SettingsAuditEvent)
         if category is not None:
             query = query.filter(models.SettingsAuditEvent.category == category)
-        if category is None or category in {"privacy", "ai", "permissions", "accounts", "notifications"}:
-            for row in query.order_by(models.SettingsAuditEvent.occurred_at.desc()).limit(window):
-                entries.append(schemas.AuditLogEntry(
-                    id=f"settings-{row.id}", category=row.category, occurred_at=row.occurred_at,
-                    actor_user_id=row.actor_user_id, is_automatic=False, campaign_id=None, summary=row.summary))
+        for row in query.order_by(models.SettingsAuditEvent.occurred_at.desc()).limit(window):
+            entries.append(schemas.AuditLogEntry(
+                id=f"settings-{row.id}", category=row.category, occurred_at=row.occurred_at,
+                actor_user_id=row.actor_user_id, is_automatic=False, campaign_id=None, summary=row.summary))
 
     entries.sort(key=lambda entry: (entry.occurred_at, entry.id), reverse=True)
     page = entries[offset:offset + limit]

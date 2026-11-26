@@ -24,7 +24,7 @@ def db():
 @pytest.fixture
 def actor(db, monkeypatch):
     permissions = {"forms.manage", "sections.manage"}
-    monkeypatch.setattr(form_import_service.workspace_settings_service, "role_permissions", lambda _db, _role: permissions)
+    monkeypatch.setattr(form_import_service.permissions, "role_permissions", lambda _db, _role: permissions)
     user = models.User(username=f"forms-{uuid4().hex}", email=f"{uuid4().hex}@example.com", password_hash="", system_role_id=None, is_active=True)
     user.granted = permissions
     return user
