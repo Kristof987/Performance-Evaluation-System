@@ -1,22 +1,21 @@
 """Questionnaire validation: question definitions, choice options, scale labels and issuance readiness."""
 
+from copy import deepcopy
+from datetime import datetime, timezone
+from uuid import uuid4
+
 from fastapi import HTTPException
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 import models
-from services import form_snapshot_service
-from services import campaign_service
-from copy import deepcopy
-from datetime import datetime
-from datetime import timezone
-from sqlalchemy import func
-from sqlalchemy import or_
-from uuid import uuid4
 import schemas
+from services import campaign_service
+from services.form_snapshot_service import iter_snapshot_questions
 
-
-def iter_form_questions(structure):
-    yield from form_snapshot_service.iter_snapshot_questions(structure)
+# Labelling every value of a scale (a behaviourally anchored scale) only makes sense for short scales.
+MAX_LABELLED_SCALE_POINTS = 11
+MAX_SCALE_LABEL_LENGTH = 120
 
 
 def validate_question_definitions(questions: list[dict], db: Session | None = None):
@@ -52,27 +51,25 @@ def validate_question_definitions(questions: list[dict], db: Session | None = No
 
 
 def form_issuance_errors(structure: list[dict], db: Session | None = None) -> list[str]:
-    """Readiness is deliberately separate from draft persistence."""
+    """Readiness is deliberately separate from draft persistence.
+
+    The draft rules run first, so structure, unique question IDs, scale direction and
+    endpoint labels are already valid below; this adds only what issuing needs on top.
+    """
     try:
         validate_question_definitions(structure, db)
     except HTTPException as error:
         return [str(error.detail)]
     errors: list[str] = []
-    questions = list(iter_form_questions(structure))
-    seen_ids: set[str] = set()
+    questions = list(iter_snapshot_questions(structure))
     if not questions:
         errors.append("A form must contain at least one question.")
-    for block in structure if isinstance(structure, list) else []:
-        if isinstance(block, dict) and block.get("type") == "section" and not block.get("questions"):
+    for block in structure:
+        if block["type"] == "section" and not block["questions"]:
             section = db.query(models.Section).filter(models.Section.id == block.get("section_id")).first() if db is not None else None
             errors.append(f"{section.name if section else 'Section'} must contain at least one question.")
     for index, question in enumerate(questions, start=1):
         name = question.get("text") if isinstance(question.get("text"), str) and question["text"].strip() else f"Question {index}"
-        question_id = question.get("id")
-        if not isinstance(question_id, str) or not question_id.strip() or question_id in seen_ids:
-            errors.append(f"{name} needs a unique question ID.")
-        else:
-            seen_ids.add(question_id)
         if not isinstance(question.get("text"), str) or not question["text"].strip():
             errors.append(f"{name} needs question text.")
         if question.get("type") not in {"Scale", "Single choice", "Multiple choice", "Text"}:
@@ -81,10 +78,6 @@ def form_issuance_errors(structure: list[dict], db: Session | None = None) -> li
             minimum, maximum = question.get("scale_min"), question.get("scale_max")
             if type(minimum) is not int or type(maximum) is not int or maximum <= minimum:
                 errors.append(f"{name} needs integer scale limits with a maximum greater than its minimum.")
-            if question.get("scale_direction", "higher_is_better") != "higher_is_better":
-                errors.append(f"{name} must score higher values as better.")
-            if any(label in question and question[label] is not None and not isinstance(question[label], str) for label in ("min_label", "max_label")):
-                errors.append(f"{name} has an invalid endpoint label.")
             labels = question.get("scale_labels")
             if labels is not None and type(minimum) is int and type(maximum) is int and maximum > minimum:
                 points = maximum - minimum + 1
@@ -112,13 +105,6 @@ def form_issuance_errors(structure: list[dict], db: Session | None = None) -> li
             if not valid:
                 errors.append(f'{name} must contain at least two valid answer options.')
     return errors
-
-
-# Labelling every value of a scale (a behaviourally anchored scale) only makes sense for short scales.
-MAX_LABELLED_SCALE_POINTS = 11
-
-
-MAX_SCALE_LABEL_LENGTH = 120
 
 
 def _validate_structured_question(question: dict, seen_ids: set, db: Session | None):
@@ -149,7 +135,7 @@ def selectable_forms(campaign_id: int, db: Session) -> list[models.Form]:
     """Forms a campaign can pick from: active ones, plus any archived one it already uses (so its name still shows)."""
     used = campaign_service.forms_used_by_campaigns(db, campaign_id)
     return (db.query(models.Form)
-            .filter(or_(models.Form.archived_at.is_(None), models.Form.id.in_(used or {-1})))
+            .filter(or_(models.Form.archived_at.is_(None), models.Form.id.in_(used)))
             .order_by(models.Form.name.asc()).all())
 
 
@@ -165,17 +151,16 @@ def get_form_templates(*, db: Session):
 
 def clone_template_questions(questions: list[dict]):
     cloned_questions = deepcopy(questions)
-    for question in iter_form_questions(cloned_questions):
+    for question in iter_snapshot_questions(cloned_questions):
         question["id"] = str(uuid4())
     return cloned_questions
 
 
-def form_section_ids(questions: object) -> set[int]:
-    return {block["section_id"] for block in questions if isinstance(block, dict) and block.get("type") == "section"
-            and isinstance(block.get("section_id"), int)} if isinstance(questions, list) else set()
+def form_section_ids(questions: list[dict] | None) -> set[int]:
+    return {block["section_id"] for block in questions or [] if block["type"] == "section"}
 
 
-def reject_newly_archived_sections(questions: list[dict], previous_questions: object, db: Session) -> None:
+def reject_newly_archived_sections(questions: list[dict], previous_questions: list[dict] | None, db: Session) -> None:
     """Archived Sections cannot be added to questionnaires; ones already in a questionnaire may stay."""
     added = form_section_ids(questions) - form_section_ids(previous_questions)
     if not added:
@@ -197,7 +182,7 @@ def validate_form_like_payload(payload: schemas.FormCreate, model, db: Session, 
     if existing_query.first() is not None:
         raise HTTPException(status_code=400, detail="Name already exists")
 
-    questions = deepcopy(payload.questions)
+    questions = payload.questions
     validate_question_definitions(questions, db)
     previous = db.query(model.questions).filter(model.id == item_id).scalar() if item_id is not None else None
     reject_newly_archived_sections(questions, previous, db)
@@ -273,7 +258,7 @@ def update_form_template(*, template_id: int, template_update: schemas.FormUpdat
 
 def delete_form(*, form_id: int, db: Session):
     """Unused forms are deleted. Forms that only finished campaigns refer to are archived, so their history stays."""
-    form = db.query(models.Form).filter(models.Form.id == form_id).with_for_update().first()
+    form = db.query(models.Form).filter(models.Form.id == form_id).first()
     if form is None:
         raise HTTPException(status_code=404, detail="Form not found")
     campaigns = campaign_service.campaigns_referencing_form(form_id, db)

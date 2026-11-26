@@ -7,15 +7,13 @@ import models
 
 
 def create_form_snapshot(form: models.Form, db: Session) -> dict[str, Any]:
-    questions = deepcopy(form.questions if isinstance(form.questions, list) else [])
+    """Freeze a validated form for issuing, with each Section's name at that moment."""
+    questions = deepcopy(form.questions)
     for block in questions:
-        if isinstance(block, dict) and block.get("type") == "section" and isinstance(block.get("section_id"), int):
-            section = db.query(models.Section).filter(models.Section.id == block["section_id"]).first()
-            if section is not None:
-                block["section"] = {"id": section.id, "name": section.name}
+        if block["type"] == "section":
+            section = db.get(models.Section, block["section_id"])
+            block["section"] = {"id": section.id, "name": section.name}
     for question in iter_snapshot_questions(questions):
-        if not isinstance(question, dict):
-            continue
         question.setdefault("scale_direction", "higher_is_better")
     return {
         "schema_version": 2,
@@ -28,27 +26,19 @@ def create_form_snapshot(form: models.Form, db: Session) -> dict[str, Any]:
 
 
 def iter_snapshot_questions(structure: list[dict[str, Any]]):
-    """Traverse issued blocks in display order without discarding their grouping."""
+    """Traverse validated blocks in display order without discarding their grouping."""
     for item in structure:
-        if not isinstance(item, dict):
-            continue
-        if item.get("type") == "section":
-            for question in item.get("questions", []):
-                if isinstance(question, dict):
-                    yield question
-        elif item.get("type") == "question" and isinstance(item.get("question"), dict):
+        if item["type"] == "section":
+            yield from item["questions"]
+        else:
             yield item["question"]
 
 
 def snapshot_form_name(filled_form: models.FilledForm, form: models.Form) -> str:
-    snapshot = filled_form.form_snapshot if isinstance(filled_form.form_snapshot, dict) else None
-    name = snapshot.get("form_name") if snapshot is not None else None
-    return name if isinstance(name, str) and name.strip() else form.name
+    # Pre-v2 snapshots have no name; they show the form's current one.
+    return (filled_form.form_snapshot or {}).get("form_name") or form.name
 
 
 def snapshot_form_description(filled_form: models.FilledForm, form: models.Form) -> str | None:
-    snapshot = filled_form.form_snapshot if isinstance(filled_form.form_snapshot, dict) else None
-    if snapshot is not None and "form_description" in snapshot:
-        description = snapshot.get("form_description")
-        return description if isinstance(description, str) else None
-    return form.description
+    snapshot = filled_form.form_snapshot or {}
+    return snapshot["form_description"] if "form_description" in snapshot else form.description

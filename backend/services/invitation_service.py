@@ -34,8 +34,8 @@ def invite_user(user: models.User, actor: models.User, db: Session, *, enforce_c
         return user
     try:
         if user.auth0_user_id is None:
+            # Kept even if the email below fails (the failure is caught and committed); a resend then only emails.
             user.auth0_user_id = auth0_management.create_login(user.email)
-            db.flush()  # Keep the link even if the email below fails; a resend then only emails.
         elif not user.auth0_user_id.startswith("auth0|"):
             raise auth0_management.InvitationFailure("external_identity")
         auth0_management.send_set_password_email(user.email)
