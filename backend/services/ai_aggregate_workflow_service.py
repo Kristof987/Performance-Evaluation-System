@@ -1,4 +1,4 @@
-"""Versioned HR workflow for campaign, assigned group, and evaluatee-role AI reports."""
+"""Versioned HR workflow for campaign and assigned group AI reports."""
 
 from datetime import datetime, timezone
 
@@ -13,7 +13,7 @@ from services import permissions
 from services import workspace_settings_service
 from services import reporting_service
 from services.ai_aggregate_service import (
-    build_campaign_analysis_context, build_group_analysis_context, build_role_analysis_context,
+    build_campaign_analysis_context, build_group_analysis_context,
 )
 from services.ai_analysis_models import AggregateAnalysisContext, EmployeeAIAnalysis
 from services.ai_generation_service import (
@@ -28,8 +28,6 @@ def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | Non
         return build_campaign_analysis_context(db, campaign_id, actor=actor)
     if scope_type == "group" and scope_id is not None:
         return build_group_analysis_context(db, campaign_id, scope_id, actor=actor)
-    if scope_type == "role" and scope_id is not None:
-        return build_role_analysis_context(db, campaign_id, scope_id, actor=actor)
     raise HTTPException(status_code=404, detail="Analysis scope not found")
 
 
@@ -125,7 +123,7 @@ def list_analyses(db: Session, campaign_id: int, scope_type: str, scope_id: int 
     try:
         context = _context(db, campaign_id, scope_type, scope_id, actor)
     except HTTPException as error:
-        if error.status_code != 404 or scope_type not in {"group", "role"} or scope_id is None:
+        if error.status_code != 404 or scope_type != "group" or scope_id is None:
             raise
         reporting_service.require_reports_access(campaign_id, actor, db)
         historical = db.query(models.AggregateAIAnalysis).filter(

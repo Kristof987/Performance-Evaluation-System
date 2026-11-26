@@ -30,7 +30,6 @@ function basePath(scope: AIAnalysisScope) {
   switch (scope.type) {
     case 'employee': return `${campaignPath}/employees/${encodeURIComponent(scope.employeeId)}/ai-analysis`;
     case 'group': return `${campaignPath}/groups/${encodeURIComponent(scope.groupId)}/ai-analysis`;
-    case 'role': return `${campaignPath}/roles/${encodeURIComponent(scope.roleId)}/ai-analysis`;
     case 'campaign': return `${campaignPath}/ai-analysis`;
   }
 }

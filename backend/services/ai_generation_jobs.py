@@ -29,7 +29,7 @@ ACTIVE = ("queued", "running")
 
 
 def _subject_query(db: Session, campaign_id: int, scope_type: str, scope_id: int | None):
-    if scope_type not in {"employee", "group", "role", "campaign"} or (scope_id is None) != (scope_type == "campaign"):
+    if scope_type not in {"employee", "group", "campaign"} or (scope_id is None) != (scope_type == "campaign"):
         raise HTTPException(status_code=404, detail="Analysis scope not found")
     return db.query(models.AIAnalysisGenerationJob).filter(
         models.AIAnalysisGenerationJob.campaign_id == campaign_id,

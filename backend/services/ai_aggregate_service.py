@@ -8,7 +8,6 @@ assignments and current membership/role interpretation used at construction.
 from hashlib import sha256
 import json
 
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
@@ -57,31 +56,14 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
         label = report["campaign"]["name"]
         total, completed = report["kpis"]["total_evaluations"], report["kpis"]["completed_evaluations"]
         cohort_count = report["employees"]["participating_employees"]
-    elif scope_type == "group":
+    else:
         report = reporting_service.build_group_detail(campaign_id, scope_id, actor, db)
         label = report["group"]["name"]
         group_rows = [row for row in reporting_service.campaign_report_rows(campaign_id, db)
                       if row[0].company_group_id == scope_id]
-        total = len({row[0].id for row in group_rows})
+        total = len(group_rows)
         completed = report["kpis"]["completed_evaluations"]
         cohort_count = len({employee["employee_id"] for employee in report["employees"]})
-    else:
-        # CompanyRole is the evaluation dimension; SystemRole is solely RBAC.
-        configured = db.query(models.CampaignEvaluationRule.id).filter(
-            models.CampaignEvaluationRule.campaign_id == campaign_id,
-            models.CampaignEvaluationRule.evaluatee_role_id == scope_id,
-        ).first()
-        if configured is None:
-            raise HTTPException(status_code=404, detail="Campaign evaluatee-role report not found")
-        report = reporting_service.build_role_detail(campaign_id, scope_id, actor, db)
-        label = report["role"]["name"]
-        roles = reporting_service.users_by_id(db)
-        cohort = {employee_id for employee_id, (_, role) in roles.items() if role.id == scope_id}
-        role_rows = [row for row in reporting_service.campaign_report_rows(campaign_id, db)
-                     if row[0].evaluatee_id in cohort and row[0].evaluator_id != row[0].evaluatee_id]
-        total = len({row[0].id for row in role_rows})
-        completed = report["kpis"]["completed_evaluations"]
-        cohort_count = len({row[0].evaluatee_id for row in role_rows})
 
     minimum = reporting_service.min_aggregate_evaluatees()
     if cohort_count < minimum and not aggregate_access:
@@ -92,11 +74,11 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
         )
     peer_questions = question_analytics_service.build_question_report(
         campaign_id, actor, db, group_id=scope_id if scope_type == "group" else None,
-        role_id=scope_id if scope_type == "role" else None, evaluation_type="peer",
+        evaluation_type="peer",
     )["questions"]
     self_questions = question_analytics_service.build_question_report(
         campaign_id, actor, db, group_id=scope_id if scope_type == "group" else None,
-        role_id=scope_id if scope_type == "role" else None, evaluation_type="self",
+        evaluation_type="self",
     )["questions"]
     scope_key = f"aggregate:{campaign_id}:{scope_type}:{scope_id or 0}"
     evidence: list[AggregateEvidence] = []
@@ -132,7 +114,7 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
                    [("average_normalized", round(row["average_score"], 2), "normalized", 5),
                     ("contributor_count", row["evaluatee_count"], "count", None),
                     ("evaluator_count", row["evaluator_count"], "count", None)])
-    overall = report["kpis"].get("overall_score") if scope_type == "campaign" else report["kpis"].get("overall_peer_score" if scope_type == "group" else "overall_score")
+    overall = report["kpis"]["overall_score" if scope_type == "campaign" else "overall_peer_score"]
     if (overall is not None and available_sections and len(available_sections) == len(section_rows)
             and all(row["availability"] == "available" for row in section_rows)):
         add_metric("overall:peer", "peer", "overall", "Overall peer Section score", None,
@@ -160,8 +142,7 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
         reporting_service.campaign_report_rows(campaign_id, db), db)[1] if comparable_keys else [])
     for key in sorted(comparable_keys):
         scoped = [item for item in comparable_observations if item.key == key
-                  and (scope_type != "group" or item.group_id == scope_id)
-                  and (scope_type != "role" or item.role_id == scope_id)]
+                  and (scope_type != "group" or item.group_id == scope_id)]
         peer_subjects = {item.evaluatee_id for item in scoped if item.evaluator_id != item.evaluatee_id}
         self_subjects = {item.evaluatee_id for item in scoped if item.evaluator_id == item.evaluatee_id}
         if peer_subjects != self_subjects or not peer_subjects or (len(peer_subjects) < minimum and not aggregate_access):
@@ -181,10 +162,8 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
     # grant permits aggregate counts but does not authorize individual answers.
     assignments = reporting_service.campaign_report_rows(campaign_id, db)
     all_participants = {row[0].evaluatee_id for row in assignments}
-    if evidence and (aggregate_access or scope_type == "campaign" or len(all_participants - (
-        {row[0].evaluatee_id for row in assignments if row[0].company_group_id == scope_id} if scope_type == "group"
-        else {row[0].evaluatee_id for row in assignments if row[0].evaluatee_id in cohort}
-    )) != 1):
+    if evidence and (aggregate_access or scope_type == "campaign" or len(all_participants - {
+            row[0].evaluatee_id for row in assignments if row[0].company_group_id == scope_id}) != 1):
         rate = round(100 * completed / total) if total else 0
         add_metric("completion", "aggregate", "completion", "Submitted evaluation completion", None,
                    {"eligible_employee_count": cohort_count, "total_evaluations": total,
@@ -200,10 +179,6 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
 
 def build_group_analysis_context(db: Session, campaign_id: int, group_id: int, *, actor: models.User) -> AggregateAnalysisContext:
     return _build(db, campaign_id, "group", group_id, actor)
-
-
-def build_role_analysis_context(db: Session, campaign_id: int, role_id: int, *, actor: models.User) -> AggregateAnalysisContext:
-    return _build(db, campaign_id, "role", role_id, actor)
 
 
 def build_campaign_analysis_context(db: Session, campaign_id: int, *, actor: models.User) -> AggregateAnalysisContext:

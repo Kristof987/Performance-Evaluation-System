@@ -74,7 +74,8 @@ def rating_range(question: dict) -> tuple[int, int] | None:
 
 def iter_snapshot_sections(snapshot: dict | None):
     """Yield (stable Section ID, nested questions) in issued block order; unissued records have none."""
-    for block in snapshot["questions"] if snapshot else []:
+    # Pre-v2 list snapshots were kept as schema_version 1 and never contribute Section scores.
+    for block in snapshot["questions"] if snapshot and snapshot.get("schema_version") == 2 else []:
         if block.get("type") == "section":
             yield block["section_id"], block["questions"]
 
@@ -87,9 +88,10 @@ def score_evaluation(assignment: models.FilledForm) -> EvaluationSections | None
     """A draft has no Section score; answers were validated against the issued snapshot when saved."""
     if assignment.finish_date is None:
         return None
-    values = {answer["question_id"]: answer["value"] for answer in assignment.answers}
+    blocks = list(iter_snapshot_sections(assignment.form_snapshot))
+    values = {answer["question_id"]: answer["value"] for answer in assignment.answers} if blocks else {}
     by_section: dict[int, list[float]] = defaultdict(list)
-    for section_id, questions in iter_snapshot_sections(assignment.form_snapshot):
+    for section_id, questions in blocks:
         for question in questions:
             bounds, value = rating_range(question), values.get(question["id"])
             if bounds is not None and value is not None and (rating := normalize_rating(value, *bounds)) is not None:

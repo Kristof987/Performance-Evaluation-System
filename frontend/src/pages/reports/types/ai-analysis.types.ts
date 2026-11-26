@@ -19,7 +19,6 @@ export type AnalysisTheme = {
 export type AIAnalysisScope =
   | { type: 'employee'; campaignId: number; employeeId: number }
   | { type: 'group'; campaignId: number; groupId: number }
-  | { type: 'role'; campaignId: number; roleId: number }
   | { type: 'campaign'; campaignId: number };
 
 export type AIAnalysisGenerationJob = {

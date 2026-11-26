@@ -16,7 +16,6 @@ function scopeKey(scope: AIAnalysisScope) {
   switch (scope.type) {
     case 'employee': return `${scope.campaignId}:employee:${scope.employeeId}`;
     case 'group': return `${scope.campaignId}:group:${scope.groupId}`;
-    case 'role': return `${scope.campaignId}:role:${scope.roleId}`;
     case 'campaign': return `${scope.campaignId}:campaign`;
   }
 }
@@ -219,7 +218,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
       .then((result) => { if (!controller.signal.aborted) { setHistory(result); setSelectedId((previous) => previous !== null && result.versions.some((version) => version.id === previous) ? previous : result.versions[0]?.id ?? null); } })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Analysis could not be loaded.'); });
     return () => controller.abort();
-  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null, reload]);
+  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : null, reload]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -245,7 +244,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
         if (!controller.signal.aborted && epoch === jobRequestEpoch.current) setJobError(cause instanceof Error ? cause.message : 'Generation status could not be loaded.');
       });
     return () => controller.abort();
-  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null, jobReload]);
+  }, [scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : null, jobReload]);
 
   const jobActive = job?.status === 'queued' || job?.status === 'running';
   useEffect(() => {
@@ -272,7 +271,7 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
         });
     }, 2500);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [job, jobActive, jobReady, jobError, scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : scope.type === 'role' ? scope.roleId : null]);
+  }, [job, jobActive, jobReady, jobError, scope.campaignId, scope.type, scope.type === 'employee' ? scope.employeeId : scope.type === 'group' ? scope.groupId : null]);
 
   const selected = history?.versions.find((version) => version.id === selectedId) ?? history?.versions[0] ?? null;
   async function perform(kind: 'save' | 'approve', task: () => Promise<AnalysisVersion>) {

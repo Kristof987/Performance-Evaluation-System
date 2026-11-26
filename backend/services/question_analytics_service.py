@@ -83,7 +83,7 @@ def _definition(question: dict, section_id: int | None) -> tuple[str, dict] | No
 def _collect(rows: list[Any], db: Session, *, include_text: bool = False):
     definitions: dict[str, dict] = {}
     observations: list[Observation] = []
-    issued_scopes: dict[str, set[tuple[int | None, int | None, int | None, int, str]]] = defaultdict(set)
+    issued_scopes: dict[str, set[tuple[int | None, int | None, int, str]]] = defaultdict(set)
     section_ids: set[int] = set()
     roles = {employee_id: role.id for employee_id, (_employee, role) in reporting_service.users_by_id(db).items()}
     seen_assignments: set[int] = set()

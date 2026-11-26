@@ -1,4 +1,4 @@
-"""AI summaries in reports: employee, group, role and campaign analyses, their generation jobs, edits and approval."""
+"""AI summaries in reports: employee, group and campaign analyses, their generation jobs, edits and approval."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -72,7 +72,7 @@ def approve_employee_ai_report(
 
 
 def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
-    """Keep all three aggregate scopes on the same authorized HR workflow."""
+    """Keep both aggregate scopes on the same authorized HR workflow."""
     read_permissions = ("reports.read", "reports.read_team") if scope_type == "group" else ("reports.read",)
 
     def authorize_read(campaign_id: int, scope_id: int | None, actor: models.User, db: Session) -> None:
@@ -125,4 +125,3 @@ def _register_aggregate_ai_routes(scope_type: str, route: str) -> None:
 
 _register_aggregate_ai_routes("campaign", "/reports/campaigns/{campaign_id}/ai-analysis")
 _register_aggregate_ai_routes("group", "/reports/campaigns/{campaign_id}/groups/{scope_id}/ai-analysis")
-_register_aggregate_ai_routes("role", "/reports/campaigns/{campaign_id}/roles/{scope_id}/ai-analysis")
