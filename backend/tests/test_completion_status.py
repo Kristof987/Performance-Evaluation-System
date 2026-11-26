@@ -74,7 +74,7 @@ class World:
             form_snapshot={"schema_version": 2, "questions": []} if issued else None))
 
     def request(self, **overrides):
-        params = {"campaign_id": self.campaign.id, "requester_user_id": None, "search": None, "status": None,
+        params = {"campaign_id": self.campaign.id, "search": None, "status": None,
                   "overdue_only": False, "sort": "outstanding", "order": "desc", "page": 1, "page_size": 25,
                   "db": self.db, "actor": self.actor}
         params.update(overrides)
@@ -138,11 +138,8 @@ def test_evaluation_matrix_does_not_show_progress_per_pair(db):
         assert set(assignment) == {"evaluator_id", "evaluatee_id", "form_id", "filled_form_id", "issued"}
 
 
-def test_conflicting_requester_and_missing_campaign(db):
+def test_missing_campaign(db):
     world = World(db)
-    with pytest.raises(HTTPException) as conflict:
-        world.request(requester_user_id=world.actor.id + 1000000)
-    assert conflict.value.status_code == 403
     with pytest.raises(HTTPException) as missing:
         world.request(campaign_id=999999999)
     assert missing.value.status_code == 404

@@ -25,7 +25,7 @@ def make_campaign(db):
     group = models.CompanyGroup(name=f"Engineering {suffix}")
     status = models.FormStatus(name=f"Planned {suffix}")
     form = models.Form(name=f"Peer form {suffix}", questions=[
-        {"type": "question", "question": {"id": "q1", "text": "How well?", "type": "Scale 1-5", "required": True}},
+        {"type": "question", "question": {"id": "q1", "text": "How well?", "type": "Scale", "scale_min": 1, "scale_max": 5, "required": True}},
     ])
     system_role = models.SystemRole(name=f"Planner {suffix}")
     db.add_all([role, group, status, form, system_role])

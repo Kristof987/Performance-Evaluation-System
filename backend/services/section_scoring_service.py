@@ -16,7 +16,7 @@ import models
 from services import reporting_service
 
 
-RATING_TYPES = {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}
+RATING_TYPES = {"Scale"}
 Availability = Literal["available", "no_data", "suppressed"]
 
 
@@ -92,13 +92,12 @@ def _rating_range(question: dict) -> tuple[int, int] | None:
     kind = question.get("type")
     if not isinstance(kind, str) or kind not in RATING_TYPES:
         return None
-    default_max = 10 if kind == "Scale 1-10" else 5
     if "scale_min" in question or "scale_max" in question:
         if "scale_min" not in question or "scale_max" not in question:
             return None
         minimum, maximum = question["scale_min"], question["scale_max"]
     else:
-        minimum, maximum = 1, default_max
+        minimum, maximum = 1, 5
     if (isinstance(minimum, bool) or not isinstance(minimum, int)
             or isinstance(maximum, bool) or not isinstance(maximum, int) or maximum <= minimum):
         return None

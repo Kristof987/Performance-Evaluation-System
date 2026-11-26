@@ -72,8 +72,3 @@ def require_permission(*permission_names: str) -> Callable[..., models.User]:
         return user
 
     return check_permission
-
-
-def reject_conflicting_requester(requester_user_id: int | None, actor: models.User):
-    if requester_user_id is not None and requester_user_id != actor.id:
-        raise HTTPException(status_code=403, detail="Requester does not match authenticated user")

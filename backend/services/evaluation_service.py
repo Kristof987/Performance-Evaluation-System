@@ -1,6 +1,6 @@
 """Filling in questionnaires: what an employee may see and edit, answer validation, drafts and submission."""
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_
@@ -17,8 +17,7 @@ def issued_employee_questions(filled_form: models.FilledForm) -> list[dict]:
     snapshot = filled_form.form_snapshot
     if isinstance(snapshot, dict) and isinstance(snapshot.get("questions"), list):
         return snapshot["questions"]
-    # Historical issued snapshots may contain the question list directly.
-    return snapshot if isinstance(snapshot, list) else []
+    return []
 
 
 def questionnaire_can_edit(campaign: models.Campaign, filled_form: models.FilledForm, now: datetime) -> bool:
@@ -27,7 +26,7 @@ def questionnaire_can_edit(campaign: models.Campaign, filled_form: models.Filled
             and campaign.status == models.CampaignStatus.ACTIVE.value
             and not campaign.is_archived and campaign.start_date <= now
             and (campaign.end_date is None or now < campaign.end_date)
-            and isinstance(filled_form.form_snapshot, (dict, list)))
+            and isinstance(filled_form.form_snapshot, dict))
 
 
 def list_employee_evaluations(employee: models.Employee, db: Session) -> list[dict]:
@@ -112,7 +111,7 @@ def employee_questionnaire(employee: models.Employee, evaluation_id: int, db: Se
     ).first()
     if filled_form is None:
         raise HTTPException(status_code=404, detail="Assigned evaluation not found")
-    if not isinstance(filled_form.form_snapshot, (dict, list)):
+    if not isinstance(filled_form.form_snapshot, dict):
         raise HTTPException(status_code=403, detail="This questionnaire has not been issued")
     return {"evaluation": evaluation, "questions": issued_employee_questions(filled_form), "answers": filled_form.answers}
 
@@ -144,11 +143,11 @@ def update_assigned_questionnaire(*, user_id: int, evaluation_id: int, payload: 
         question = by_id[question_id]
         value = answer["value"]
         kind = question.get("type")
-        options = question.get("options", question.get("choices", []))
-        choices = [option if isinstance(option, str) else next((option[key] for key in ("id", "value", "label") if option.get(key) is not None), None) for option in options if isinstance(option, (str, dict))] if isinstance(options, list) else []
-        if kind in {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}:
+        options = question.get("options")
+        choices = [option.get("id") for option in options if isinstance(option, dict)] if isinstance(options, list) else []
+        if kind == "Scale":
             minimum = question.get("scale_min", 1)
-            maximum = question.get("scale_max", 10 if kind == "Scale 1-10" else 5)
+            maximum = question.get("scale_max", 5)
             valid = isinstance(value, int) and not isinstance(value, bool) and isinstance(minimum, int) and not isinstance(minimum, bool) and isinstance(maximum, int) and not isinstance(maximum, bool) and minimum <= value <= maximum
         elif kind == "Single choice":
             valid = isinstance(value, str) and value in choices
@@ -156,17 +155,10 @@ def update_assigned_questionnaire(*, user_id: int, evaluation_id: int, payload: 
             valid = isinstance(value, list) and len(value) > 0 and len(value) == len(set(str(item) for item in value)) and all(isinstance(item, str) and item in choices for item in value)
         elif kind == "Text":
             valid = isinstance(value, str) and value.strip() != ""
-        elif kind == "Number":
-            valid = isinstance(value, (int, float)) and not isinstance(value, bool)
-        elif kind == "Date":
-            try:
-                valid = isinstance(value, str) and len(value) == 10 and date.fromisoformat(value).isoformat() == value
-            except ValueError:
-                valid = False
         else:
             valid = False
         if not valid:
-            if kind in {"Scale", "Numerical scale", "Scale 1-5", "Scale 1-10"}:
+            if kind == "Scale":
                 detail = f"Rating for question {question_id} must be a whole number from {minimum} to {maximum}"
             elif kind in {"Single choice", "Multiple choice"}:
                 detail = f"Select valid issued options for question {question_id}"

@@ -42,8 +42,6 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_JSON_MODE: ${AI_JSON_MODE:-}
-      COMPASS_RUNTIME_ENV: local
-      COMPASS_AI_DIAGNOSTICS: "1"
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_STARTTLS: "false"

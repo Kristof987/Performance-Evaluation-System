@@ -40,8 +40,9 @@ class World:
         role = add(db, models.CompanyRole(name=f"Role {suffix}"))
         system_role = db.query(models.SystemRole).first() or add(db, models.SystemRole(name=f"System {suffix}"))
         self.form = add(db, models.Form(name=f"Questionnaire {suffix}", questions=[
-            {"id": "required", "text": "Feedback", "type": "Text", "required": True},
-            {"id": "score", "text": "Original rating", "type": "Numerical scale", "scale_min": 1, "scale_max": 5, "required": False},
+            {"type": "question", "question": {"id": "required", "text": "Feedback", "type": "Text", "required": True}},
+            {"type": "question", "question": {"id": "score", "text": "Original rating", "type": "Scale",
+                                              "scale_min": 1, "scale_max": 5, "required": False}},
         ]))
         status(db, "Not started")
         self.users, self.people = [], []
@@ -132,11 +133,12 @@ def test_review_keeps_submitted_answers_readable_and_hides_unfinished_ones(db):
 
 def test_issued_snapshot_survives_later_form_edits(db):
     world = World(db)
-    assert world.filled.form_snapshot["questions"][1]["text"] == "Original rating"
-    world.form.questions = [{"id": "score", "text": "Changed rating", "type": "Numerical scale", "scale_min": 1, "scale_max": 10}]
+    assert world.filled.form_snapshot["questions"][1]["question"]["text"] == "Original rating"
+    world.form.questions = [{"type": "question", "question": {"id": "score", "text": "Changed rating", "type": "Scale",
+                                                              "scale_min": 1, "scale_max": 10}}]
     db.flush()
     questions = world.get()["questions"]
-    assert [question["text"] for question in questions] == ["Feedback", "Original rating"]
+    assert [block["question"]["text"] for block in questions] == ["Feedback", "Original rating"]
     # Validation follows the issued 1-5 scale, not the edited 1-10 one.
     expect(400, world.save, [{"question_id": "score", "value": 8}])
     world.save([{"question_id": "required", "value": "Fine"}, {"question_id": "score", "value": 5}], submit=True)

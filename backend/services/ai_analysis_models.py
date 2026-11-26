@@ -115,21 +115,6 @@ class EmployeeAnalysisContext(AnalysisModel):
     warnings: list[DataQualityWarning]
 
 
-class NumericClaim(AnalysisModel):
-    marker: str = Field(min_length=6, max_length=7)
-    statistic_id: str = Field(min_length=1, max_length=160)
-    value: str = Field(min_length=1, max_length=32)
-
-
-class ComparisonClaim(AnalysisModel):
-    fact_id: str = Field(min_length=1, max_length=160)
-    direction: Literal["left_higher", "right_higher"]
-
-
-class ObservationClaim(AnalysisModel):
-    fact_id: str = Field(min_length=1, max_length=160)
-
-
 class GeneratedFinding(AnalysisModel):
     assessment: str = Field(min_length=1, max_length=1200)
     reasoning: str = Field(min_length=1, max_length=2000)
@@ -167,12 +152,7 @@ class AnalysisFinding(AnalysisModel):
     # Generated handle citations expand to all authorized source references for
     # each cited aggregate before this persisted contract is validated.
     supporting_evidence_ids: list[str] = Field(min_length=1, max_length=1000)
-    numeric_claims: list[NumericClaim] = Field(default_factory=list, max_length=20)
-    # Absent in historical versions; new claims bind qualitative prose to released facts.
-    comparison_claims: list[ComparisonClaim] = Field(default_factory=list, max_length=20)
-    observation_claims: list[ObservationClaim] = Field(default_factory=list, max_length=20)
-    # Present on new resolved analyses; legacy Drafts have no unified fact list.
-    fact_ids: list[str] | None = Field(default=None, max_length=20)
+    fact_ids: list[str] = Field(min_length=1, max_length=20)
     # How many distinct colleagues' written comments the finding draws on; set by the backend.
     comment_mentions: int | None = None
 
@@ -187,7 +167,7 @@ class AnalysisFinding(AnalysisModel):
     def unique_references(self):
         if any(not item.strip() for item in self.supporting_evidence_ids) or len(set(self.supporting_evidence_ids)) != len(self.supporting_evidence_ids):
             raise ValueError("Evidence references must be nonempty and unique")
-        if self.fact_ids is not None and (not self.fact_ids or len(set(self.fact_ids)) != len(self.fact_ids)):
+        if len(set(self.fact_ids)) != len(self.fact_ids):
             raise ValueError("Fact references must be nonempty and unique")
         return self
 
@@ -211,9 +191,8 @@ class AnalysisTheme(AnalysisModel):
 
 class EmployeeAIAnalysis(AnalysisModel):
     overall_assessment: AnalysisFinding
-    # Historical versions may hold up to five; new generations ask for three.
-    strengths: list[AnalysisFinding] = Field(max_length=5)
-    development_areas: list[AnalysisFinding] = Field(max_length=5)
+    strengths: list[AnalysisFinding] = Field(max_length=3)
+    development_areas: list[AnalysisFinding] = Field(max_length=3)
     themes: list[AnalysisTheme] = Field(default_factory=list, max_length=10)
     # Distinct colleagues who wrote comments the analysis could use; set by the backend.
     comment_authors: int | None = None

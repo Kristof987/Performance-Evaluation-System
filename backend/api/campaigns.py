@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
-from api.dependencies import get_db, reject_conflicting_requester, require_permission
+from api.dependencies import get_db, require_permission
 from services import campaign_service
 
 router = APIRouter()
@@ -14,7 +14,6 @@ router = APIRouter()
 @router.get("/campaigns/{campaign_id}/completion-status", response_model=schemas.CompletionStatusResponse)
 def get_campaign_completion_status(
     campaign_id: int,
-    requester_user_id: int | None = Query(default=None),
     search: str | None = Query(default=None),
     status: str | None = Query(default=None),
     overdue_only: bool = Query(default=False),
@@ -26,7 +25,6 @@ def get_campaign_completion_status(
     actor: models.User = Depends(require_permission("campaigns.read")),
 ):
     """Progress per evaluator. Who evaluates whom is never part of this view (requirement 7.4)."""
-    reject_conflicting_requester(requester_user_id, actor)
     return campaign_service.get_campaign_completion_status(campaign_id=campaign_id, search=search, status=status, overdue_only=overdue_only, sort=sort, order=order, page=page, page_size=page_size, db=db)
 
 

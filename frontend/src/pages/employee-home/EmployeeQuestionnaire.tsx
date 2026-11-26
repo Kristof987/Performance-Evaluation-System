@@ -20,15 +20,11 @@ type AnswerValue = QuestionnaireAnswer['value'];
 type SaveState = 'idle' | 'saved' | 'failed';
 
 function optionsFor(question: FormQuestion) {
-  const source = Array.isArray(question.options) ? question.options : Array.isArray(question.choices) ? question.choices : [];
-  return source.map((option) => typeof option === 'string' ? { value: option, label: option } : {
-    value: option.id ?? option.value ?? option.label,
-    label: option.label ?? option.text ?? option.value,
-  }).filter((option): option is { value: string; label: string } => typeof option.value === 'string' && typeof option.label === 'string');
+  return (question.options ?? []).map((option) => ({ value: option.id, label: option.label }));
 }
 
-function isScale(question: FormQuestion) { return ['Scale', 'Numerical scale', 'Scale 1-5', 'Scale 1-10'].includes(question.type); }
-function scaleLimits(question: FormQuestion) { return { min: question.scale_min ?? 1, max: question.scale_max ?? (question.type === 'Scale 1-10' ? 10 : 5) }; }
+function isScale(question: FormQuestion) { return question.type === 'Scale'; }
+function scaleLimits(question: FormQuestion) { return { min: question.scale_min ?? 1, max: question.scale_max ?? 5 }; }
 
 function isQuestionAnswered(question: FormQuestion, value: AnswerValue | undefined) {
   if (isScale(question)) {

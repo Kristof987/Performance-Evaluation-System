@@ -177,12 +177,10 @@ def transition_campaign(
             if errors:
                 raise CampaignLifecycleError("Snapshot issuance failed: " + "; ".join(errors))
             db.flush()
-            # Submitted legacy records without a snapshot are historical; do not
-            # overwrite them or block activation on an irrecoverable old form.
             pending = db.query(FilledForm.id).filter(
                 FilledForm.campaign_id == campaign.id,
                 FilledForm.finish_date.is_(None),
-                or_(FilledForm.form_snapshot.is_(None), FilledForm.form_snapshot == JSONB.NULL),
+                FilledForm.form_snapshot.is_(None),
                 FilledForm.answers == [],
             ).first()
             if pending is not None:
@@ -240,8 +238,8 @@ def deletion_blocker(db: Session, campaign: Campaign) -> str | None:
         return "Archived campaigns cannot be permanently deleted"
     if campaign.status not in {CampaignStatus.DRAFT.value, CampaignStatus.SCHEDULED.value}:
         return "Only draft or scheduled campaigns can be deleted"
-    if campaign.ever_issued or campaign.legacy_issuance_blocked:
-        return "Campaign has historical issuance or uncertain legacy provenance"
+    if campaign.ever_issued:
+        return "Campaign has already issued evaluations"
     if db.query(CampaignOperationAudit.id).filter(
         CampaignOperationAudit.campaign_id == campaign.id,
         CampaignOperationAudit.category == "snapshot_issuance",
@@ -258,9 +256,9 @@ def deletion_blocker(db: Session, campaign: Campaign) -> str | None:
     if db.query(FilledForm.id).filter(
         FilledForm.campaign_id == campaign.id,
         or_(FilledForm.finish_date.isnot(None),
-            (FilledForm.snapshot_status.isnot(None) & (FilledForm.snapshot_status != "legacy_unsnapshotted")),
+            FilledForm.snapshot_status.isnot(None),
             FilledForm.answers.notin_([[], {}, JSONB.NULL]),
-            (FilledForm.form_snapshot.isnot(None) & (FilledForm.form_snapshot != JSONB.NULL))),
+            FilledForm.form_snapshot.isnot(None)),
     ).first() is not None:
         return "Campaign has issued or answered evaluations"
     return None

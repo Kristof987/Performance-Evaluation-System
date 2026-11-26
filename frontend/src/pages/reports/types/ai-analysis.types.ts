@@ -1,15 +1,8 @@
-export type NumericClaim = { marker: string; statistic_id: string; value: string };
-export type ComparisonClaim = { fact_id: string; direction: 'left_higher' | 'right_higher' };
-export type ObservationClaim = { fact_id: string };
-
 export type AnalysisFinding = {
   assessment: string;
   reasoning: string;
   supporting_evidence_ids: string[];
-  numeric_claims: NumericClaim[];
-  comparison_claims?: ComparisonClaim[];
-  observation_claims?: ObservationClaim[];
-  fact_ids?: string[] | null;
+  fact_ids: string[];
   /** Distinct colleagues whose written comments the finding draws on; set by the server. */
   comment_mentions?: number | null;
 };
@@ -95,8 +88,8 @@ export type AnalysisVersion = {
 export type AIAnalysisHistory = {
   versions: AnalysisVersion[];
   can_manage: boolean;
-  can_generate?: boolean;
-  can_approve?: boolean;
+  can_generate: boolean;
+  can_approve: boolean;
   ai_enabled?: boolean;
   has_eligible_evidence: boolean;
   scope_label?: string;

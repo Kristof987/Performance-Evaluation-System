@@ -16,7 +16,6 @@ def create_form_snapshot(form: models.Form, db: Session) -> dict[str, Any]:
     for question in iter_snapshot_questions(questions):
         if not isinstance(question, dict):
             continue
-        # The deep copy retains any self-contained legacy JSON metadata unchanged.
         question.setdefault("scale_direction", "higher_is_better")
     return {
         "schema_version": 2,
@@ -39,8 +38,6 @@ def iter_snapshot_questions(structure: list[dict[str, Any]]):
                     yield question
         elif item.get("type") == "question" and isinstance(item.get("question"), dict):
             yield item["question"]
-        elif "text" in item:  # Previously issued flat questionnaires.
-            yield item
 
 
 def snapshot_form_name(filled_form: models.FilledForm, form: models.Form) -> str:

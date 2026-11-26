@@ -18,7 +18,7 @@ export type FormQuestion = {
   max_label?: string;
   /** One label per value, lowest first; when present every value is labelled, not just the endpoints. */
   scale_labels?: string[];
-  options?: ChoiceOption[] | string[];
+  options?: ChoiceOption[];
   [key: string]: unknown;
 };
 
@@ -114,7 +114,7 @@ function mapBlock(block: unknown, index: number): FormBlock {
   if (block && typeof block === 'object' && 'type' in block && block.type === 'question' && 'question' in block) {
     return { type: 'question', question: mapQuestion(block.question, index) };
   }
-  return { type: 'question', question: mapQuestion(block, index) };
+  throw new Error('Unsupported form structure.');
 }
 
 function mapForm(form: FormResponse): ReviewForm {

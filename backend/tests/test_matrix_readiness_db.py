@@ -37,7 +37,7 @@ def test_plan_follows_rules_and_issued_form_survives_rule_change(db):
     role = add(db, models.CompanyRole(name=f"Matrix role {suffix}"))
     system_role = db.query(models.SystemRole).first() or add(db, models.SystemRole(name=f"System {suffix}"))
     group = add(db, models.CompanyGroup(name=f"Matrix group {suffix}"))
-    question = [{"id": "q", "text": "Feedback", "type": "Text", "required": True}]
+    question = [{"type": "question", "question": {"id": "q", "text": "Feedback", "type": "Text", "required": True}}]
     form = add(db, models.Form(name=f"Matrix form {suffix}", questions=question))
     replacement = add(db, models.Form(name=f"Matrix replacement {suffix}", questions=question))
     actor = add(db, models.User(username=f"hr-{suffix}", email=f"hr-{suffix}@example.com", password_hash="",

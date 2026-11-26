@@ -1,6 +1,6 @@
 import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router'
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router'
 import { Auth0Provider } from '@auth0/auth0-react'
 import './styles/index.css'
 import Login from './pages/login/Login'
@@ -32,27 +32,10 @@ import FeedbackProvider from './components/feedback/FeedbackProvider'
 import ErrorBoundary from './components/feedback/ErrorBoundary'
 import LoadingState from './components/feedback/LoadingState'
 
-/** Detailed Results was retired: employee-scoped links open All Answers, the rest the Overview section. */
-function DetailedResultsRedirect() {
-  const { campaignId } = useParams()
-  const [params] = useSearchParams()
-  const employee = params.get('employee_id')
-  const section = params.get('section')
-  if (employee) return <Navigate to={`/reports/campaigns/${campaignId}/answers?employee=${encodeURIComponent(employee)}`} replace />
-  return <Navigate to={`/reports/campaigns/${campaignId}${section ? `?section=${encodeURIComponent(section)}` : ''}`} replace />
-}
-
-/** Old questionnaire links (e.g. in bookmarks) keep working. */
 /** Group leaders have no campaign-wide overview; their reports start at the employee list. */
 function CampaignOverviewRoute() {
   // Group leaders get the same Overview, limited by the backend to the groups they lead.
   return <ProtectedPage rule={ACCESS.reports}><CampaignOverviewPage /></ProtectedPage>
-}
-
-function LegacyEvaluationRedirect() {
-  const { id } = useParams()
-  const { search, hash } = useLocation()
-  return <Navigate to={`/evaluations/${id}${search}${hash}`} replace />
 }
 
 /** Requires a signed-in user and, when a rule is given, every permission it lists (see app/access.ts). */
@@ -112,7 +95,6 @@ export default function AppRoutes() {
         <Route path="/employee-home" element={page(['Dashboard'], <EmployeeHomeRoute />)} />
         <Route path="/my-evaluations" element={page(['My evaluations'], <MyEvaluationsPage />, ACCESS.evaluations)} />
         <Route path="/evaluations/:id" element={page(['Evaluation'], <EmployeeQuestionnaire />, ACCESS.evaluations)} />
-        <Route path="/employee-home/evaluations/:id" element={<LegacyEvaluationRedirect />} />
         <Route path="/people" element={page(['People'], <People />, ACCESS.people)} />
         <Route path="/forms" element={page(['Forms'], <Forms />, ACCESS.forms)} />
         <Route path="/campaigns" element={page(['Campaigns'], <Campaigns />, ACCESS.campaigns)} />
@@ -121,7 +103,6 @@ export default function AppRoutes() {
         <Route path="/reports" element={page(['Reports'], <ReportsIndexPage />, ACCESS.reports)} />
         <Route path="/reports/campaigns/:campaignId" element={page(['Overview', 'Reports'], <CampaignOverviewRoute />, ACCESS.reports)} />
         <Route path="/reports/campaigns/:campaignId/answers" element={page(['All answers', 'Reports'], <AllAnswersPage />, ACCESS.campaignReports)} />
-        <Route path="/reports/campaigns/:campaignId/detailed" element={<DetailedResultsRedirect />} />
         <Route path="/reports/campaigns/:campaignId/ai-analysis" element={page(['AI analysis', 'Reports'], <AIAnalysisPage />, ACCESS.campaignReports)} />
         <Route path="/reports/campaigns/:campaignId/questions" element={page(['Question analytics', 'Reports'], <QuestionAnalyticsPage />, ACCESS.campaignReports)} />
         <Route path="/reports/campaigns/:campaignId/groups" element={page(['Groups', 'Reports'], <GroupsRolesPage />, ACCESS.reports)} />

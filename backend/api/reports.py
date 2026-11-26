@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
-from api.dependencies import get_db, reject_conflicting_requester, require_permission
+from api.dependencies import get_db, require_permission
 from services import (
     answers_service,
     question_analytics_service,
@@ -19,20 +19,17 @@ router = APIRouter()
 
 
 @router.get("/reports/campaigns", response_model=list[schemas.ReportCampaignOption])
-def get_report_campaigns(requester_user_id: int | None = Query(default=None), db: Session = Depends(get_db),
+def get_report_campaigns(db: Session = Depends(get_db),
                          actor: models.User = Depends(require_permission("reports.read", "reports.read_team"))):
-    reject_conflicting_requester(requester_user_id, actor)
     return reporting_service.list_report_campaigns(actor, db)
 
 
 @router.get("/reports/campaigns/{campaign_id}/dashboard", response_model=schemas.CampaignDashboardResponse)
 def get_campaign_report_dashboard(
     campaign_id: int,
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     return report_dashboard_service.build_campaign_dashboard(campaign_id, actor, db)
 
 
@@ -42,11 +39,9 @@ def get_campaign_section_questions(
     section_id: int,
     group_ids: str = Query(default="", pattern=r"^(\d+(,\d+)*)?$"),
     role_ids: str = Query(default="", pattern=r"^(\d+(,\d+)*)?$"),
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     selected = list(dict.fromkeys(int(value) for value in group_ids.split(",") if value))
     roles = list(dict.fromkeys(int(value) for value in role_ids.split(",") if value))
     return report_dashboard_service.build_section_questions(campaign_id, section_id, selected, actor, db, role_ids=roles)
@@ -55,11 +50,9 @@ def get_campaign_section_questions(
 @router.get("/reports/campaigns/{campaign_id}/rating-distribution", response_model=schemas.ReportRatingDistributionResponse)
 def get_campaign_rating_distribution(
     campaign_id: int,
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     # Campaign-wide counts; for a group leader they are the company reference next to their groups.
     reporting_service.require_team_campaign(campaign_id, actor, db)
     return question_analytics_service.build_rating_distribution_report(campaign_id, actor, db)
@@ -68,7 +61,6 @@ def get_campaign_rating_distribution(
 @router.get("/reports/campaigns/{campaign_id}/questions", response_model=schemas.ReportQuestionsResponse)
 def get_campaign_report_questions(
     campaign_id: int,
-    requester_user_id: int | None = Query(default=None),
     group_id: int | None = Query(default=None),
     role_id: int | None = Query(default=None),
     employee_id: int | None = Query(default=None),
@@ -77,7 +69,6 @@ def get_campaign_report_questions(
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     if sum(value is not None for value in (group_id, role_id, employee_id)) > 1:
         raise HTTPException(status_code=400, detail="Select one Reports scope at a time")
     if perspective not in {"evaluatee", "evaluator"} or (perspective == "evaluator" and role_id is None):
@@ -104,11 +95,9 @@ def get_campaign_written_feedback(
     evaluation_type: Literal["peer", "self"] = Query(default="peer"),
     section_id: int | None = Query(default=None, gt=0),
     employee_id: int | None = Query(default=None, gt=0),
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     return reporting_service.build_written_feedback(
         campaign_id, question_key, evaluation_type, actor, db,
         employee_id=employee_id, section_id=section_id,
@@ -137,11 +126,9 @@ def get_employee_answers(
 @router.get("/reports/campaigns/{campaign_id}/groups")
 def get_campaign_report_groups(
     campaign_id: int,
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     reporting_service.enter_report_scope(actor, db)
     return reporting_service.build_groups_overview(campaign_id, actor, db)
 
@@ -150,11 +137,9 @@ def get_campaign_report_groups(
 def get_campaign_report_group_detail(
     campaign_id: int,
     group_id: int,
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     reporting_service.require_team_group(campaign_id, group_id, actor, db)
     return reporting_service.build_group_detail(campaign_id, group_id, actor, db)
 
@@ -163,11 +148,9 @@ def get_campaign_report_group_detail(
 def get_campaign_report_roles(
     campaign_id: int,
     perspective: str = Query(default="evaluatee"),
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     return reporting_service.build_roles_overview(campaign_id, actor, db, perspective)
 
 
@@ -176,22 +159,18 @@ def get_campaign_report_role_detail(
     campaign_id: int,
     role_id: int,
     perspective: str = Query(default="evaluatee"),
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     return reporting_service.build_role_detail(campaign_id, role_id, actor, db, perspective)
 
 
 @router.get("/reports/campaigns/{campaign_id}/employees")
 def get_campaign_report_employees(
     campaign_id: int,
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     reporting_service.enter_report_scope(actor, db)
     return reporting_service.build_employee_reports_overview(campaign_id, actor, db)
 
@@ -200,10 +179,8 @@ def get_campaign_report_employees(
 def get_campaign_report_employee_detail(
     campaign_id: int,
     employee_id: int,
-    requester_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    reject_conflicting_requester(requester_user_id, actor)
     reporting_service.require_team_employee(campaign_id, employee_id, actor, db)
     return reporting_service.build_employee_report_detail(campaign_id, employee_id, actor, db)

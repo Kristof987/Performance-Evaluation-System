@@ -8,7 +8,8 @@ from services.ai_analysis_models import AnalysisFinding, EmployeeAIAnalysis
 
 
 def analysis(reasoning="The employee rates their own work above the midpoint."):
-    finding = AnalysisFinding(assessment="Positive self-view", reasoning=reasoning, supporting_evidence_ids=["e1"])
+    finding = AnalysisFinding(assessment="Positive self-view", reasoning=reasoning, supporting_evidence_ids=["e1"],
+                            fact_ids=["F1"])
     return EmployeeAIAnalysis(overall_assessment=finding, strengths=[], development_areas=[])
 
 
@@ -44,8 +45,8 @@ def test_a_long_reasoning_keeps_whole_sentences_within_the_limit():
 def test_the_note_passes_the_prose_checks_an_approval_runs_again():
     note = generation.OTHERS_WITHHELD_NOTE
     number = re.compile(r"\d|%|\b(?:zero|two|three|four|five|six|seven|eight|nine|ten|percent|per cent)\b", re.I)
-    for rule in (number, generation._PEER, generation._SELF, generation._TREND, generation._TEMPORAL_TREND,
-                 generation._RANKING, generation._COMPARISON, generation._RELATIVE, generation._EXPLICIT_COMPARISON,
+    for rule in (number, generation._PEER, generation._SELF, generation._TEMPORAL_TREND,
+                 generation._RANKING, generation._RELATIVE, generation._EXPLICIT_COMPARISON,
                  generation._ACTION, generation._EMPLOYMENT_DECISION, generation._REVIEWER_CONSISTENCY,
                  generation._RATING_CONSISTENCY, generation._SELF_REPORTED_CONSISTENCY):
         assert not rule.search(note), rule.pattern

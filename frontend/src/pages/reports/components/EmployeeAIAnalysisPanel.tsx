@@ -28,10 +28,7 @@ const scopeCopy = {
   campaign: { intro: 'Generate a summary of the campaign’s reportable results.' },
 };
 
-/** New analyses carry at most three findings per side; older versions may hold more. */
 const MAX_FINDINGS = 3;
-
-const blankFinding = (evidenceId: string): AnalysisFinding => ({ assessment: '', reasoning: '', supporting_evidence_ids: [evidenceId], numeric_claims: [], comparison_claims: [], observation_claims: [] });
 
 type EvidenceGroup = { key: string; entries: Array<{ id: string; item: AnalysisEvidence | undefined }> };
 
@@ -352,21 +349,17 @@ function AIAnalysisPanel({ scope, getAccessToken }: Props) {
     setEditing((current) => current && { ...current, [section]: current[section].filter((_, position) => position !== index) });
   }
   function addFinding(section: 'strengths' | 'development_areas') {
-    const firstEvidence = Object.keys(selected?.evidence ?? {})[0];
-    if (firstEvidence) setEditing((current) => {
+    setEditing((current) => {
       if (!current) return current;
       const source = current.overall_assessment;
-      const next = source.fact_ids != null
-        ? { ...blankFinding(firstEvidence), fact_ids: [...source.fact_ids], supporting_evidence_ids: [...source.supporting_evidence_ids] }
-        : blankFinding(firstEvidence);
+      const next: AnalysisFinding = { assessment: '', reasoning: '', fact_ids: [...source.fact_ids], supporting_evidence_ids: [...source.supporting_evidence_ids] };
       return { ...current, [section]: [...current[section], next] };
     });
   }
 
-  // Older API responses only carried can_manage, which meant both generate and approve.
-  const canGenerate = history?.can_generate ?? history?.can_manage ?? false;
+  const canGenerate = history?.can_generate ?? false;
   const canEdit = history?.can_manage ?? false;
-  const canApprove = history?.can_approve ?? history?.can_manage ?? false;
+  const canApprove = history?.can_approve ?? false;
   const aiEnabled = history?.ai_enabled ?? true;
   const mayWrite = !selected?.outdated;
   const employeeScope = scope.type === 'employee';

@@ -27,8 +27,7 @@ const choiceTypes = new Set(['Single choice', 'Multiple choice']);
 const sectionKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 const emptyOption = (): ChoiceOption => ({ id: crypto.randomUUID(), label: '' });
 function optionsFor(question: FormQuestion): ChoiceOption[] {
-  if (!Array.isArray(question.options)) return [];
-  return question.options.map((option, index) => typeof option === 'string' ? { id: `legacy-${index}-${option}`, label: option } : option);
+  return question.options ?? [];
 }
 const initial = (name = 'Untitled form'): ReviewFormValues => ({ name, description: '', questions: [{ type: 'question', question: makeQuestion() }] });
 function importedQuestion(question: AIGeneratedQuestion): FormQuestion {
@@ -38,7 +37,7 @@ function importedQuestion(question: AIGeneratedQuestion): FormQuestion {
   return base;
 }
 const sectionQuestions = (blocks: FormBlock[], id: number) => blocks.find((block) => block.type === 'section' && block.section_id === id)?.type === 'section' ? (blocks.find((block) => block.type === 'section' && block.section_id === id) as Extract<FormBlock, { type: 'section' }>).questions : [];
-function isScale(question: FormQuestion) { return ['Scale', 'Scale 1-5', 'Scale 1-10'].includes(question.type); }
+function isScale(question: FormQuestion) { return question.type === 'Scale'; }
 
 export default function Forms() {
   const { state, retryAuth0, getAccessToken: getAccessTokenSilently } = useAppAuth();
@@ -557,7 +556,7 @@ function MoveControls({ item, position, count, onMove }: { item: MovingItem; pos
   return <div className="forms-move-controls"><button type="button" aria-label={`Move ${item.type} up`} title="Move up" disabled={position.index === 0} onClick={(event) => { event.stopPropagation(); onMove(item, destination(position.index - 1)); }}>↑</button><button type="button" aria-label={`Move ${item.type} down`} title="Move down" disabled={position.index === count - 1} onClick={(event) => { event.stopPropagation(); onMove(item, destination(position.index + 2)); }}>↓</button></div>;
 }
 function QuestionCard({ question, active, onSelect, onDelete, onMove, position, count }: { question: FormQuestion; active: boolean; onSelect: () => void; onDelete: () => void; onMove: (item: MovingItem, position: DropPosition) => void; position: DropPosition; count: number }) {
-  const range = isScale(question) ? ` · ${question.scale_min ?? 1}-${question.scale_max ?? (question.type === 'Scale 1-10' ? 10 : 5)}` : '';
+  const range = isScale(question) ? ` · ${question.scale_min ?? 1}-${question.scale_max ?? 5}` : '';
   return <div className={`card forms-editor-question${active ? ' active' : ''}`} onClick={onSelect}>
     <DragHandle item={{ type: 'question', id: question.id }} label="question" />
     <button type="button" className="forms-editor-q-main" aria-pressed={active} onClick={(event) => { event.stopPropagation(); onSelect(); }}>
@@ -636,7 +635,6 @@ function QuestionEditor({ question, sections, current, onUpdate, onMove, onDelet
     <button className="forms-editor-delete-link" onClick={onDelete}>Delete question</button>
     <label className="form-field forms-editor-field"><span className="form-label">Question text</span><textarea className="form-control" aria-label="Question text" value={question.text} onChange={(event) => onUpdate({ text: event.target.value })} /></label>
     <label className="form-field forms-editor-field"><span className="form-label">Question type</span><select className="form-control" aria-label="Question type" value={question.type} onChange={(event) => { const type = event.target.value; onUpdate({ type, options: choiceTypes.has(type) ? question.options ?? [] : undefined, ...(isScale({ ...question, type }) ? { scale_min: question.scale_min ?? 1, scale_max: question.scale_max ?? 5, scale_direction: 'higher_is_better' } : { scale_labels: undefined }) }); }}>
-      {!['Scale', 'Text', 'Single choice', 'Multiple choice'].includes(question.type) && <option value={question.type}>{question.type}</option>}
       <option value="Scale">Numerical scale</option><option>Text</option><option>Single choice</option><option>Multiple choice</option>
     </select></label>
     <label className="form-field forms-editor-field"><span className="form-label">Placement</span><select className="form-control" aria-label="Placement" value={current ?? ''} onChange={(event) => onMove(event.target.value === '' ? null : Number(event.target.value))}><option value="">Standalone / No section</option>{sections.map((section) => <option key={section.id} value={section.id}>{section.name}{section.is_archived ? ' (archived)' : ''}</option>)}</select></label>

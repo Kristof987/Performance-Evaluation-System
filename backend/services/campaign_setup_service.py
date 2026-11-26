@@ -563,15 +563,13 @@ def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.Camp
     for pair, existing in existing_by_pair.items():
         if campaign_service.assignment_is_immutable(existing):
             continue
-        if campaign.legacy_issuance_blocked and desired_by_pair.get(pair) != existing.form_id:
-            raise HTTPException(status_code=409, detail="Historical planned assignments cannot be changed through migrated-campaign issuance")
         if pair not in desired_by_pair:
             db.delete(existing)
             removed_count += 1
         else:
             existing.form_id = desired_by_pair[pair]
 
-    remaining_pairs = {(form.evaluator_id, form.evaluatee_id) for form in existing_forms if campaign.legacy_issuance_blocked or campaign_service.assignment_is_immutable(form) or (form.company_group_id, form.evaluator_id, form.evaluatee_id) in desired_by_pair}
+    remaining_pairs = {(form.evaluator_id, form.evaluatee_id) for form in existing_forms if campaign_service.assignment_is_immutable(form) or (form.company_group_id, form.evaluator_id, form.evaluatee_id) in desired_by_pair}
     for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
         if (group_id, evaluator_id, evaluatee_id) not in existing_by_pair and (evaluator_id, evaluatee_id) in remaining_pairs:
             raise HTTPException(status_code=409, detail="This evaluator/evaluatee pair already has an assignment in this campaign")
@@ -580,7 +578,6 @@ def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.Camp
     status = campaign_service.get_or_create_default_form_status(db)
 
     created_count = 0
-    created_records = []
     for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
         if (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
             continue
@@ -600,13 +597,8 @@ def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.Camp
             snapshot_status=None,
         )
         db.add(record)
-        created_records.append(record)
         created_count += 1
 
-    if campaign.legacy_issuance_blocked and campaign.status in {
-        models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value,
-    } and created_records:
-        raise HTTPException(status_code=409, detail="New pairs in migrated campaigns require a verified issuance path")
     db.flush()
     campaign_service.unschedule_if_incomplete(campaign, db, manager.id)
     db.commit()
@@ -623,9 +615,8 @@ def issue_ready_campaign_evaluations(*, campaign_id: int, db: Session, manager: 
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    if (campaign.is_archived or campaign.status != models.CampaignStatus.ACTIVE.value
-            or campaign.legacy_issuance_blocked):
-        raise HTTPException(status_code=409, detail="Only active campaigns with verified provenance can issue planned evaluations")
+    if campaign.is_archived or campaign.status != models.CampaignStatus.ACTIVE.value:
+        raise HTTPException(status_code=409, detail="Only active campaigns can issue planned evaluations")
     now = datetime.now(timezone.utc)
     if campaign.start_date > now or campaign.end_date is not None and campaign.end_date <= now:
         raise HTTPException(status_code=409, detail="The campaign deadline has passed; extend it before issuing new evaluations")
@@ -780,11 +771,9 @@ def update_campaign_setup(*, campaign_id: int, payload: schemas.CampaignSetupUpd
             existing_pairs.add(key)
             if campaign_service.assignment_is_immutable(row) and (key not in selected or selected[key] != row.form_id):
                 raise HTTPException(status_code=409, detail="Issued evaluations cannot be changed or removed")
-            if campaign.legacy_issuance_blocked and not campaign_service.assignment_is_immutable(row) and (key not in selected or selected[key] != row.form_id):
-                raise HTTPException(status_code=409, detail="Historical planned assignments cannot be changed")
         relocated = {}
         for row in existing_assignments:
-            if row.company_group_id not in removed_groups or campaign_service.assignment_is_immutable(row) or campaign.legacy_issuance_blocked:
+            if row.company_group_id not in removed_groups or campaign_service.assignment_is_immutable(row):
                 continue
             pair = (row.evaluator_id, row.evaluatee_id)
             if any((other.evaluator_id, other.evaluatee_id) == pair and other.id != row.id for other in existing_assignments):
@@ -814,7 +803,7 @@ def update_campaign_setup(*, campaign_id: int, payload: schemas.CampaignSetupUpd
                 raise HTTPException(status_code=409, detail="Issued self-evaluations cannot be changed")
 
         for row in existing_assignments:
-            if not campaign_service.assignment_is_immutable(row) and not campaign.legacy_issuance_blocked:
+            if not campaign_service.assignment_is_immutable(row):
                 key = relocated.get(row.id, (row.company_group_id, row.evaluator_id, row.evaluatee_id))
                 if key not in selected:
                     db.delete(row)

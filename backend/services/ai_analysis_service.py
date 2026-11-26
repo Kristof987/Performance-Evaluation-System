@@ -29,7 +29,7 @@ from services.ai_analysis_models import (
 
 
 def _issued_questions(snapshot: object) -> list[tuple[dict, int | None, str | None]]:
-    """Accept v2 blocks and its explicitly supported historical flat-question layout."""
+    """Accept only schema-v2 section and question blocks."""
     if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 2 or not isinstance(snapshot.get("questions"), list):
         raise ValueError("unsupported_snapshot_schema")
     issued = []
@@ -45,8 +45,6 @@ def _issued_questions(snapshot: object) -> list[tuple[dict, int | None, str | No
             issued.extend((question, section_id, section["name"]) for question in questions)
         elif block.get("type") == "question":
             issued.append((block.get("question"), None, None))
-        elif "text" in block:  # Historical flat question in a v2 issued snapshot.
-            issued.append((block, None, None))
         else:
             raise ValueError("malformed_snapshot")
     ids = []

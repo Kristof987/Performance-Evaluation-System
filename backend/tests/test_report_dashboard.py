@@ -67,7 +67,7 @@ class World:
     def snapshot(self):
         return {"schema_version": 2, "questions": [
             {"type": "section", "section_id": section.id, "section": {"id": section.id, "name": section.name},
-             "questions": [{"id": f"q{section.id}", "type": "Scale 1-5", "text": "How well?"}]}
+             "questions": [{"id": f"q{section.id}", "type": "Scale", "scale_min": 1, "scale_max": 5, "text": "How well?"}]}
             for section in (self.section_a, self.section_b)]}
 
     def review(self, campaign, group, evaluator, evaluatee, alpha, beta, *, completed=True):

@@ -8,14 +8,12 @@ from sqlalchemy.orm import Session
 import models
 from services import campaign_lifecycle, form_service, people_service
 from sqlalchemy import or_
-from sqlalchemy.dialects.postgresql import JSONB
 from datetime import date
 from services import campaign_reminder_service
 from services import form_snapshot_service
 from business_calendar import business_date
 from business_calendar import business_today as campaign_today
 from business_calendar import campaign_instant
-from sqlalchemy import and_
 from sqlalchemy import case
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -23,7 +21,6 @@ import schemas
 
 
 def assignment_is_immutable(assignment):
-    # Existing answers without a snapshot are historical and must also stay untouched.
     return assignment.form_snapshot is not None or assignment.finish_date is not None or bool(assignment.answers)
 
 
@@ -132,8 +129,7 @@ def require_mutable_campaign_configuration(campaign: models.Campaign) -> None:
 
 
 def unissued_snapshot_filter():
-    # Older planned rows may contain JSON null; new rows use SQL NULL.
-    return or_(models.FilledForm.form_snapshot.is_(None), models.FilledForm.form_snapshot == JSONB.NULL)
+    return models.FilledForm.form_snapshot.is_(None)
 
 
 def campaigns_referencing_form(form_id: int, db: Session) -> list[models.Campaign]:
@@ -267,14 +263,14 @@ def require_mutable_campaign_plan(campaign: models.Campaign) -> None:
 
 
 def issued_snapshot_filter():
-    return and_(models.FilledForm.form_snapshot.isnot(None), models.FilledForm.form_snapshot != JSONB.NULL)
+    return models.FilledForm.form_snapshot.isnot(None)
 
 
 def ensure_campaign_issued(campaign_id: int, db: Session, *, commit: bool = True,
                            actor_user_id: int | None = None):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     now = datetime.now(timezone.utc)
-    if (campaign is None or campaign.legacy_issuance_blocked
+    if (campaign is None
             or campaign.status != models.CampaignStatus.ACTIVE.value
             or campaign.is_archived or campaign.start_date > now
             or (campaign.end_date is not None and campaign.end_date <= now)):
@@ -305,9 +301,6 @@ def issue_activation_snapshots(campaign: models.Campaign, db: Session,
         models.FilledForm.campaign_id == campaign.id,
         unissued_snapshot_filter(),
     ).order_by(models.FilledForm.id).all():
-        # Historical answers cannot be reconstructed from today's editable form.
-        if assignment.finish_date is not None or assignment.answers:
-            continue
         if assignment.form_id is None:
             if require_all:
                 errors.append(f"Assignment {assignment.id}: select a form before issuance")

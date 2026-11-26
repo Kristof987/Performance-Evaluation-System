@@ -33,9 +33,9 @@ class SectionValidationTests(unittest.TestCase):
                     expected = HTTPException if constraint == "uq_section_scope_name" else IntegrityError
                     with self.assertRaises(expected) as error:
                         if endpoint is sections.create_section:
-                            endpoint(schemas.SectionCreate(name="Test section"), requester_user_id=1, db=db, actor=ACTOR)
+                            endpoint(schemas.SectionCreate(name="Test section"), db=db, actor=ACTOR)
                         else:
-                            endpoint(1, schemas.SectionUpdate(name="Test section"), requester_user_id=1, db=db, actor=ACTOR)
+                            endpoint(1, schemas.SectionUpdate(name="Test section"), db=db, actor=ACTOR)
                     db.rollback.assert_called_once()
                     if expected is HTTPException:
                         self.assertEqual(error.exception.status_code, 409)
@@ -48,7 +48,7 @@ class SectionValidationTests(unittest.TestCase):
         failure = ProgrammingError("statement", {}, Exception("relation sections does not exist"))
         db.commit.side_effect = failure
         with self.assertRaises(ProgrammingError) as error:
-            sections.create_section(schemas.SectionCreate(name="Test section"), requester_user_id=1, db=db, actor=ACTOR)
+            sections.create_section(schemas.SectionCreate(name="Test section"), db=db, actor=ACTOR)
         self.assertIs(error.exception, failure)
 
 

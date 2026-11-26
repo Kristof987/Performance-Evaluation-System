@@ -60,7 +60,7 @@ class World:
     def snapshot(self):
         return {"schema_version": 2, "questions": [
             {"type": "section", "section_id": self.section.id, "section": {"id": self.section.id, "name": self.section.name},
-             "questions": [{"id": "rating", "type": "Scale 1-5", "text": "Works well with others"},
+             "questions": [{"id": "rating", "type": "Scale", "scale_min": 1, "scale_max": 5, "text": "Works well with others"},
                            {"id": "pick", "type": "Multiple choice", "text": "Strong areas",
                             "options": [{"id": "o1", "label": "Planning"}, {"id": "o2", "label": "Support"}, {"id": "o3", "label": "Focus"}]}]},
             {"type": "question", "question": {"id": "comment", "type": "Text", "text": "What should they keep doing?"}}]}

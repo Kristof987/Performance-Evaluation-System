@@ -588,9 +588,6 @@ class Campaign(Base):
     launch_email_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     # False: the workspace default reminders apply; True: this campaign's own campaign_reminders rows do.
     custom_reminders = Column(Boolean, nullable=False, default=False, server_default="false")
-    # Compatibility boundary: migration-era campaigns must not acquire new snapshots
-    # through the old, date/flag-driven issuance path before lifecycle integration.
-    legacy_issuance_blocked = Column(Boolean, nullable=False, default=False, server_default="false")
     lifecycle_error = Column(String, nullable=True)
     lifecycle_retry_at = Column(DateTime(timezone=True), nullable=True)
     lifecycle_attempts = Column(Integer, nullable=False, default=0, server_default="0")

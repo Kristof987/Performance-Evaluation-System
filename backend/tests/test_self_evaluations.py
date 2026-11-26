@@ -20,7 +20,7 @@ class CampaignSelfEvaluationTests(unittest.TestCase):
         role = models.CompanyRole(name=f"Self role {suffix}")
         system_role = models.SystemRole(name=f"Self system {suffix}")
         self.groups = [models.CompanyGroup(name=f"Self group {index} {suffix}") for index in range(2)]
-        self.forms = [models.Form(name=f"Self form {index} {suffix}", questions=[{"id": "q", "text": "How did it go?", "type": "Text", "required": True}]) for index in range(2)]
+        self.forms = [models.Form(name=f"Self form {index} {suffix}", questions=[{"type": "question", "question": {"id": "q", "text": "How did it go?", "type": "Text", "required": True}}]) for index in range(2)]
         self.db.add_all([role, system_role, *self.groups, *self.forms])
         self.db.flush()
         accounts = [

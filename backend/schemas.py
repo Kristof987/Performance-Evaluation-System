@@ -541,7 +541,7 @@ class ReportCampaignOption(BaseModel):
 
     @field_validator("start_date", "end_date", mode="before")
     @classmethod
-    def preserve_legacy_calendar_date(cls, value):
+    def to_business_date(cls, value):
         return business_date(value)
 
 

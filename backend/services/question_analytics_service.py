@@ -29,16 +29,13 @@ class Observation:
 
 
 def _options(question: dict) -> list[dict] | None:
-    raw = question.get("options", question.get("choices"))
+    raw = question.get("options")
     if not isinstance(raw, list) or len(raw) < 2:
         return None
     options = []
     for option in raw:
-        if isinstance(option, str):
-            options.append({"value": option, "label": option, "definition": {"label": option}})
-        elif isinstance(option, dict):
-            value = next((option[field] for field in ("id", "value", "label") if isinstance(option.get(field), str)), None)
-            label = option.get("label")
+        if isinstance(option, dict):
+            value, label = option.get("id"), option.get("label")
             if not isinstance(value, str) or not isinstance(label, str):
                 return None
             # Generated option IDs identify issued answers, not cross-Form semantics.
@@ -73,7 +70,7 @@ def _definition(question: dict, section_id: int | None) -> tuple[str, dict] | No
     else:
         return None
     # Include issued answer-domain metadata, not presentation/order, UUIDs or requiredness.
-    excluded = {"id", "text", "type", "required", "options", "choices", "scale_min", "scale_max",
+    excluded = {"id", "text", "type", "required", "options", "scale_min", "scale_max",
                 "dimension", "dimension_id", "dimensionId", "section_id"}
     config.update({key: value for key, value in question.items() if key not in excluded})
     identity = [kind, " ".join(text.split()).casefold(), section_id, config]
