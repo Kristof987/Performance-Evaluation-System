@@ -18,7 +18,7 @@ from services import permissions
 from services import reporting_service
 from services.form_snapshot_service import snapshot_form_name
 from services.question_analytics_service import _options
-from services.section_scoring_service import RATING_TYPES, _rating_range
+from services.section_scoring_service import rating_range
 
 ANSWER_STATUSES = (models.CampaignStatus.ACTIVE, models.CampaignStatus.REVIEW,
                    models.CampaignStatus.PAUSED, models.CampaignStatus.CLOSED)
@@ -75,10 +75,8 @@ def _answer(question: dict, value: Any, answered: bool) -> dict[str, Any] | None
                               "text": text.strip(), "type": kind, "required": bool(question.get("required")),
                               "rating": None, "rating_label": None, "scale_min": None, "scale_max": None, "choices": [], "text_answer": None,
                               "answered": False}
-    if kind in RATING_TYPES:
-        bounds = _rating_range(question)
-        if bounds is None:
-            return None
+    if kind == "Scale":
+        bounds = rating_range(question)
         result["scale_min"], result["scale_max"] = bounds
         if answered and isinstance(value, int) and not isinstance(value, bool) and bounds[0] <= value <= bounds[1]:
             result["rating"], result["answered"] = value, True

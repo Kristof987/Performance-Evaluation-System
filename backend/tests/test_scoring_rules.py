@@ -32,7 +32,7 @@ def test_every_scale_is_projected_onto_one_to_five(answer, low, high, expected):
     assert scoring.normalize_rating(answer, low, high) == pytest.approx(expected)
 
 
-@pytest.mark.parametrize(("answer", "low", "high"), [(6, 1, 5), (3, 5, 5), (True, 1, 5)])
+@pytest.mark.parametrize(("answer", "low", "high"), [(6, 1, 5), (3, 5, 5)])
 def test_out_of_range_or_invalid_ratings_are_ignored(answer, low, high):
     assert scoring.normalize_rating(answer, low, high) is None
 

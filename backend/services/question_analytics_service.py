@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 import models
 from services import reporting_service
-from services.section_scoring_service import RATING_TYPES, _rating_range, normalize_rating
+from services.section_scoring_service import normalize_rating, rating_range
 
 
 @dataclass(frozen=True)
@@ -50,10 +50,8 @@ def _definition(question: dict, section_id: int | None) -> tuple[str, dict] | No
     kind, text = question.get("type"), question.get("text")
     if not isinstance(text, str) or not text.strip():
         return None
-    if kind in RATING_TYPES:
-        bounds = _rating_range(question)
-        if bounds is None:
-            return None
+    if kind == "Scale":
+        bounds = rating_range(question)
         category = "rating"
         config: dict[str, Any] = {"bounds": bounds}
     elif kind in {"Single choice", "Multiple choice"}:
