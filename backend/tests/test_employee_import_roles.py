@@ -8,7 +8,7 @@ from openpyxl import Workbook
 
 import models
 from database import SessionLocal
-from services import invitation_service, people_service, permissions
+from services import invitation_service, people_import_service, permissions
 
 HR = {"employees.manage", "evaluations.submit", "settings.read"}
 ASSIGNER = HR | {"roles.assign", "reports.read_team"}
@@ -49,7 +49,7 @@ def roles(db, monkeypatch):
 def upload(*rows):
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(people_service.EMPLOYEE_IMPORT_HEADERS)
+    sheet.append(people_import_service.EMPLOYEE_IMPORT_HEADERS)
     for row in rows:
         sheet.append(row)
     buffer = io.BytesIO()
@@ -71,14 +71,14 @@ def system_role_of(db, email):
 @pytest.mark.parametrize("value", [None, "Employee", "employee"])
 def test_hr_without_role_assignment_imports_employees(db, roles, value):
     row, email = person(value)
-    result = people_service.import_people_employees(file=upload(row), db=db, actor=roles.importer)
+    result = people_import_service.import_people_employees(file=upload(row), db=db, actor=roles.importer)
     assert result["errors"] == [] and result["created_count"] == 1
     assert system_role_of(db, email) == "Employee"
 
 
 def test_hr_without_role_assignment_cannot_import_other_roles(db, roles):
     row, email = person("Manager")
-    result = people_service.import_people_employees(file=upload(row), db=db, actor=roles.importer)
+    result = people_import_service.import_people_employees(file=upload(row), db=db, actor=roles.importer)
     assert result["created_count"] == 0
     assert "not allowed to assign" in result["errors"][0] and "Leave the column empty" in result["errors"][0]
     assert system_role_of(db, email) is None
@@ -87,15 +87,15 @@ def test_hr_without_role_assignment_cannot_import_other_roles(db, roles):
 def test_role_assigners_import_roles_they_fully_hold(db, roles):
     roles.grant(set(ASSIGNER))
     row, email = person("Manager")
-    assert people_service.import_people_employees(file=upload(row), db=db, actor=roles.importer)["errors"] == []
+    assert people_import_service.import_people_employees(file=upload(row), db=db, actor=roles.importer)["errors"] == []
     assert system_role_of(db, email) == "Manager"
 
     stronger, _ = person("Admin")
-    result = people_service.import_people_employees(file=upload(stronger), db=db, actor=roles.importer)
+    result = people_import_service.import_people_employees(file=upload(stronger), db=db, actor=roles.importer)
     assert result["created_count"] == 0 and "not allowed to assign" in result["errors"][0]
 
 
 def test_unknown_roles_are_named(db, roles):
     row, _ = person("Wizard")
-    result = people_service.import_people_employees(file=upload(row), db=db, actor=roles.importer)
+    result = people_import_service.import_people_employees(file=upload(row), db=db, actor=roles.importer)
     assert result["errors"] == ["Row 2: Employee System Role “Wizard” does not exist."]

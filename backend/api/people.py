@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from api.dependencies import get_db, require_permission
-from services import people_service
+from services import people_import_service, people_service
 
 router = APIRouter()
 
@@ -92,10 +92,10 @@ def remove_people_group_member(
 @router.post("/people/groups/import", response_model=schemas.PeopleGroupImportResponse)
 def import_people_groups(file: UploadFile = File(...), db: Session = Depends(get_db),
                          _group_manager: models.User = Depends(require_permission("groups.manage"))):
-    return people_service.import_people_groups(file=file, db=db)
+    return people_import_service.import_people_groups(file=file, db=db)
 
 
 @router.post("/people/employees/import", response_model=schemas.PeopleEmployeeImportResponse)
 def import_people_employees(file: UploadFile = File(...), db: Session = Depends(get_db),
                             actor: models.User = Depends(require_permission("employees.manage"))):
-    return people_service.import_people_employees(file=file, db=db, actor=actor)
+    return people_import_service.import_people_employees(file=file, db=db, actor=actor)

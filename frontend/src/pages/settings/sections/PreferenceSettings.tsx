@@ -69,7 +69,6 @@ export default function PreferenceSettings() {
           <option value="locale">Locale format</option><option value="iso">ISO (YYYY-MM-DD)</option>
         </select>
       </label>
-
       {error && <InlineMessage tone="error" onDismiss={() => setError('')}>{error} Changes were rolled back.</InlineMessage>}
     </section>
     {(dirty || saving) && <div className="settings-save-bar" aria-busy={saving}>

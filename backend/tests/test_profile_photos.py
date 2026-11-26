@@ -74,6 +74,7 @@ def test_transparent_png_is_accepted():
     (b"", 400),
     (b"not an image at all", 400),
     (image_bytes("GIF", mode="L"), 400),
+    (image_bytes("WEBP"), 400),
     (b"0" * (service.MAX_UPLOAD_BYTES + 1), 413),
 ])
 def test_invalid_uploads_are_rejected(data, status):

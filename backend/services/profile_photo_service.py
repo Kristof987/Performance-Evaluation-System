@@ -62,8 +62,6 @@ def remove_photo(employee: models.Employee, db: Session) -> None:
 
 
 def find_servable_photo(photo_id: str, db: Session) -> models.ProfilePhoto | None:
-    if len(photo_id) != 32 or not all(char in "0123456789abcdef" for char in photo_id):
-        return None
     return (db.query(models.ProfilePhoto)
             .join(models.Employee, models.Employee.id == models.ProfilePhoto.employee_id)
             .filter(models.ProfilePhoto.id == photo_id, models.Employee.is_active.is_(True))

@@ -18,9 +18,6 @@ from services import (
 )
 
 from services.employee_creation import DEFAULT_SYSTEM_ROLE, add_employee, get_or_create_company_role
-from services.people_import_service import (
-    EMPLOYEE_IMPORT_HEADERS, GROUP_IMPORT_HEADERS, import_people_employees, import_people_groups,
-)
 
 
 def group_member_counts(group_ids: list[int], db: Session) -> dict[int, int]:
@@ -178,7 +175,7 @@ def create_people_employee(*, employee: schemas.PeopleEmployeeCreate, db: Sessio
 
 
 def update_people_employee(*, employee_id: int, employee: schemas.PeopleEmployeeUpdate, db: Session):
-    person = db.query(models.Employee).filter(models.Employee.id == employee_id).with_for_update().first()
+    person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
     user = person.user
@@ -327,7 +324,7 @@ def add_people_group_member(*, group_id: int, member: schemas.PeopleGroupMemberC
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    person = db.query(models.Employee).filter(models.Employee.id == member.employee_id).with_for_update().first()
+    person = db.query(models.Employee).filter(models.Employee.id == member.employee_id).first()
     if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
 
@@ -351,7 +348,7 @@ def remove_people_group_member(*, group_id: int, employee_id: int, db: Session):
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    person = db.query(models.Employee).filter(models.Employee.id == employee_id).with_for_update().first()
+    person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
 
