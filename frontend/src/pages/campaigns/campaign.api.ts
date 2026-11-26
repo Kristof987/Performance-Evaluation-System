@@ -399,25 +399,3 @@ export async function updateCampaignEvaluationMatrix(
     keptCompletedCount: response.kept_completed_count,
   };
 }
-
-export async function updateCampaignSetup(
-  getAccessToken: AccessTokenGetter,
-  id: string,
-  groupIds: number[],
-  rules: Array<{ companyGroupId: number; evaluatorRoleId: number; evaluateeRoleId: number; formId: number }>,
-  selfEvaluations: Array<{ employeeId: number; formId: number | null }>,
-  assignments: Array<{ companyGroupId: number; evaluatorId: number; evaluateeId: number }>,
-): Promise<CampaignEvaluationMatrix> {
-  const response = await requestCampaigns<CampaignEvaluationMatrixResponse>(
-    getAccessToken, `/${encodeURIComponent(id)}/setup`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        group_ids: groupIds,
-        rules: rules.map((rule) => ({ company_group_id: rule.companyGroupId, evaluator_role_id: rule.evaluatorRoleId, evaluatee_role_id: rule.evaluateeRoleId, form_id: rule.formId })),
-        self_evaluations: selfEvaluations.map((item) => ({ employee_id: item.employeeId, form_id: item.formId })),
-        assignments: assignments.map((item) => ({ company_group_id: item.companyGroupId, evaluator_id: item.evaluatorId, evaluatee_id: item.evaluateeId })),
-      }),
-    }, 'Campaign setup could not be saved.',
-  );
-  return mapCampaignEvaluationMatrix(response);
-}

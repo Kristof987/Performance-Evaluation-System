@@ -906,20 +906,6 @@ class CampaignEvaluationMatrixUpdate(BaseModel):
     assignments: list[CampaignEvaluationMatrixUpdateItem] = Field(default_factory=list)
 
 
-class CampaignSetupMembershipChange(BaseModel):
-    company_group_id: int
-    employee_id: int
-    included: bool
-
-
-class CampaignSetupUpdate(BaseModel):
-    group_ids: list[int]
-    rules: list[CampaignEvaluationRuleUpdateItem]
-    self_evaluations: list[CampaignSelfEvaluationAssignment]
-    assignments: list[CampaignEvaluationMatrixUpdateItem]
-    memberships: list[CampaignSetupMembershipChange] = Field(default_factory=list)
-
-
 class CampaignSetupPreviewResponse(BaseModel):
     rules: CampaignEvaluationRulesResponse
     self_evaluations: CampaignSelfEvaluationsResponse

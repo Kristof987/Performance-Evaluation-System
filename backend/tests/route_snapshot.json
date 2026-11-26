@@ -106,7 +106,6 @@
  "PUT /campaigns/{campaign_id}/evaluation-rules update_campaign_evaluation_rules",
  "PUT /campaigns/{campaign_id}/groups update_campaign_groups",
  "PUT /campaigns/{campaign_id}/self-evaluations update_campaign_self_evaluations",
- "PUT /campaigns/{campaign_id}/setup update_campaign_setup",
  "PUT /form-templates/{template_id} update_form_template",
  "PUT /forms/{form_id} update_form",
  "PUT /me/profile-photo upload_my_profile_photo",

@@ -70,10 +70,3 @@ def get_campaign_setup_preview(campaign_id: int, group_ids: list[int] = Query(de
                                db: Session = Depends(get_db),
                                _reader: models.User = Depends(require_permission("campaigns.read"))):
     return campaign_setup_service.get_campaign_setup_preview(campaign_id=campaign_id, group_ids=group_ids, db=db)
-
-
-@router.put("/campaigns/{campaign_id}/setup", response_model=schemas.CampaignEvaluationMatrixResponse)
-def update_campaign_setup(campaign_id: int, payload: schemas.CampaignSetupUpdate, db: Session = Depends(get_db),
-                          manager: models.User = Depends(require_permission("campaigns.manage"))):
-    """Replace a draft/scheduled configuration in one transaction, without issuing forms."""
-    return campaign_setup_service.update_campaign_setup(campaign_id=campaign_id, payload=payload, db=db, manager=manager)

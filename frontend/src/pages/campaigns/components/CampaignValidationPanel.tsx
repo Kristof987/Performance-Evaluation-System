@@ -69,7 +69,7 @@ function formatIssue(source: string, context: Context): CampaignIssue {
   return { message: `${message}.`, section, groupId };
 }
 
-export function campaignFeedbackFromError(error: unknown, action: 'schedule' | 'unschedule' | 'setup', context: Context): CampaignFeedback {
+export function campaignFeedbackFromError(error: unknown, action: 'schedule' | 'unschedule', context: Context): CampaignFeedback {
   if (error instanceof ApiAccessError) return {
     kind: 'authorization', title: error.status === 401 ? 'Sign in again' : 'You cannot change this campaign',
     description: error.status === 401 ? 'Your session could not be verified. Sign in again before retrying.' : 'Your account does not have permission to perform this action.', issues: [],

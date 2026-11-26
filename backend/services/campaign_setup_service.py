@@ -3,11 +3,9 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 import models
-from services import permissions
 import schemas
 from services import campaign_service, form_service, people_service, reporting_service
 
@@ -48,11 +46,13 @@ def update_campaign_groups(*, campaign_id: int, payload: schemas.CampaignGroupsU
             raise HTTPException(status_code=400, detail="One or more groups do not exist")
 
     removed_ids = set(campaign_service.get_campaign_assigned_group_ids(campaign_id, db)) - set(unique_group_ids)
+    # Before launch a removed group takes its dependent setup with it; once running, it must be emptied first.
+    replanning = campaign.status in {models.CampaignStatus.DRAFT.value, models.CampaignStatus.SCHEDULED.value}
     if removed_ids:
-        has_rules = db.query(models.CampaignEvaluationRule.id).filter(
+        group_rules = db.query(models.CampaignEvaluationRule).filter(
             models.CampaignEvaluationRule.campaign_id == campaign_id,
             models.CampaignEvaluationRule.company_group_id.in_(removed_ids),
-        ).first() is not None
+        ).all()
         group_assignments = db.query(models.FilledForm).filter(
             models.FilledForm.campaign_id == campaign_id,
             models.FilledForm.company_group_id.in_(removed_ids),
@@ -60,8 +60,11 @@ def update_campaign_groups(*, campaign_id: int, payload: schemas.CampaignGroupsU
         has_evaluations = any(campaign_service.assignment_is_immutable(record) for record in group_assignments)
         if has_evaluations:
             raise HTTPException(status_code=409, detail="Groups with issued evaluations cannot be removed")
-        if has_rules:
+        if group_rules and not replanning:
             raise HTTPException(status_code=409, detail="Remove saved form rules before deselecting these groups")
+        for rule in group_rules:
+            db.delete(rule)
+        db.flush()
         remaining_members = {group_id: {person.id: person for person, _ in people_service.get_group_employees(group_id, db)}
                              for group_id in unique_group_ids}
         occupied = {(row.evaluator_id, row.evaluatee_id) for row in db.query(models.FilledForm).filter(
@@ -70,12 +73,15 @@ def update_campaign_groups(*, campaign_id: int, payload: schemas.CampaignGroupsU
         ).all()}
         for record in group_assignments:
             pair = (record.evaluator_id, record.evaluatee_id)
-            if pair in occupied:
-                raise HTTPException(status_code=409, detail="Overlapping groups already contain this evaluation pair")
             target = next((group_id for group_id, members in remaining_members.items()
                            if record.evaluator_id in members and record.evaluatee_id in members), None)
+            if replanning and (pair in occupied or target is None):
+                db.delete(record)  # A planned pair with no remaining group, or already planned there, goes.
+                continue
+            if pair in occupied:
+                raise HTTPException(status_code=409, detail="Overlapping groups already contain this evaluation pair")
             if target is None:
-                raise HTTPException(status_code=409, detail="Selected pairs must remain in a campaign group; use setup to replan them")
+                raise HTTPException(status_code=409, detail="Selected pairs must remain in a campaign group")
             record.company_group_id = target
             occupied.add(pair)
             if record.evaluator_id != record.evaluatee_id:
@@ -95,6 +101,13 @@ def update_campaign_groups(*, campaign_id: int, payload: schemas.CampaignGroupsU
                 company_group_id=group_id,
             )
         )
+    if removed_ids and replanning:
+        # Self-evaluation settings of people who are no longer in any campaign group.
+        participants = {person.id for group_id in unique_group_ids for person, _ in people_service.get_group_employees(group_id, db)}
+        db.query(models.CampaignEmployeeSelfEvaluation).filter(
+            models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id,
+            ~models.CampaignEmployeeSelfEvaluation.employee_id.in_(participants or {0}),
+        ).delete(synchronize_session=False)
     db.flush()
     campaign_service.unschedule_if_incomplete(campaign, db, manager.id)
     db.commit()
@@ -661,179 +674,3 @@ def get_campaign_setup_preview(*, campaign_id: int, group_ids: list[int] = [], d
         "self_evaluations": build_campaign_self_evaluations(campaign_id, db, group_ids),
         "matrix": build_campaign_evaluation_matrix(campaign_id, db, group_ids=group_ids),
     }
-
-
-def update_campaign_setup(*, campaign_id: int, payload: schemas.CampaignSetupUpdate, db: Session, manager: models.User):
-    """Replace a draft/scheduled configuration in one transaction, without issuing forms."""
-    try:
-        if payload.memberships:
-            if not permissions.has_permission(manager, db, "groups.manage"):
-                raise HTTPException(status_code=403, detail="Group membership changes require groups.manage")
-        campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
-        if campaign is None:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-        campaign_service.require_mutable_campaign_configuration(campaign)
-        if campaign.status not in {models.CampaignStatus.DRAFT.value, models.CampaignStatus.SCHEDULED.value}:
-            raise HTTPException(status_code=409, detail="Only draft and scheduled campaigns can replace their setup")
-
-        group_ids = set(payload.group_ids)
-        if len(group_ids) != len(payload.group_ids) or db.query(models.CompanyGroup.id).filter(models.CompanyGroup.id.in_(group_ids)).count() != len(group_ids):
-            raise HTTPException(status_code=400, detail="Groups must exist and be unique")
-
-        previous_groups = set(campaign_service.get_campaign_assigned_group_ids(campaign_id, db))
-        removed_groups = previous_groups - group_ids
-        membership_keys = set()
-        affected = {}
-        for change in payload.memberships:
-            key = (change.company_group_id, change.employee_id)
-            if key in membership_keys or change.company_group_id not in (group_ids | previous_groups):
-                raise HTTPException(status_code=400, detail="Membership changes must be unique and belong to a campaign group")
-            membership_keys.add(key)
-            if db.query(models.Employee.id).filter(models.Employee.id == change.employee_id).first() is None:
-                raise HTTPException(status_code=400, detail="Membership employee does not exist")
-        if membership_keys:
-            affected = {row.id: row for row in campaign_service.scheduled_campaigns_for_groups(
-                {group_id for group_id, _ in membership_keys}, db) if row.id != campaign_id}
-        for change in payload.memberships:
-            membership = models.employee_company_groups.select().where(
-                models.employee_company_groups.c.company_group_id == change.company_group_id,
-                models.employee_company_groups.c.employee_id == change.employee_id,
-            )
-            exists = db.execute(membership).first() is not None
-            if change.included and not exists:
-                db.execute(models.employee_company_groups.insert().values(
-                    company_group_id=change.company_group_id, employee_id=change.employee_id))
-            elif not change.included and exists:
-                immutable = db.query(models.FilledForm).filter(
-                    models.FilledForm.company_group_id == change.company_group_id,
-                    or_(models.FilledForm.evaluator_id == change.employee_id,
-                        models.FilledForm.evaluatee_id == change.employee_id),
-                ).all()
-                if any(campaign_service.assignment_is_immutable(row) for row in immutable):
-                    raise HTTPException(status_code=409, detail="Issued evaluations prevent removing this member")
-                db.execute(models.employee_company_groups.delete().where(
-                    models.employee_company_groups.c.company_group_id == change.company_group_id,
-                    models.employee_company_groups.c.employee_id == change.employee_id))
-
-        members = {group_id: {person.id: person for person, _ in people_service.get_group_employees(group_id, db)} for group_id in group_ids}
-        participants = {employee_id for people in members.values() for employee_id in people}
-        form_ids = {row[0] for row in db.query(models.Form.id).all()}
-        rules = {}
-        for item in payload.rules:
-            if item.company_group_id in removed_groups:
-                continue
-            key = (item.company_group_id, item.evaluator_role_id, item.evaluatee_role_id)
-            roles = {person.company_role_id for person in members.get(item.company_group_id, {}).values()}
-            if key in rules or item.evaluator_role_id not in roles or item.evaluatee_role_id not in roles or item.form_id not in form_ids:
-                raise HTTPException(status_code=400, detail="Invalid or duplicate role rule")
-            rules[key] = item.form_id
-        self_forms = {}
-        existing_self = {row.employee_id: row for row in db.query(models.CampaignEmployeeSelfEvaluation)
-                         .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id)}
-        for item in payload.self_evaluations:
-            if item.employee_id not in participants and item.employee_id in existing_self and removed_groups:
-                continue
-            if item.employee_id in self_forms or item.employee_id not in participants or (item.form_id is not None and item.form_id not in form_ids):
-                raise HTTPException(status_code=400, detail="Invalid or duplicate self-evaluation")
-            if item.form_id is not None:
-                self_forms[item.employee_id] = item.form_id
-
-        selected = {}
-        selected_people = set()
-        for item in payload.assignments:
-            if item.company_group_id in removed_groups:
-                continue
-            key = (item.company_group_id, item.evaluator_id, item.evaluatee_id)
-            pair = (item.evaluator_id, item.evaluatee_id)
-            if key in selected or pair in selected_people or item.evaluator_id not in members.get(item.company_group_id, {}) or item.evaluatee_id not in members[item.company_group_id]:
-                raise HTTPException(status_code=400, detail="Invalid or duplicate matrix assignment")
-            selected_people.add(pair)
-            evaluator = members[item.company_group_id][item.evaluator_id]
-            evaluatee = members[item.company_group_id][item.evaluatee_id]
-            form_id = (self_forms.get(item.evaluator_id) if item.evaluator_id == item.evaluatee_id else
-                       rules.get((item.company_group_id, evaluator.company_role_id, evaluatee.company_role_id)))
-            selected[key] = form_id
-
-        existing_assignments = db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign_id).all()
-        existing_pairs = set()
-        for row in existing_assignments:
-            key = (row.company_group_id, row.evaluator_id, row.evaluatee_id)
-            if key in existing_pairs:
-                raise HTTPException(status_code=409, detail="Duplicate historical matrix assignments must be resolved")
-            existing_pairs.add(key)
-            if campaign_service.assignment_is_immutable(row) and (key not in selected or selected[key] != row.form_id):
-                raise HTTPException(status_code=409, detail="Issued evaluations cannot be changed or removed")
-        relocated = {}
-        for row in existing_assignments:
-            if row.company_group_id not in removed_groups or campaign_service.assignment_is_immutable(row):
-                continue
-            pair = (row.evaluator_id, row.evaluatee_id)
-            if any((other.evaluator_id, other.evaluatee_id) == pair and other.id != row.id for other in existing_assignments):
-                continue
-            candidates = [key for key in selected if key[1:] == pair]
-            if not candidates and pair not in selected_people:
-                for group_id in sorted(group_ids):
-                    people = members[group_id]
-                    if pair[0] not in people or pair[1] not in people:
-                        continue
-                    form_id = (self_forms.get(pair[0]) if pair[0] == pair[1] else rules.get(
-                        (group_id, people[pair[0]].company_role_id, people[pair[1]].company_role_id)))
-                    target = (group_id, *pair)
-                    selected[target] = form_id
-                    selected_people.add(pair)
-                    candidates = [target]
-                    break
-            if candidates:
-                relocated[row.id] = candidates[0]
-        existing_rules = {(row.company_group_id, row.evaluator_role_id, row.evaluatee_role_id): row for row in
-                          db.query(models.CampaignEvaluationRule).filter(models.CampaignEvaluationRule.campaign_id == campaign_id)}
-        for key in issued_role_pair_keys(campaign_id, db):
-            if key in existing_rules and rules.get(key) != existing_rules[key].form_id:
-                raise HTTPException(status_code=409, detail="Issued form rules cannot be changed or removed")
-        for row in existing_assignments:
-            if campaign_service.assignment_is_immutable(row) and row.evaluator_id == row.evaluatee_id and self_forms.get(row.evaluator_id) != row.form_id:
-                raise HTTPException(status_code=409, detail="Issued self-evaluations cannot be changed")
-
-        for row in existing_assignments:
-            if not campaign_service.assignment_is_immutable(row):
-                key = relocated.get(row.id, (row.company_group_id, row.evaluator_id, row.evaluatee_id))
-                if key not in selected:
-                    db.delete(row)
-                else:
-                    row.company_group_id = key[0]
-                    row.form_id = selected[key]
-        for key, row in existing_rules.items():
-            if key not in rules:
-                db.delete(row)
-            else:
-                row.form_id = rules[key]
-        for key, form_id in rules.items():
-            if key not in existing_rules:
-                db.add(models.CampaignEvaluationRule(campaign_id=campaign_id, company_group_id=key[0],
-                                                     evaluator_role_id=key[1], evaluatee_role_id=key[2], form_id=form_id))
-        for employee_id, row in existing_self.items():
-            if employee_id not in self_forms:
-                db.delete(row)
-            else:
-                row.form_id = self_forms[employee_id]
-        for employee_id, form_id in self_forms.items():
-            if employee_id not in existing_self:
-                db.add(models.CampaignEmployeeSelfEvaluation(campaign_id=campaign_id, employee_id=employee_id, form_id=form_id))
-        db.execute(models.campaign_company_groups.delete().where(models.campaign_company_groups.c.campaign_id == campaign_id))
-        for group_id in sorted(group_ids):
-            db.execute(models.campaign_company_groups.insert().values(campaign_id=campaign_id, company_group_id=group_id))
-        retained_pairs = existing_pairs | set(relocated.values())
-        for key, form_id in selected.items():
-            if key not in retained_pairs:
-                db.add(models.FilledForm(campaign_id=campaign_id, company_group_id=key[0], evaluator_id=key[1],
-                                         evaluatee_id=key[2], form_id=form_id,
-                                         finish_date=None, answers=[], form_snapshot=None, snapshot_status=None))
-        db.flush()
-        campaign_service.unschedule_if_incomplete(campaign, db, manager.id)
-        for other in affected.values():
-            campaign_service.validate_scheduled_campaign(other, db)
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    return build_campaign_evaluation_matrix(campaign_id, db)

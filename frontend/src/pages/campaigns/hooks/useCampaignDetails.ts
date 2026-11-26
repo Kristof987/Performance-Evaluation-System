@@ -45,7 +45,6 @@ import {
   updateCampaignEvaluationRules,
   updateCampaignGroups,
   updateCampaignSelfEvaluations,
-  updateCampaignSetup,
 } from '../campaign.api';
 
 function areGroupIdsEqual(first: number[], second: number[]) {
@@ -159,7 +158,6 @@ export function useCampaignDetails(id: string | undefined) {
   const [destructiveError, setDestructiveError] = useState('');
   const [isChangingArchive, setIsChangingArchive] = useState(false);
   const archivePending = useRef(false);
-  const [isSavingSetup, setIsSavingSetup] = useState(false);
   const [isSetupPreviewLoading, setIsSetupPreviewLoading] = useState(false);
   const [setupPreviewError, setSetupPreviewError] = useState('');
   const savedRules = useRef<CampaignEvaluationRules>({ forms: [], groups: [] });
@@ -596,88 +594,8 @@ export function useCampaignDetails(id: string | undefined) {
   const matrixPlanningReadiness = !selectedGroupIds.length || (campaign?.status !== 'scheduled' && hasGroupChanges)
     ? 'groups' : evaluationMatrix.groups.every((group) => group.employees.length === 0) ? 'empty' : 'ready';
 
-  async function handleUpdateSetup(): Promise<boolean> {
-    if (!campaign || (campaign.status !== 'scheduled' && campaign.status !== 'draft') || !canManageCampaigns || isSavingSetup || isSetupPreviewLoading || setupPreviewError ||
-        !(hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges)) return false;
-    const removedCount = campaignGroups.assignedGroupIds.filter((groupId) => !selectedGroupIds.includes(groupId)).length;
-    const version = routeVersion.current;
-    setIsSavingSetup(true);
-    setGroupsMessage('');
-    setActionMessage('');
-    setConfigurationFeedback(null);
-    let setupSaved = false;
-    try {
-      const rules = evaluationRules.groups.flatMap((group) => group.rolePairs.flatMap((pair) => {
-        const formId = selectedRuleFormIds[getRuleKey(group.groupId, pair.evaluatorRoleId, pair.evaluateeRoleId)];
-        return formId == null || !selectedGroupIds.includes(group.groupId) ? [] : [{
-          companyGroupId: group.groupId, evaluatorRoleId: pair.evaluatorRoleId,
-          evaluateeRoleId: pair.evaluateeRoleId, formId,
-        }];
-      }));
-      const assignments = evaluationMatrix.groups.flatMap((group) => group.employees.flatMap((evaluator) =>
-        group.employees.flatMap((evaluatee) =>
-          selectedGroupIds.includes(group.groupId) && selectedMatrixAssignments[getMatrixKey(group.groupId, evaluator.id, evaluatee.id)]
-            ? [{ companyGroupId: group.groupId, evaluatorId: evaluator.id, evaluateeId: evaluatee.id }] : [],
-        ),
-      ));
-      const selectedParticipants = new Set(evaluationMatrix.groups.filter((group) => selectedGroupIds.includes(group.groupId))
-        .flatMap((group) => group.employees.filter((person) => person.active !== false).map((person) => person.id)));
-      await updateCampaignSetup(getAccessTokenSilently, campaign.id, selectedGroupIds, rules,
-        selfEvaluations.participants.filter((person) => selectedParticipants.has(person.employeeId)).map((person) => ({
-          employeeId: person.employeeId, formId: selectedSelfForms[person.employeeId] ?? null,
-        })), assignments);
-      setupSaved = true;
-      if (routeVersion.current !== version) return false;
-      setConfigurationFeedback(null);
-      const controller = new AbortController();
-      const [loadedGroups, loadedRules, loadedSelf, loadedMatrix, loadedCampaign] = await Promise.all([
-        fetchCampaignGroups(getAccessTokenSilently, campaign.id, controller.signal),
-        fetchCampaignEvaluationRules(getAccessTokenSilently, campaign.id, controller.signal),
-        fetchCampaignSelfEvaluations(getAccessTokenSilently, campaign.id, controller.signal),
-        fetchCampaignEvaluationMatrix(getAccessTokenSilently, campaign.id, controller.signal),
-        fetchCampaign(getAccessTokenSilently, campaign.id, controller.signal),
-      ]);
-      if (routeVersion.current !== version) return false;
-      setCampaignGroups(loadedGroups);
-      setSelectedGroupIds(loadedGroups.assignedGroupIds);
-      setEvaluationRules(loadedRules);
-      savedRules.current = loadedRules;
-      setSelectedRuleFormIds(getRuleFormMap(loadedRules));
-      setSelfEvaluations(loadedSelf);
-      savedSelf.current = loadedSelf;
-      setSelectedSelfForms(selfFormMap(loadedSelf));
-      setEvaluationMatrix(loadedMatrix);
-      savedMatrix.current = loadedMatrix;
-      setSelectedMatrixAssignments(getMatrixAssignmentMap(loadedMatrix));
-      setCampaign(loadedCampaign);
-      notifySuccess(removedCount
-        ? `${removedCount} campaign ${removedCount === 1 ? 'group' : 'groups'} removed with dependent configuration. Shared participants and eligible planned assignments were retained.`
-        : 'Campaign setup saved.');
-      return true;
-    } catch (error) {
-      handleAuthError(error);
-      if (routeVersion.current === version) {
-        const feedback = campaignFeedbackFromError(error, 'setup', {
-          groups: campaignGroups, rules: evaluationRules, matrix: evaluationMatrix, selfEvaluations,
-        });
-        setConfigurationFeedback(setupSaved ? {
-          ...feedback,
-          title: 'Campaign saved, refresh needed',
-          description: 'Your setup was saved, but the latest campaign details could not be loaded. Reload the page to see the persisted configuration.',
-          issues: [],
-        } : feedback);
-        if (removedCount > 0) setGroupsMessage(setupSaved
-          ? 'Groups were saved, but the latest setup could not be loaded. Reload before making further changes.'
-          : error instanceof Error ? error.message : 'Group removal could not be saved.');
-      }
-      return setupSaved;
-    } finally {
-      if (routeVersion.current === version) setIsSavingSetup(false);
-    }
-  }
-
   function toggleGroup(groupId: number) {
-    if (isSavingGroups || isSavingSetup) return;
+    if (isSavingGroups) return;
     setSelectedGroupIds((current) =>
       current.includes(groupId)
         ? current.filter((id) => id !== groupId)
@@ -699,7 +617,7 @@ export function useCampaignDetails(id: string | undefined) {
     evaluateeRoleId: number,
     formId: number | null,
   ) {
-    if (isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || isSavingSetup || isIssuingPlanned) return;
+    if (isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || isIssuingPlanned) return;
     setActiveRuleKey(getRuleKey(groupId, evaluatorRoleId, evaluateeRoleId));
     setSelectedRuleFormIds((current) => ({
       ...current,
@@ -714,7 +632,7 @@ export function useCampaignDetails(id: string | undefined) {
     evaluatorId: number,
     evaluateeId: number,
   ) {
-    if (isSavingMatrix || isSavingSetup || isSavingGroups) return;
+    if (isSavingMatrix || isSavingGroups) return;
     const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
     const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
     if (matrixPlanningReadiness !== 'ready' || !group) return;
@@ -726,7 +644,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   function applyMatrixSelectAll(groupId: number) {
-    if (isSavingMatrix || isSavingSetup || isSavingGroups) return;
+    if (isSavingMatrix || isSavingGroups) return;
     const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
     const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
     if (group === undefined || matrixPlanningReadiness !== 'ready') return;
@@ -739,7 +657,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   function applyMatrixSelfEvaluations(groupId: number) {
-    if (isSavingMatrix || isSavingSetup || isSavingGroups) return;
+    if (isSavingMatrix || isSavingGroups) return;
     const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
     const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
     if (group === undefined || matrixPlanningReadiness !== 'ready') return;
@@ -754,7 +672,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   function applyMatrixMinimumReviewers(groupId: number, minimumReviewers: number) {
-    if (isSavingMatrix || isSavingSetup || isSavingGroups) return;
+    if (isSavingMatrix || isSavingGroups) return;
     const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
     const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
     if (group === undefined || matrixPlanningReadiness !== 'ready') return;
@@ -768,7 +686,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   function applyMatrixDeleteAll(groupId: number) {
-    if (isSavingMatrix || isSavingSetup || isSavingGroups) return;
+    if (isSavingMatrix || isSavingGroups) return;
     const rawGroup = evaluationMatrix.groups.find((item) => item.groupId === groupId);
     const group = rawGroup && matrixGroupWithSelfLocks(evaluationMatrix, rawGroup);
     if (group === undefined || matrixPlanningReadiness !== 'ready') return;
@@ -789,7 +707,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   function updateSelfForm(employeeId: number, formId: number | null) {
-    if (isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || isSavingSetup || isIssuingPlanned) return;
+    if (isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || isIssuingPlanned) return;
     if (selfEvaluations.participants.find((person) => person.employeeId === employeeId)?.locked) return;
     setSelectedSelfForms((current) => ({ ...current, [employeeId]: formId }));
     setSelfMessage('');
@@ -801,7 +719,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateSelfForms() {
-    if (id === undefined || isSavingSelf || isSavingRules || isSavingMatrix || isSavingGroups || isSavingSetup || isIssuingPlanned ||
+    if (id === undefined || isSavingSelf || isSavingRules || isSavingMatrix || isSavingGroups || isIssuingPlanned ||
         !hasSelfChanges || !canManageCampaigns || !campaign || campaign.isArchived || campaign.status === 'closed') return;
     if (hasMatrixChanges || hasGroupChanges) {
       setSelfMessage('Wait for matrix and group changes to save, or discard them, before self-evaluations can save automatically.');
@@ -860,20 +778,21 @@ export function useCampaignDetails(id: string | undefined) {
     setRulesMessage('');
   }
 
-  async function handleUpdateGroups() {
+  async function handleUpdateGroups(): Promise<boolean> {
     if (id === undefined || isSavingGroups || !hasGroupChanges || !canManageCampaigns || !campaign || campaign.isArchived ||
-        !['draft', 'scheduled', 'active'].includes(campaign.status)) return;
+        !['draft', 'scheduled', 'active'].includes(campaign.status)) return false;
     if (hasRuleChanges || hasMatrixChanges || hasSelfChanges) {
       setGroupsMessage('Save or discard form-rule, self-evaluation and matrix changes before saving groups.');
-      return;
+      return false;
     }
     const version = routeVersion.current;
     const previousStatus = campaign?.status;
+    const removedCount = campaignGroups.assignedGroupIds.filter((groupId) => !selectedGroupIds.includes(groupId)).length;
     setIsSavingGroups(true);
     setGroupsMessage('');
     try {
       const saved = await updateCampaignGroups(getAccessTokenSilently, id, selectedGroupIds);
-      if (routeVersion.current !== version) return;
+      if (routeVersion.current !== version) return false;
       setCampaignGroups(saved);
       setSelectedGroupIds(saved.assignedGroupIds);
       const controller = new AbortController();
@@ -891,9 +810,9 @@ export function useCampaignDetails(id: string | undefined) {
       } catch (refreshError) {
         handleAuthError(refreshError);
         if (routeVersion.current === version) setGroupsMessage('Groups were saved, but campaign details could not be refreshed. Reload to see the latest status and assignments.');
-        return;
+        return true;
       }
-      if (routeVersion.current !== version) return;
+      if (routeVersion.current !== version) return false;
       setEvaluationRules(loadedRules);
       savedRules.current = loadedRules;
       setEvaluationMatrix(loadedMatrix);
@@ -906,8 +825,11 @@ export function useCampaignDetails(id: string | undefined) {
       setCampaign(loadedCampaign);
       notifySuccess(previousStatus === 'scheduled' && loadedCampaign.status === 'draft'
         ? 'Groups saved. Campaign returned to Draft because the scheduled setup is incomplete.'
-        : 'Campaign groups saved automatically.');
+        : removedCount && previousStatus !== 'active'
+          ? `${removedCount} campaign ${removedCount === 1 ? 'group' : 'groups'} removed with dependent configuration. Shared participants and eligible planned assignments were retained.`
+          : 'Campaign groups saved automatically.');
       setConfigurationFeedback(null);
+      return true;
     } catch (error) {
       handleAuthError(error);
       if (routeVersion.current === version) {
@@ -917,13 +839,14 @@ export function useCampaignDetails(id: string | undefined) {
             : 'Campaign groups could not be updated.',
         );
       }
+      return false;
     } finally {
       if (routeVersion.current === version) setIsSavingGroups(false);
     }
   }
 
   async function handleUpdateRules() {
-    if (id === undefined || isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || isSavingSetup || isIssuingPlanned ||
+    if (id === undefined || isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || isIssuingPlanned ||
         !hasRuleChanges || !canManageCampaigns || !campaign || campaign.isArchived || campaign.status === 'closed') return;
     if (hasMatrixChanges || hasGroupChanges) {
       setRulesMessage('Wait for matrix and group changes to save, or discard them, before questionnaires can save automatically.');
@@ -985,7 +908,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleUpdateMatrix() {
-    if (id === undefined || isSavingMatrix || isSavingGroups || isSavingSetup || isSavingRules || isSavingSelf || isIssuingPlanned || !hasMatrixChanges ||
+    if (id === undefined || isSavingMatrix || isSavingGroups || isSavingRules || isSavingSelf || isIssuingPlanned || !hasMatrixChanges ||
         matrixPlanningReadiness !== 'ready' || !canManageCampaigns || !campaign || campaign.isArchived || campaign.status === 'closed') return;
     if (hasSelfChanges || hasGroupChanges) {
       setMatrixSaveError('Save or discard group and self-evaluation changes before the matrix can save automatically.');
@@ -1054,7 +977,7 @@ export function useCampaignDetails(id: string | undefined) {
   }
 
   async function handleIssuePlanned() {
-    if (!id || !campaign || isIssuingPlanned || isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || isSavingSetup || !canManageCampaigns || campaign.isArchived ||
+    if (!id || !campaign || isIssuingPlanned || isSavingRules || isSavingSelf || isSavingMatrix || isSavingGroups || !canManageCampaigns || campaign.isArchived ||
         campaign.status !== 'active') return;
     if (hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges) {
       setIssuanceMessage('Save or discard staged setup changes before issuing planned evaluations.');
@@ -1198,10 +1121,8 @@ export function useCampaignDetails(id: string | undefined) {
     openLifecycleConfirmation,
     closeLifecycleConfirmation,
     handleLifecycleAction,
-    isSavingSetup,
     isSetupPreviewLoading,
     setupPreviewError,
-    handleUpdateSetup,
     handleScheduleAction,
     isSavingGroups,
     isSavingRules,

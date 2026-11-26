@@ -98,10 +98,8 @@ export function CampaignDetails() {
     openLifecycleConfirmation,
     closeLifecycleConfirmation,
     handleLifecycleAction,
-    isSavingSetup,
     isSetupPreviewLoading,
     setupPreviewError,
-    handleUpdateSetup,
     handleScheduleAction,
     campaignGroups,
     evaluationRules,
@@ -184,7 +182,7 @@ export function CampaignDetails() {
     person.formId != null && !remainingParticipantIds.has(person.employeeId)).length;
   const setupDirty = hasGroupChanges || hasRuleChanges || hasMatrixChanges || hasSelfChanges;
   const groupSaveBlocked = hasRuleChanges || hasMatrixChanges || hasSelfChanges;
-  const setupSaveBusy = isSavingGroups || isSavingMatrix || isSavingRules || isSavingSelf || isSavingSetup || isIssuingPlanned;
+  const setupSaveBusy = isSavingGroups || isSavingMatrix || isSavingRules || isSavingSelf || isIssuingPlanned;
   const pendingChanges = setupDirty || setupSaveBusy || (isEditOpen && hasEditChanges);
   const matrixAutoSaveBlocked = hasSelfChanges || hasGroupChanges;
   const validSelfForms = new Set(selfEvaluations.forms.map((item) => item.id));
@@ -400,7 +398,7 @@ export function CampaignDetails() {
   }, [pendingChanges]);
 
   useEffect(() => {
-    if (!canEdit || !hasGroupChanges || isSavingGroups || isSavingSetup || isSetupPreviewLoading ||
+    if (!canEdit || !hasGroupChanges || isSavingGroups || isSetupPreviewLoading ||
         groupSaveBlocked || groupsMessage || confirmGroupRemoval) return;
     const timer = window.setTimeout(() => {
       if (removedGroupIds.length && (campaign?.status === 'draft' || campaign?.status === 'scheduled')) {
@@ -410,17 +408,17 @@ export function CampaignDetails() {
       }
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [canEdit, hasGroupChanges, isSavingGroups, isSavingSetup, isSetupPreviewLoading, groupSaveBlocked,
+  }, [canEdit, hasGroupChanges, isSavingGroups, isSetupPreviewLoading, groupSaveBlocked,
     groupsMessage, confirmGroupRemoval, removedGroupIds.length, campaign?.status, handleUpdateGroups]);
 
   useEffect(() => {
     if (!canPlanPairs || !hasMatrixChanges || matrixPlanningReadiness !== 'ready' || matrixAutoSaveBlocked ||
-        isSavingMatrix || isSavingGroups || isSavingSetup || isSavingRules || isSavingSelf || isIssuingPlanned ||
+        isSavingMatrix || isSavingGroups || isSavingRules || isSavingSelf || isIssuingPlanned ||
         isSetupPreviewLoading || setupPreviewError || matrixSaveError) return;
     const timer = window.setTimeout(() => { void handleUpdateMatrix(); }, 500);
     return () => window.clearTimeout(timer);
   }, [canPlanPairs, hasMatrixChanges, matrixPlanningReadiness, matrixAutoSaveBlocked,
-    isSavingMatrix, isSavingGroups, isSavingSetup, isSavingRules, isSavingSelf, isIssuingPlanned,
+    isSavingMatrix, isSavingGroups, isSavingRules, isSavingSelf, isIssuingPlanned,
     isSetupPreviewLoading, setupPreviewError, matrixSaveError, handleUpdateMatrix]);
 
   useEffect(() => {
@@ -602,7 +600,7 @@ export function CampaignDetails() {
               <h2>Campaign groups</h2>
               <p>Select which company groups are included in this campaign.</p>
             </div>
-            {canEdit && <span className="campaign-group-autosave" role="status">{isSavingGroups || isSavingSetup ? <Pending label="Saving groups" /> : hasGroupChanges ? groupsMessage ? 'Not saved' : 'Waiting to save...' : 'Saved automatically'}</span>}
+            {canEdit && <span className="campaign-group-autosave" role="status">{isSavingGroups ? <Pending label="Saving groups" /> : hasGroupChanges ? groupsMessage ? 'Not saved' : 'Waiting to save...' : 'Saved automatically'}</span>}
           </div>
 
           {campaignGroups.availableGroups.length === 0 ? (
@@ -620,7 +618,7 @@ export function CampaignDetails() {
                   <input
                     type="checkbox"
                     checked={selectedGroupIds.includes(group.id)}
-                      disabled={!canEdit || isSavingGroups || isSavingSetup || groupSaveBlocked || (selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id))}
+                      disabled={!canEdit || isSavingGroups || groupSaveBlocked || (selectedGroupIds.includes(group.id) && groupsWithIssuedAssignments.has(group.id))}
                     title={groupsWithIssuedAssignments.has(group.id) ? 'This group has issued evaluations and cannot be removed.' : undefined}
                     onChange={() => toggleGroup(group.id)}
                   />
@@ -641,10 +639,10 @@ export function CampaignDetails() {
           </div>
           {groupsMessage !== '' && <InlineMessage tone={messageTone(groupsMessage)} className="campaign-inline-message">{groupsMessage}</InlineMessage>}
           {canEdit && groupSaveBlocked && <p className="campaign-setup-guidance">Save or discard questionnaire, matrix and self-evaluation changes before changing campaign groups.</p>}
-          {canEdit && hasGroupChanges && !isSavingGroups && !isSavingSetup && groupsMessage && <div className="campaign-heading-actions"><button className="btn btn-secondary" type="button" disabled={groupSaveBlocked} onClick={retryGroupSave}>Retry saving</button><button className="btn btn-secondary" type="button" onClick={discardGroups}>Discard group changes</button></div>}
+          {canEdit && hasGroupChanges && !isSavingGroups && groupsMessage && <div className="campaign-heading-actions"><button className="btn btn-secondary" type="button" disabled={groupSaveBlocked} onClick={retryGroupSave}>Retry saving</button><button className="btn btn-secondary" type="button" onClick={discardGroups}>Discard group changes</button></div>}
         </section>
         <CampaignGroupPreview employees={previewEmployees} selectedGroups={selectedPreviewGroups} loading={peopleLoading} error={!getAccessToken ? 'Employee preview is unavailable.' : peopleError} />
-        <div className="campaign-groups-next"><div><strong>What happens next?</strong><p>Group selections save automatically. Continue to plan who evaluates whom.</p>{hasGroupChanges && <small role="status">{groupsMessage ? 'Group changes were not saved. Retry or discard them before continuing.' : 'Wait for automatic saving before continuing.'}</small>}</div><button className="btn btn-primary" type="button" disabled={!selectedGroupIds.length || hasGroupChanges || isSavingGroups || isSavingSetup || !!groupsMessage || isSetupPreviewLoading || !!setupPreviewError} onClick={() => changeTab('setup', 'pairs')}>Continue to evaluation assignments <ArrowUpRight size={16} aria-hidden="true" /></button></div>
+        <div className="campaign-groups-next"><div><strong>What happens next?</strong><p>Group selections save automatically. Continue to plan who evaluates whom.</p>{hasGroupChanges && <small role="status">{groupsMessage ? 'Group changes were not saved. Retry or discard them before continuing.' : 'Wait for automatic saving before continuing.'}</small>}</div><button className="btn btn-primary" type="button" disabled={!selectedGroupIds.length || hasGroupChanges || isSavingGroups || !!groupsMessage || isSetupPreviewLoading || !!setupPreviewError} onClick={() => changeTab('setup', 'pairs')}>Continue to evaluation assignments <ArrowUpRight size={16} aria-hidden="true" /></button></div>
         </div>}
 
         {setupSection === 'pairs' && <section className="campaign-rules-card campaign-matrix-workspace" id="campaign-evaluation-matrix" tabIndex={-1}>
@@ -663,8 +661,8 @@ export function CampaignDetails() {
               disabledReason={!canPlanPairs ? 'This campaign is read-only.' : matrixAutoSaveBlocked ? 'Save or discard group and self-evaluation changes before editing the matrix.' : matrixPlanningReadiness === 'groups' ? 'Select and save campaign groups before editing the matrix.' : matrixPlanningReadiness === 'empty' ? 'Selected groups have no active employees.' : matrixSaveError && !hasMatrixChanges ? 'Reload to refresh the saved matrix details.' : ''}
               minimum={matrixMinimum}
               onMinimumChange={setMatrixMinimum}
-              saving={isSavingMatrix || isSavingSetup}
-              saveDisabled={!canPlanPairs || matrixAutoSaveBlocked || isSavingMatrix || isSavingGroups || isSavingSetup || isSavingRules || isSavingSelf || isIssuingPlanned || isSetupPreviewLoading || !!setupPreviewError || !hasMatrixChanges || matrixPlanningReadiness !== 'ready'}
+              saving={isSavingMatrix}
+              saveDisabled={!canPlanPairs || matrixAutoSaveBlocked || isSavingMatrix || isSavingGroups || isSavingRules || isSavingSelf || isIssuingPlanned || isSetupPreviewLoading || !!setupPreviewError || !hasMatrixChanges || matrixPlanningReadiness !== 'ready'}
               saveError={matrixSaveError}
               autosaveBlockedReason={matrixAutoSaveBlocked ? 'Save or discard group and self-evaluation changes before the matrix can save automatically.' : ''}
               message={matrixMessage}
@@ -876,7 +874,7 @@ export function CampaignDetails() {
        )}
 
         {confirmGroupRemoval && (
-        <CampaignModal mode="remove-group" onClose={() => { if (!isSavingSetup) { discardGroups(); setConfirmGroupRemoval(false); } }}>
+        <CampaignModal mode="remove-group" onClose={() => { if (!isSavingGroups) { discardGroups(); setConfirmGroupRemoval(false); } }}>
           <div className="campaign-copy-preview">
             <p>Remove <strong>{removedGroupNames.join(', ')}</strong> from this campaign? The group records, Forms, Templates and Sections remain available.</p>
             <dl className="campaign-copy-counts">
@@ -889,10 +887,10 @@ export function CampaignDetails() {
             <p>Participants and self-evaluations shared with remaining groups stay. Eligible shared planned assignments move to a remaining group; issued evaluations cannot be removed. If a Scheduled campaign becomes incomplete, it returns to Draft.</p>
             {groupsMessage && <InlineMessage tone={messageTone(groupsMessage)}>{groupsMessage}</InlineMessage>}
             <div className="campaign-modal-actions">
-              <button className="btn btn-secondary" type="button" disabled={isSavingSetup} onClick={() => { discardGroups(); setConfirmGroupRemoval(false); }}>Cancel</button>
-              <button className="btn btn-danger" type="button" disabled={isSavingSetup || removedAssignments.some((item) => item.issued)}
-                onClick={async () => { if (await handleUpdateSetup()) setConfirmGroupRemoval(false); }}>
-                {isSavingSetup ? <Pending label="Saving" /> : 'Remove and save setup'}
+              <button className="btn btn-secondary" type="button" disabled={isSavingGroups} onClick={() => { discardGroups(); setConfirmGroupRemoval(false); }}>Cancel</button>
+              <button className="btn btn-danger" type="button" disabled={removedAssignments.some((item) => item.issued)}
+                onClick={async () => { if (await handleUpdateGroups()) setConfirmGroupRemoval(false); }}>
+                {isSavingGroups ? <Pending label="Saving" /> : 'Remove and save setup'}
               </button>
             </div>
           </div>
