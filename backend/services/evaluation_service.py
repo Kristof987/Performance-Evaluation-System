@@ -8,16 +8,13 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
-from services import campaign_lifecycle, campaign_service, form_snapshot_service
+from services import campaign_service, form_snapshot_service
 from business_calendar import business_date, campaign_instant
 from business_calendar import business_today as campaign_today
 
 
 def issued_employee_questions(filled_form: models.FilledForm) -> list[dict]:
-    snapshot = filled_form.form_snapshot
-    if isinstance(snapshot, dict) and isinstance(snapshot.get("questions"), list):
-        return snapshot["questions"]
-    return []
+    return filled_form.form_snapshot["questions"] if filled_form.form_snapshot else []
 
 
 def questionnaire_can_edit(campaign: models.Campaign, filled_form: models.FilledForm, now: datetime) -> bool:
@@ -26,11 +23,10 @@ def questionnaire_can_edit(campaign: models.Campaign, filled_form: models.Filled
             and campaign.status == models.CampaignStatus.ACTIVE.value
             and not campaign.is_archived and campaign.start_date <= now
             and (campaign.end_date is None or now < campaign.end_date)
-            and isinstance(filled_form.form_snapshot, dict))
+            and filled_form.form_snapshot is not None)
 
 
 def list_employee_evaluations(employee: models.Employee, db: Session) -> list[dict]:
-
     rows = (
         db.query(
             models.FilledForm,
@@ -60,11 +56,9 @@ def list_employee_evaluations(employee: models.Employee, db: Session) -> list[di
         can_edit = questionnaire_can_edit(campaign, filled_form, now)
         if filled_form.finish_date is None and not can_edit:
             continue
-        questions = issued_employee_questions(filled_form)
-        answers = filled_form.answers if isinstance(filled_form.answers, list) else []
-        issued_questions = list(form_snapshot_service.iter_snapshot_questions(questions))
-        question_ids = {question.get("id") for question in issued_questions if isinstance(question.get("id"), str)}
-        answered_count = len({answer.get("question_id") for answer in answers if isinstance(answer, dict) and answer.get("question_id") in question_ids})
+        issued_questions = list(form_snapshot_service.iter_snapshot_questions(issued_employee_questions(filled_form)))
+        question_ids = {question["id"] for question in issued_questions}
+        answered_count = sum(answer["question_id"] in question_ids for answer in filled_form.answers or [])
 
         evaluations.append({
             "id": filled_form.id,
@@ -72,13 +66,9 @@ def list_employee_evaluations(employee: models.Employee, db: Session) -> list[di
             "campaign_id": campaign.id,
             "campaign_name": campaign.name,
             "campaign_start_date": business_date(campaign.start_date),
-            "campaign_start_at": campaign_instant(campaign.start_date),
             "campaign_end_at": campaign_instant(campaign.end_date),
-            "is_overdue": campaign_lifecycle.is_overdue(filled_form, campaign, now=now),
             "can_edit": can_edit,
-            "campaign_is_active": campaign.is_active,
             "campaign_status": campaign.status,
-            "campaign_lifecycle_status": campaign_service.campaign_lifecycle_status(campaign, today),
             "current_date": today,
             "form_id": form.id,
             "form_name": form_snapshot_service.snapshot_form_name(filled_form, form),
@@ -89,48 +79,33 @@ def list_employee_evaluations(employee: models.Employee, db: Session) -> list[di
             "finish_date": filled_form.finish_date,
             "question_count": len(issued_questions),
             "answered_count": answered_count,
-            "created_at": filled_form.created_at,
         })
 
     return evaluations
 
 
 def employee_questionnaire(employee: models.Employee, evaluation_id: int, db: Session) -> dict:
-    if db.query(models.FilledForm.id).filter(
-        models.FilledForm.id == evaluation_id, models.FilledForm.evaluator_id == employee.id,
-    ).first() is None:
-        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
+    # The list only holds issued (or submitted) questionnaires of open campaigns assigned to this evaluator.
     evaluation = next((item for item in list_employee_evaluations(employee, db) if item["id"] == evaluation_id), None)
     if evaluation is None:
         raise HTTPException(status_code=404, detail="Assigned evaluation not found")
-    filled_form = db.query(models.FilledForm).filter(
-        models.FilledForm.id == evaluation_id, models.FilledForm.evaluator_id == employee.id,
-    ).first()
-    if filled_form is None:
-        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
-    if not isinstance(filled_form.form_snapshot, dict):
-        raise HTTPException(status_code=403, detail="This questionnaire has not been issued")
+    filled_form = db.get(models.FilledForm, evaluation_id)
     return {"evaluation": evaluation, "questions": issued_employee_questions(filled_form), "answers": filled_form.answers}
 
 
 def update_assigned_questionnaire(*, user_id: int, evaluation_id: int, payload: schemas.AssignedQuestionnaireUpdate, db: Session, actor: models.User, employee: models.Employee):
     if user_id != actor.id:
         raise HTTPException(status_code=404, detail="Assigned evaluation not found")
-    campaign_id = db.query(models.FilledForm.campaign_id).filter(
-        models.FilledForm.id == evaluation_id, models.FilledForm.evaluator_id == employee.id,
-    ).scalar()
-    if campaign_id is None:
-        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
-    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).populate_existing().with_for_update().one()
-    questionnaire = employee_questionnaire(employee, evaluation_id, db)
-    evaluation = questionnaire["evaluation"]
-    if not evaluation["can_edit"]:
+    questionnaire = employee_questionnaire(employee, evaluation_id, db)  # 404 unless it is visible to this evaluator
+    if not questionnaire["evaluation"]["can_edit"]:
         raise HTTPException(status_code=403, detail="This questionnaire is not currently available")
-    if evaluation["finish_date"] is not None:
-        raise HTTPException(status_code=409, detail="This questionnaire has already been submitted")
+    # Locking the assignment makes a second, concurrent submit wait and then see it submitted.
+    filled_form = db.query(models.FilledForm).filter(models.FilledForm.id == evaluation_id).with_for_update().populate_existing().one()
+    if filled_form.finish_date is not None:
+        raise HTTPException(status_code=409, detail="This questionnaire is no longer available for editing")
 
     questions = list(form_snapshot_service.iter_snapshot_questions(questionnaire["questions"]))
-    by_id = {question.get("id"): question for question in questions}
+    by_id = {question["id"]: question for question in questions}
     seen = set()
     for answer in payload.answers:
         question_id = answer.get("question_id")
@@ -139,21 +114,18 @@ def update_assigned_questionnaire(*, user_id: int, evaluation_id: int, payload: 
         seen.add(question_id)
         question = by_id[question_id]
         value = answer["value"]
-        kind = question.get("type")
-        options = question.get("options")
-        choices = [option.get("id") for option in options if isinstance(option, dict)] if isinstance(options, list) else []
+        kind = question["type"]
+        choices = {option["id"] for option in question.get("options") or []}
         if kind == "Scale":
-            minimum = question.get("scale_min", 1)
-            maximum = question.get("scale_max", 5)
-            valid = isinstance(value, int) and not isinstance(value, bool) and isinstance(minimum, int) and not isinstance(minimum, bool) and isinstance(maximum, int) and not isinstance(maximum, bool) and minimum <= value <= maximum
+            minimum, maximum = question["scale_min"], question["scale_max"]
+            valid = isinstance(value, int) and not isinstance(value, bool) and minimum <= value <= maximum
         elif kind == "Single choice":
             valid = isinstance(value, str) and value in choices
         elif kind == "Multiple choice":
-            valid = isinstance(value, list) and len(value) > 0 and len(value) == len(set(str(item) for item in value)) and all(isinstance(item, str) and item in choices for item in value)
-        elif kind == "Text":
+            valid = (isinstance(value, list) and len(value) > 0 and all(isinstance(item, str) and item in choices for item in value)
+                     and len(value) == len(set(value)))
+        else:  # Text
             valid = isinstance(value, str) and value.strip() != ""
-        else:
-            valid = False
         if not valid:
             if kind == "Scale":
                 detail = f"Rating for question {question_id} must be a whole number from {minimum} to {maximum}"
@@ -162,18 +134,8 @@ def update_assigned_questionnaire(*, user_id: int, evaluation_id: int, payload: 
             else:
                 detail = f"Invalid answer for question {question_id}"
             raise HTTPException(status_code=400, detail=detail)
-    if payload.submit and (not questions or any(question.get("required") and question.get("id") not in seen for question in questions)):
+    if payload.submit and (not questions or any(question.get("required") and question["id"] not in seen for question in questions)):
         raise HTTPException(status_code=400, detail="Answer all required questions before submitting")
-
-    filled_form = db.query(models.FilledForm).filter(
-        models.FilledForm.id == evaluation_id, models.FilledForm.evaluator_id == employee.id,
-    ).with_for_update().first()
-    if filled_form is None:
-        raise HTTPException(status_code=404, detail="Assigned evaluation not found")
-    if filled_form.finish_date is not None or filled_form.form_snapshot is None:
-        raise HTTPException(status_code=409, detail="This questionnaire is no longer available for editing")
-    if not questionnaire_can_edit(campaign, filled_form, datetime.now(timezone.utc)):
-        raise HTTPException(status_code=403, detail="This questionnaire is not currently available")
     filled_form.answers = payload.answers
     if payload.submit:
         filled_form.finish_date = campaign_today()
@@ -193,66 +155,9 @@ def get_employee_dashboard(*, user_id: int, db: Session, actor: models.User, emp
                                      ]))
                              .filter(or_(campaign_service.issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
                              .distinct().all())
-    open_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is None]
-    completed_evaluations = [evaluation for evaluation in evaluations if evaluation["finish_date"] is not None]
-    active_campaign = (
-        db.query(models.Campaign)
-        .join(models.FilledForm, models.FilledForm.campaign_id == models.Campaign.id)
-        .filter(models.FilledForm.evaluator_id == employee.id)
-        .filter(models.Campaign.status.in_([
-            models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value,
-        ]))
-        .filter(models.Campaign.is_archived.is_(False))
-        .filter(or_(campaign_service.issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
-        .order_by((models.Campaign.status == models.CampaignStatus.ACTIVE.value).desc(),
-                  models.Campaign.end_date.asc().nullslast(), models.Campaign.start_date.asc())
-        .first()
-    )
-    next_campaign = None
-    if active_campaign is None:
-        next_campaign = (
-            db.query(models.Campaign)
-            .join(models.FilledForm, models.FilledForm.campaign_id == models.Campaign.id)
-            .filter(models.FilledForm.evaluator_id == employee.id)
-            .filter(models.Campaign.start_date >= datetime.now(timezone.utc))
-            .filter(models.Campaign.status == models.CampaignStatus.ACTIVE.value)
-            .filter(models.Campaign.is_archived.is_(False))
-            .filter(or_(campaign_service.issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
-            .order_by(models.Campaign.start_date.asc())
-            .first()
-        )
-
-    campaign_date_label = ("Campaign deadline" if active_campaign.status == models.CampaignStatus.REVIEW.value
-                           else "Campaign ends") if active_campaign is not None else "Next campaign"
-    campaign_date = (
-        business_date(active_campaign.end_date)
-        if active_campaign is not None
-        else business_date(next_campaign.start_date) if next_campaign is not None else None
-    )
-    campaign_date_empty_text = "No deadline" if active_campaign is not None else "Not announced yet"
-    latest_result = completed_evaluations[0] if len(completed_evaluations) > 0 else None
-
     return {
         "current_date": campaign_today(),
         "evaluations": evaluations,
         "restricted_campaigns": [{"campaign_id": row.id, "campaign_name": row.name,
                                    "campaign_status": row.status} for row in restricted_campaigns],
-        "open_count": len(open_evaluations),
-        "completed_count": len(completed_evaluations),
-        "next_review_date": campaign_date,
-        "campaign_date_label": campaign_date_label,
-        "campaign_date": campaign_date,
-        "campaign_date_empty_text": campaign_date_empty_text,
-        "latest_result": latest_result,
-        "history": [
-            {
-                "id": evaluation["id"],
-                "title": evaluation["form_name"],
-                "subtitle": evaluation["campaign_name"],
-                "status": ("Submitted" if evaluation["finish_date"] is not None
-                           else "In progress" if evaluation["answered_count"] else "Not started"),
-                "occurred_at": evaluation["finish_date"] or evaluation["created_at"],
-            }
-            for evaluation in evaluations[:3]
-        ],
     }

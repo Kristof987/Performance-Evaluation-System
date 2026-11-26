@@ -5,7 +5,6 @@ export type Campaign = {
   start_date: string;
   end_date: string | null;
   current_date: string;
-  lifecycle_status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
   campaign_status: 'draft' | 'scheduled' | 'active' | 'paused' | 'review' | 'closed';
   is_archived: boolean;
 };
@@ -20,8 +19,6 @@ export type DashboardMetrics = {
   in_progress_count: number;
   overdue_count: number;
   overdue_forms_count: number;
-  upcoming_reviews_count: number;
-  next_review_date: string | null;
 };
 
 export type DashboardForm = {
@@ -30,7 +27,6 @@ export type DashboardForm = {
   audience: string;
   submitted_count: number;
   assignment_count: number;
-  due_date: string | null;
   overdue_count: number;
 };
 

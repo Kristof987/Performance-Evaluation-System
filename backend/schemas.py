@@ -46,13 +46,9 @@ class AssignedEvaluationResponse(BaseModel):
     campaign_id: int
     campaign_name: str
     campaign_start_date: date
-    campaign_start_at: datetime
     campaign_status: CampaignStatus
     campaign_end_at: datetime | None
-    is_overdue: bool = False
     can_edit: bool = False
-    campaign_is_active: bool
-    campaign_lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
     current_date: date
     form_id: int
     form_name: str
@@ -63,7 +59,6 @@ class AssignedEvaluationResponse(BaseModel):
     finish_date: date | None
     question_count: int
     answered_count: int
-    created_at: datetime
 
 
 class AssignedQuestionnaireResponse(BaseModel):
@@ -77,14 +72,6 @@ class AssignedQuestionnaireUpdate(BaseModel):
     submit: bool = False
 
 
-class EmployeeDashboardHistoryItem(BaseModel):
-    id: int
-    title: str
-    subtitle: str
-    status: str
-    occurred_at: date | datetime | None = None
-
-
 class EmployeeCampaignNotice(BaseModel):
     campaign_id: int
     campaign_name: str
@@ -95,14 +82,6 @@ class EmployeeDashboardResponse(BaseModel):
     current_date: date
     evaluations: list[AssignedEvaluationResponse]
     restricted_campaigns: list[EmployeeCampaignNotice] = Field(default_factory=list)
-    open_count: int
-    completed_count: int
-    next_review_date: date | None = None
-    campaign_date_label: str
-    campaign_date: date | None = None
-    campaign_date_empty_text: str
-    latest_result: AssignedEvaluationResponse | None = None
-    history: list[EmployeeDashboardHistoryItem]
 
 
 class PeopleGroupResponse(BaseModel):
@@ -416,7 +395,6 @@ class DashboardCampaignSummary(BaseModel):
     start_date: date
     end_date: date | None = None
     current_date: date
-    lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
     campaign_status: CampaignStatus
     is_archived: bool
 
@@ -431,8 +409,6 @@ class DashboardMetricSummary(BaseModel):
     in_progress_count: int
     overdue_count: int
     overdue_forms_count: int
-    upcoming_reviews_count: int
-    next_review_date: date | None = None
 
 
 class DashboardFormSummary(BaseModel):
@@ -441,7 +417,6 @@ class DashboardFormSummary(BaseModel):
     audience: str
     submitted_count: int
     assignment_count: int
-    due_date: date | None = None
     overdue_count: int
 
 
@@ -453,14 +428,6 @@ class DashboardParticipantSummary(BaseModel):
     role_name: str
     groups: list[str]
     evaluations_left: int = 0
-
-
-class DashboardUpcomingReview(BaseModel):
-    campaign_id: int
-    name: str
-    start_date: date
-    participant_count: int
-    form_count: int
 
 
 class DashboardUpcomingDeadline(BaseModel):
@@ -477,7 +444,6 @@ class DashboardResponse(BaseModel):
     metrics: DashboardMetricSummary | None
     forms: list[DashboardFormSummary]
     participants: list[DashboardParticipantSummary]
-    upcoming_reviews: list[DashboardUpcomingReview]
     upcoming_deadlines: list[DashboardUpcomingDeadline]
 
 

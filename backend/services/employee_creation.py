@@ -1,5 +1,8 @@
 """Shared persistence for employees entered by HR or imported from a spreadsheet."""
 
+from itertools import chain, count
+
+from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -24,19 +27,19 @@ def get_or_create_company_role(role_name: str, db: Session):
     return company_role
 
 
+def default_system_role(db: Session) -> models.SystemRole:
+    """The system role of a new employee whose row or form names none."""
+    role = db.query(models.SystemRole).filter(func.lower(models.SystemRole.name) == DEFAULT_SYSTEM_ROLE.lower()).first()
+    if role is None:
+        raise HTTPException(status_code=500, detail="Employee system role is unavailable")
+    return role
+
+
 def employee_username(name: str, email: str, used: set[str]) -> str:
-    # The login uses user IDs; username remains unique even when display names repeat.
-    for candidate in (name, email):
-        if candidate not in used:
-            used.add(candidate)
-            return candidate
-    suffix = 2
-    while True:
-        candidate = f"{email}-{suffix}"
-        if candidate not in used:
-            used.add(candidate)
-            return candidate
-        suffix += 1
+    # The login uses user IDs; username remains unique even when display names repeat: name, email, email-2, ...
+    username = next(candidate for candidate in chain((name, email), (f"{email}-{n}" for n in count(2))) if candidate not in used)
+    used.add(username)
+    return username
 
 
 def add_employee(name, email, company_role, system_role, used_usernames, db: Session):

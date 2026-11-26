@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 import models
 from services import people_import_service, permissions
+from services.form_service import MAX_LABELLED_SCALE_POINTS
 
 FORM_HEADERS = ["Form Name", "Form Description"]
 QUESTION_HEADERS = ["Section", "Question Text", "Question Type", "Required", "Help Text",
@@ -20,8 +21,6 @@ QUESTION_TYPES = {"numerical scale": "Scale", "scale": "Scale", "text": "Text",
 CHOICE_TYPES = {"Single choice", "Multiple choice"}
 MAX_FORM_QUESTIONS = 200
 MAX_NAME_LENGTH = 120
-# Kept in step with main.MAX_LABELLED_SCALE_POINTS.
-MAX_LABELLED_SCALE_POINTS = 11
 
 
 def _text(value: Any) -> str:
@@ -120,7 +119,7 @@ def parse_form_workbook(upload: BinaryIO, filename: str | None, actor: models.Us
         errors.append("The Questions sheet does not contain any questions.")
 
     catalog = {section.normalized_name: section for section in db.query(models.Section).filter(models.Section.scope_key == "default").all()}
-    can_create_sections = "sections.manage" in permissions.role_permissions(db, actor.system_role_id)
+    can_create_sections = permissions.has_permission(actor, db, "sections.manage")
     blocks: list[dict[str, Any]] = []
     section_blocks: dict[str, dict[str, Any]] = {}
     for row_number, cells in question_rows:

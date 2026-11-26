@@ -169,25 +169,6 @@ def get_campaign_form_ids(campaign_id: int, db: Session):
     return sorted((rule_form_ids | filled_form_ids) - {None})
 
 
-def get_campaign_participant_count(campaign_id: int, db: Session):
-    evaluator_ids = {
-        employee_id
-        for (employee_id,) in db.query(models.FilledForm.evaluator_id)
-        .filter(models.FilledForm.campaign_id == campaign_id)
-        .distinct()
-        .all()
-    }
-    evaluatee_ids = {
-        employee_id
-        for (employee_id,) in db.query(models.FilledForm.evaluatee_id)
-        .filter(models.FilledForm.campaign_id == campaign_id)
-        .distinct()
-        .all()
-    }
-
-    return len(evaluator_ids | evaluatee_ids)
-
-
 def get_campaign_participants(campaign_id: int, db: Session):
     assigned_group_ids = get_campaign_assigned_group_ids(campaign_id, db)
     if len(assigned_group_ids) == 0:

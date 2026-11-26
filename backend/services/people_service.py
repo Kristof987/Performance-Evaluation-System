@@ -17,7 +17,7 @@ from services import (
     workspace_settings_service,
 )
 
-from services.employee_creation import DEFAULT_SYSTEM_ROLE, add_employee, get_or_create_company_role
+from services.employee_creation import add_employee, default_system_role, get_or_create_company_role
 
 
 def group_member_counts(group_ids: list[int], db: Session) -> dict[int, int]:
@@ -157,10 +157,7 @@ def create_people_employee(*, employee: schemas.PeopleEmployeeCreate, db: Sessio
     used = {username for (username,) in db.query(models.User.username).all()}
     try:
         company_role = get_or_create_company_role(role_name, db)
-        system_role = db.query(models.SystemRole).filter(models.SystemRole.name == DEFAULT_SYSTEM_ROLE).first()
-        if system_role is None:
-            raise HTTPException(status_code=500, detail="Employee system role is unavailable")
-        person = add_employee(name, email, company_role, system_role, used, db)
+        person = add_employee(name, email, company_role, default_system_role(db), used, db)
         db.flush()
         update_memberships(person, group_ids, set(), db)
         db.commit()

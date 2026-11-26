@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 import models
 from services import account_service, invitation_service, permissions
-from services.employee_creation import DEFAULT_SYSTEM_ROLE, add_employee, get_or_create_company_role
+from services.employee_creation import DEFAULT_SYSTEM_ROLE, add_employee, default_system_role, get_or_create_company_role
 
 email_validator = TypeAdapter(EmailStr)
 
@@ -143,9 +143,7 @@ def import_people_employees(*, file: UploadFile, db: Session, actor: models.User
     }
     actor_permissions = permissions.role_permissions(db, actor.system_role_id)
     all_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()}
-    default_role = all_roles.get(DEFAULT_SYSTEM_ROLE.casefold())
-    if default_role is None:
-        raise HTTPException(status_code=500, detail="Employee system role is unavailable")
+    default_role = default_system_role(db)
     # Like adding one person, an empty System Role means Employee. Any other role is a role
     # assignment, so it needs roles.assign and never more access than the importer holds.
     can_assign = "roles.assign" in actor_permissions

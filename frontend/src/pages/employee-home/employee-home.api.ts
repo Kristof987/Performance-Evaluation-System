@@ -7,10 +7,8 @@ type AssignedEvaluationResponse = {
   campaign_id: number;
   campaign_name: string;
   campaign_start_date: string;
-  campaign_is_active: boolean;
   campaign_status: 'draft' | 'scheduled' | 'active' | 'paused' | 'review' | 'closed';
   campaign_end_at: string | null;
-  campaign_lifecycle_status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
   current_date: string;
   form_id: number;
   form_name: string;
@@ -21,29 +19,12 @@ type AssignedEvaluationResponse = {
   finish_date: string | null;
   question_count: number;
   answered_count: number;
-  created_at: string;
-};
-
-type EmployeeDashboardHistoryItemResponse = {
-  id: number;
-  title: string;
-  subtitle: string;
-  status: string;
-  occurred_at: string | null;
 };
 
 type EmployeeDashboardResponse = {
   current_date: string;
   evaluations: AssignedEvaluationResponse[];
   restricted_campaigns: Array<{ campaign_id: number; campaign_name: string; campaign_status: 'paused' | 'closed' }>;
-  open_count: number;
-  completed_count: number;
-  next_review_date: string | null;
-  campaign_date_label: string;
-  campaign_date: string | null;
-  campaign_date_empty_text: string;
-  latest_result: AssignedEvaluationResponse | null;
-  history: EmployeeDashboardHistoryItemResponse[];
 };
 
 export type AssignedEvaluation = {
@@ -52,10 +33,8 @@ export type AssignedEvaluation = {
   campaignId: number;
   campaignName: string;
   campaignStartDate: string;
-  campaignIsActive: boolean;
   campaignStatus: AssignedEvaluationResponse['campaign_status'];
   campaignEndAt: string | null;
-  campaignLifecycleStatus: 'Scheduled' | 'Ongoing' | 'Completed' | 'Disabled';
   currentDate: string;
   formId: number;
   formName: string;
@@ -66,7 +45,6 @@ export type AssignedEvaluation = {
   finishDate: string | null;
   questionCount: number;
   answeredCount: number;
-  createdAt: string;
 };
 
 export type QuestionnaireAnswer = { question_id: string; value: string | number | string[] };
@@ -84,26 +62,10 @@ function mapIssuedBlocks(questions: Array<IssuedBlock | FormQuestion>): IssuedBl
     : { type: 'question' as const, question: item as FormQuestion });
 }
 
-type EmployeeDashboardHistoryItem = {
-  id: number;
-  title: string;
-  subtitle: string;
-  status: string;
-  occurredAt: string | null;
-};
-
 type EmployeeDashboard = {
   currentDate: string;
   evaluations: AssignedEvaluation[];
   restrictedCampaigns: Array<{ campaignId: number; campaignName: string; status: 'paused' | 'closed' }>;
-  openCount: number;
-  completedCount: number;
-  nextReviewDate: string | null;
-  campaignDateLabel: string;
-  campaignDate: string | null;
-  campaignDateEmptyText: string;
-  latestResult: AssignedEvaluation | null;
-  history: EmployeeDashboardHistoryItem[];
 };
 
 function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): AssignedEvaluation {
@@ -113,10 +75,8 @@ function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): Assigned
     campaignId: evaluation.campaign_id,
     campaignName: evaluation.campaign_name,
     campaignStartDate: evaluation.campaign_start_date,
-    campaignIsActive: evaluation.campaign_is_active,
     campaignStatus: evaluation.campaign_status,
     campaignEndAt: evaluation.campaign_end_at,
-    campaignLifecycleStatus: evaluation.campaign_lifecycle_status,
     currentDate: evaluation.current_date,
     formId: evaluation.form_id,
     formName: evaluation.form_name,
@@ -127,7 +87,6 @@ function mapAssignedEvaluation(evaluation: AssignedEvaluationResponse): Assigned
     finishDate: evaluation.finish_date,
     questionCount: evaluation.question_count,
     answeredCount: evaluation.answered_count,
-    createdAt: evaluation.created_at,
   };
 }
 
@@ -137,20 +96,6 @@ function mapEmployeeDashboard(dashboard: EmployeeDashboardResponse): EmployeeDas
     evaluations: dashboard.evaluations.map(mapAssignedEvaluation),
     restrictedCampaigns: (dashboard.restricted_campaigns ?? []).map((item) => ({
       campaignId: item.campaign_id, campaignName: item.campaign_name, status: item.campaign_status,
-    })),
-    openCount: dashboard.open_count,
-    completedCount: dashboard.completed_count,
-    nextReviewDate: dashboard.next_review_date,
-    campaignDateLabel: dashboard.campaign_date_label,
-    campaignDate: dashboard.campaign_date,
-    campaignDateEmptyText: dashboard.campaign_date_empty_text,
-    latestResult: dashboard.latest_result === null ? null : mapAssignedEvaluation(dashboard.latest_result),
-    history: dashboard.history.map((item) => ({
-      id: item.id,
-      title: item.title,
-      subtitle: item.subtitle,
-      status: item.status,
-      occurredAt: item.occurred_at,
     })),
   };
 }
