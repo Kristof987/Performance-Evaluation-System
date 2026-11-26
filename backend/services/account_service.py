@@ -31,8 +31,7 @@ def sign_in_status(user: models.User | None) -> str:
     return "not_invited"
 
 
-def account_fields(user: models.User | None, db: Session) -> dict:
-    system_role = db.get(models.SystemRole, user.system_role_id) if user else None
+def account_fields(user: models.User | None, system_role: models.SystemRole | None) -> dict:
     return {"sign_in_status": sign_in_status(user),
             "sign_in_linked": bool(user and user.auth0_user_id),
             "invitation_sent_at": user.invitation_sent_at if user else None,

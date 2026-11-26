@@ -2,11 +2,10 @@
 
 from datetime import datetime, timezone
 
-from fastapi import HTTPException, UploadFile
-from pydantic import TypeAdapter, ValidationError
+from fastapi import HTTPException
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 import models
 import schemas
@@ -15,26 +14,13 @@ from services import (
     account_service,
     campaign_service,
     invitation_service,
-    people_import_service,
-    permissions,
     workspace_settings_service,
 )
 
-email_validator = TypeAdapter(schemas.EmailStr)
-
-
-# New people get this system role unless someone allowed to assign roles chooses another.
-DEFAULT_SYSTEM_ROLE = "Employee"
-
-EMPLOYEE_IMPORT_HEADERS = [
-    "Employee Name",
-    "Employee Email Address",
-    "Employee Company Role",
-    "Employee System Role",
-]
-
-
-GROUP_IMPORT_HEADERS = ["Group Name", "Group Description"]
+from services.employee_creation import DEFAULT_SYSTEM_ROLE, add_employee, get_or_create_company_role
+from services.people_import_service import (
+    EMPLOYEE_IMPORT_HEADERS, GROUP_IMPORT_HEADERS, import_people_employees, import_people_groups,
+)
 
 
 def group_member_counts(group_ids: list[int], db: Session) -> dict[int, int]:
@@ -71,100 +57,93 @@ def set_group_leaders(group_id: int, leader_ids: list[int], db: Session) -> list
     return wanted
 
 
-def get_people(*, db: Session):
-    employees = (
-        db.query(models.Employee)
-        .order_by(models.Employee.is_active.desc(), models.Employee.full_name.asc())
-        .all()
-    )
-    company_roles = db.query(models.CompanyRole).all()
-    roles_by_id = {role.id: role.name for role in company_roles}
-    groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
-    groups_by_id = {group.id: group for group in groups}
-    group_member_counts = {group.id: 0 for group in groups}
-    group_ids_by_employee_id = {employee.id: [] for employee in employees}
+def group_response(group, count, leaders):
+    return {"id": group.id, "name": group.name, "description": group.description,
+            "member_count": count, "leader_ids": leaders}
 
-    memberships = db.query(
-        models.employee_company_groups.c.employee_id,
-        models.employee_company_groups.c.company_group_id,
-    ).all()
-    for membership in memberships:
-        group = groups_by_id.get(membership.company_group_id)
-        if group is None:
-            continue
-        group_member_counts[group.id] = group_member_counts.get(group.id, 0) + 1
-        if membership.employee_id in group_ids_by_employee_id:
-            group_ids_by_employee_id[membership.employee_id].append(group.id)
 
-    leader_ids_by_group = group_leader_ids(None, db)
+def group_responses(groups, db):
+    ids = [group.id for group in groups]
+    counts = group_member_counts(ids, db)
+    leaders = group_leader_ids(ids, db) if ids else {}
+    return [group_response(group, counts.get(group.id, 0), leaders.get(group.id, [])) for group in groups]
 
-    def serialize_group(group: models.CompanyGroup):
-        return {
-            "id": group.id,
-            "name": group.name,
-            "description": group.description,
-            "member_count": group_member_counts.get(group.id, 0),
-            "leader_ids": leader_ids_by_group.get(group.id, []),
-        }
 
+def employee_response(person, role, system_role, groups):
+    user = person.user
     return {
-        "employees": [
-            {
-                "id": employee.id,
-                "user_id": employee.user_id,
-                "username": employee.user.username if employee.user else employee.full_name,
-                "full_name": employee.full_name,
-                "email": employee.user.email if employee.user else "",
-                "company_role_id": employee.company_role_id,
-                "role_name": roles_by_id.get(employee.company_role_id, "Unknown role"),
-                "groups": [
-                    serialize_group(groups_by_id[group_id])
-                    for group_id in group_ids_by_employee_id.get(employee.id, [])
-                    if group_id in groups_by_id
-                ],
-                "is_active": employee.is_active,
-                "profile_image_url": employee.profile_image_url,
-                **account_service.account_fields(employee.user, db),
-            }
-            for employee in employees
-        ],
-        "groups": [serialize_group(group) for group in groups],
-        "company_roles": [{"id": role.id, "name": role.name}
-                          for role in sorted(company_roles, key=lambda item: item.name.lower()) if role.archived_at is None],
-        "system_roles": [{"id": role.id, "name": role.name, "description": role.description}
-                         for role in db.query(models.SystemRole).order_by(models.SystemRole.id).all()],
+        "id": person.id, "user_id": person.user_id, "full_name": person.full_name,
+        "username": user.username if user else person.full_name, "email": user.email if user else "",
+        "company_role_id": person.company_role_id, "role_name": role.name if role else "Unknown role",
+        "groups": groups, "is_active": person.is_active, "profile_image_url": person.profile_image_url,
+        **account_service.account_fields(user, system_role),
     }
 
 
-def get_or_create_company_role(role_name: str, db: Session):
-    company_role = (
-        db.query(models.CompanyRole)
-        .filter(func.lower(models.CompanyRole.name) == role_name.lower())
-        .first()
-    )
-    if company_role is None:
-        company_role = models.CompanyRole(name=role_name)
-        db.add(company_role)
-        db.flush()
-    elif company_role.archived_at is not None:
-        # Typing an archived role's name brings it back instead of creating a near-duplicate.
-        company_role.archived_at = None
-    return company_role
+def saved_employee_response(person, db):
+    memberships = models.employee_company_groups
+    groups = (db.query(models.CompanyGroup).join(memberships)
+              .filter(memberships.c.employee_id == person.id).order_by(models.CompanyGroup.name).all())
+    system_role = db.get(models.SystemRole, person.user.system_role_id) if person.user else None
+    return employee_response(person, db.get(models.CompanyRole, person.company_role_id),
+                             system_role, group_responses(groups, db))
 
 
-def employee_username(name: str, email: str, used: set[str]) -> str:
-    # The login uses user IDs; username remains unique even when display names repeat.
-    for candidate in (name, email):
-        if candidate not in used:
-            used.add(candidate)
-            return candidate
-    suffix = 2
-    while True:
-        candidate = f"{email}-{suffix}"
-        if candidate not in used:
-            used.add(candidate)
-            return candidate
-        suffix += 1
+def get_people(*, db: Session):
+    employees = (db.query(models.Employee).options(selectinload(models.Employee.user))
+                 .order_by(models.Employee.is_active.desc(), models.Employee.full_name).all())
+    roles = {role.id: role for role in db.query(models.CompanyRole).all()}
+    system_roles = {role.id: role for role in db.query(models.SystemRole).order_by(models.SystemRole.id)}
+    groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name).all()
+    memberships = models.employee_company_groups.c
+    groups_by_employee = {}
+    counts = {}
+    for employee_id, group_id in db.query(memberships.employee_id, memberships.company_group_id):
+        groups_by_employee.setdefault(employee_id, []).append(group_id)
+        counts[group_id] = counts.get(group_id, 0) + 1
+    leaders = group_leader_ids(None, db)
+    summaries = {group.id: group_response(group, counts.get(group.id, 0), leaders.get(group.id, []))
+                 for group in groups}
+    return {
+        "employees": [employee_response(person, roles.get(person.company_role_id),
+                                        system_roles.get(person.user.system_role_id) if person.user else None,
+                                        [summaries[group_id] for group_id in groups_by_employee.get(person.id, [])
+                                         if group_id in summaries])
+                      for person in employees],
+        "groups": list(summaries.values()),
+        "company_roles": [{"id": role.id, "name": role.name}
+                          for role in sorted(roles.values(), key=lambda item: item.name.lower()) if role.archived_at is None],
+        "system_roles": [{"id": role.id, "name": role.name, "description": role.description}
+                         for role in system_roles.values()],
+    }
+
+
+def selected_group_ids(ids, db):
+    wanted = set(ids)
+    if wanted and db.query(models.CompanyGroup.id).filter(models.CompanyGroup.id.in_(wanted)).count() != len(wanted):
+        raise HTTPException(status_code=400, detail="Invalid group selection")
+    return wanted
+
+
+def update_memberships(person, added: set[int], removed: set[int], db: Session, *, role_groups=None):
+    memberships = models.employee_company_groups
+    affected = added | removed if role_groups is None else role_groups
+    campaigns = campaign_service.scheduled_campaigns_for_groups(affected, db)
+    if role_groups is not None:
+        ensure_group_membership_mutable(None, person.id, db, role_change=True)
+    for group_id in sorted(removed):
+        ensure_group_membership_mutable(group_id, person.id, db)
+    if removed:
+        result = db.execute(memberships.delete().where(memberships.c.employee_id == person.id,
+                                                       memberships.c.company_group_id.in_(removed)))
+        if result.rowcount != len(removed):
+            raise HTTPException(status_code=404, detail="Employee is not in this group")
+    if added:
+        db.execute(memberships.insert(), [{"employee_id": person.id, "company_group_id": group_id}
+                                         for group_id in sorted(added)])
+    db.flush()
+    for campaign in campaigns:
+        campaign_service.validate_scheduled_campaign(campaign, db)
 
 
 def create_people_employee(*, employee: schemas.PeopleEmployeeCreate, db: Session, actor: models.User):
@@ -177,43 +156,16 @@ def create_people_employee(*, employee: schemas.PeopleEmployeeCreate, db: Sessio
     if account_service.email_taken(email, db):
         raise HTTPException(status_code=409, detail="Employee email already exists")
 
-    group_ids = sorted(set(employee.group_ids))
-    groups = []
-    if len(group_ids) > 0:
-        groups = (
-            db.query(models.CompanyGroup)
-            .filter(models.CompanyGroup.id.in_(group_ids))
-            .order_by(models.CompanyGroup.name.asc())
-            .all()
-        )
-        if len(groups) != len(group_ids):
-            raise HTTPException(status_code=400, detail="Invalid group selection")
-
+    group_ids = selected_group_ids(employee.group_ids, db)
     used = {username for (username,) in db.query(models.User.username).all()}
     try:
         company_role = get_or_create_company_role(role_name, db)
         system_role = db.query(models.SystemRole).filter(models.SystemRole.name == DEFAULT_SYSTEM_ROLE).first()
         if system_role is None:
             raise HTTPException(status_code=500, detail="Employee system role is unavailable")
-        new_user = models.User(
-            username=employee_username(name, email, used),
-            email=email,
-            password_hash="",
-            system_role_id=system_role.id,
-            is_active=True,
-        )
-        db.add(new_user)
+        person = add_employee(name, email, company_role, system_role, used, db)
         db.flush()
-        new_employee = models.Employee(user_id=new_user.id, full_name=name, company_role_id=company_role.id, is_active=True)
-        db.add(new_employee)
-        db.flush()
-        for group in groups:
-            db.execute(
-                models.employee_company_groups.insert().values(
-                    employee_id=new_employee.id,
-                    company_group_id=group.id,
-                )
-            )
+        update_memberships(person, group_ids, set(), db)
         db.commit()
     except IntegrityError as error:
         db.rollback()
@@ -221,33 +173,12 @@ def create_people_employee(*, employee: schemas.PeopleEmployeeCreate, db: Sessio
     except Exception:
         db.rollback()
         raise
-    new_user = invitation_service.invite_user(new_user, actor, db)
-    counts = group_member_counts([group.id for group in groups], db)
-
-    return {
-        "id": new_employee.id,
-        "user_id": new_user.id,
-        "username": new_user.username,
-        "full_name": new_employee.full_name,
-        "email": new_user.email,
-        "company_role_id": new_employee.company_role_id,
-        "role_name": company_role.name,
-        "groups": [
-            {
-                "id": group.id,
-                "name": group.name,
-                "description": group.description,
-                "member_count": counts.get(group.id, 0),
-            }
-            for group in groups
-        ],
-        "is_active": new_employee.is_active,
-        **account_service.account_fields(new_user, db),
-    }
+    invitation_service.invite_user(person.user, actor, db)
+    return saved_employee_response(person, db)
 
 
 def update_people_employee(*, employee_id: int, employee: schemas.PeopleEmployeeUpdate, db: Session):
-    person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    person = db.query(models.Employee).filter(models.Employee.id == employee_id).with_for_update().first()
     if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
     user = person.user
@@ -267,79 +198,32 @@ def update_people_employee(*, employee_id: int, employee: schemas.PeopleEmployee
         raise HTTPException(status_code=409, detail="The email cannot be changed after the sign-in account is created")
 
     company_role = get_or_create_company_role(role_name, db)
-    group_ids = sorted(set(employee.group_ids))
-    groups = []
-    if len(group_ids) > 0:
-        groups = (
-            db.query(models.CompanyGroup)
-            .filter(models.CompanyGroup.id.in_(group_ids))
-            .order_by(models.CompanyGroup.name.asc())
-            .all()
-        )
-        if len(groups) != len(group_ids):
-            raise HTTPException(status_code=400, detail="Invalid group selection")
-
-    current_group_ids = {group_id for (group_id,) in db.query(models.employee_company_groups.c.company_group_id)
-        .filter(models.employee_company_groups.c.employee_id == employee_id).all()}
-    affected_campaigns = campaign_service.scheduled_campaigns_for_groups(current_group_ids | set(group_ids), db)
-    for removed_group_id in current_group_ids - set(group_ids):
-        ensure_group_membership_mutable(removed_group_id, employee_id, db)
-    if person.company_role_id != company_role.id:
-        ensure_group_membership_mutable(None, employee_id, db, role_change=True)
-
+    wanted = selected_group_ids(employee.group_ids, db)
+    memberships = models.employee_company_groups.c
+    current = {group_id for (group_id,) in db.query(memberships.company_group_id)
+               .filter(memberships.employee_id == person.id)}
+    role_changed = person.company_role_id != company_role.id
     person.full_name = name
     user.email = email
     person.company_role_id = company_role.id
-
-    db.execute(
-        models.employee_company_groups.delete().where(
-            models.employee_company_groups.c.employee_id == employee_id
-        )
-    )
-    for group in groups:
-        db.execute(
-            models.employee_company_groups.insert().values(
-                employee_id=employee_id,
-                company_group_id=group.id,
-            )
-        )
-
-    db.flush()
-    for campaign in affected_campaigns:
-        campaign_service.validate_scheduled_campaign(campaign, db)
+    if role_changed or current != wanted:
+        update_memberships(person, wanted - current, current - wanted, db,
+                           role_groups=current | wanted if role_changed else None)
     db.commit()
-    db.refresh(person)
-    counts = group_member_counts([group.id for group in groups], db)
+    return saved_employee_response(person, db)
 
-    return {
-        "id": person.id,
-        "user_id": user.id,
-        "username": user.username,
-        "full_name": person.full_name,
-        "email": user.email,
-        "company_role_id": person.company_role_id,
-        "role_name": company_role.name,
-        "groups": [
-            {
-                "id": group.id,
-                "name": group.name,
-                "description": group.description,
-                "member_count": counts.get(group.id, 0),
-            }
-            for group in groups
-        ],
-        "is_active": person.is_active,
-        "profile_image_url": person.profile_image_url,
-        **account_service.account_fields(user, db),
-    }
+
+CAMPAIGN_ROLE_COLUMNS = (
+    models.FilledForm.evaluator_company_role_id, models.FilledForm.evaluatee_company_role_id,
+    models.CampaignEvaluationRule.evaluator_role_id, models.CampaignEvaluationRule.evaluatee_role_id,
+)
 
 
 def company_role_usage(db: Session) -> list[dict]:
     employee_counts = dict(db.query(models.Employee.company_role_id, func.count(models.Employee.id))
                            .group_by(models.Employee.company_role_id).all())
     used = set()
-    for column in (models.FilledForm.evaluator_company_role_id, models.FilledForm.evaluatee_company_role_id,
-                   models.CampaignEvaluationRule.evaluator_role_id, models.CampaignEvaluationRule.evaluatee_role_id):
+    for column in CAMPAIGN_ROLE_COLUMNS:
         used.update(role_id for (role_id,) in db.query(column).filter(column.isnot(None)).distinct().all())
     return [{"id": role.id, "name": role.name, "employee_count": employee_counts.get(role.id, 0),
              "used_in_campaigns": role.id in used, "archived": role.archived_at is not None}
@@ -351,11 +235,10 @@ def delete_company_role(*, role_id: int, db: Session, actor: models.User):
     role = db.query(models.CompanyRole).filter(models.CompanyRole.id == role_id).with_for_update().first()
     if role is None:
         raise HTTPException(status_code=404, detail="Company role not found")
-    usage = next(item for item in company_role_usage(db) if item["id"] == role_id)
-    if usage["employee_count"]:
-        count = usage["employee_count"]
+    count = db.query(models.Employee.id).filter_by(company_role_id=role_id).count()
+    if count:
         raise HTTPException(status_code=409, detail=f"Move the {count} employee{'s' if count != 1 else ''} with this role to another role first")
-    if usage["used_in_campaigns"]:
+    if any(db.query(column).filter(column == role_id).first() for column in CAMPAIGN_ROLE_COLUMNS):
         if role.archived_at is None:
             role.archived_at = datetime.now(timezone.utc)
         summary = f"Company role archived: {role.name}"
@@ -383,23 +266,8 @@ def resend_employee_invitation(*, employee_id: int, db: Session, actor: models.U
         raise HTTPException(status_code=409, detail="Inactive employees cannot be invited")
     if not auth0_management.password_reset_available():
         raise HTTPException(status_code=503, detail="Sign-in invitations are not configured on the server")
-    user = invitation_service.invite_user(person.user, actor, db, enforce_cooldown=True)
-    group_ids = [group_id for (group_id,) in db.query(models.employee_company_groups.c.company_group_id)
-                 .filter(models.employee_company_groups.c.employee_id == person.id)]
-    groups = db.query(models.CompanyGroup).filter(models.CompanyGroup.id.in_(group_ids)) \
-        .order_by(models.CompanyGroup.name.asc()).all() if group_ids else []
-    counts = group_member_counts(group_ids, db)
-    role = db.get(models.CompanyRole, person.company_role_id)
-    return {
-        "id": person.id, "user_id": user.id, "username": user.username, "full_name": person.full_name,
-        "email": user.email, "company_role_id": person.company_role_id,
-        "role_name": role.name if role else "Unknown role",
-        "groups": [{"id": group.id, "name": group.name, "description": group.description,
-                    "member_count": counts.get(group.id, 0)} for group in groups],
-        "is_active": person.is_active,
-        "profile_image_url": person.profile_image_url,
-        **account_service.account_fields(user, db),
-    }
+    invitation_service.invite_user(person.user, actor, db, enforce_cooldown=True)
+    return saved_employee_response(person, db)
 
 
 def create_people_group(*, group: schemas.PeopleGroupCreate, db: Session):
@@ -422,13 +290,7 @@ def create_people_group(*, group: schemas.PeopleGroupCreate, db: Session):
     leader_ids = set_group_leaders(new_group.id, group.leader_ids or [], db)
     db.commit()
     db.refresh(new_group)
-    return {
-        "id": new_group.id,
-        "name": new_group.name,
-        "description": new_group.description,
-        "member_count": 0,
-        "leader_ids": leader_ids,
-    }
+    return group_response(new_group, 0, leader_ids)
 
 
 def update_people_group(*, group_id: int, group: schemas.PeopleGroupUpdate, db: Session):
@@ -457,18 +319,7 @@ def update_people_group(*, group_id: int, group: schemas.PeopleGroupUpdate, db: 
     db.commit()
     db.refresh(existing_group)
 
-    member_count = (
-        db.query(models.employee_company_groups)
-        .filter(models.employee_company_groups.c.company_group_id == group_id)
-        .count()
-    )
-    return {
-        "id": existing_group.id,
-        "name": existing_group.name,
-        "description": existing_group.description,
-        "member_count": member_count,
-        "leader_ids": group_leader_ids([group_id], db).get(group_id, []),
-    }
+    return group_responses([existing_group], db)[0]
 
 
 def add_people_group_member(*, group_id: int, member: schemas.PeopleGroupMemberCreate, db: Session):
@@ -476,7 +327,7 @@ def add_people_group_member(*, group_id: int, member: schemas.PeopleGroupMemberC
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    person = db.query(models.Employee).filter(models.Employee.id == member.employee_id).first()
+    person = db.query(models.Employee).filter(models.Employee.id == member.employee_id).with_for_update().first()
     if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
 
@@ -489,28 +340,10 @@ def add_people_group_member(*, group_id: int, member: schemas.PeopleGroupMemberC
     if existing_membership is not None:
         raise HTTPException(status_code=400, detail="Employee is already in this group")
 
-    affected_campaigns = campaign_service.scheduled_campaigns_for_groups({group_id}, db)
-    db.execute(
-        models.employee_company_groups.insert().values(
-            employee_id=member.employee_id,
-            company_group_id=group_id,
-        )
-    )
-    for campaign in affected_campaigns:
-        campaign_service.validate_scheduled_campaign(campaign, db)
+    update_memberships(person, {group_id}, set(), db)
     db.commit()
 
-    member_count = (
-        db.query(models.employee_company_groups)
-        .filter(models.employee_company_groups.c.company_group_id == group_id)
-        .count()
-    )
-    return {
-        "id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "member_count": member_count,
-    }
+    return group_responses([group], db)[0]
 
 
 def remove_people_group_member(*, group_id: int, employee_id: int, db: Session):
@@ -518,181 +351,14 @@ def remove_people_group_member(*, group_id: int, employee_id: int, db: Session):
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    person = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    person = db.query(models.Employee).filter(models.Employee.id == employee_id).with_for_update().first()
     if person is None:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    affected_campaigns = campaign_service.scheduled_campaigns_for_groups({group_id}, db)
-    ensure_group_membership_mutable(group_id, employee_id, db)
-
-    delete_result = db.execute(
-        models.employee_company_groups.delete()
-        .where(models.employee_company_groups.c.employee_id == employee_id)
-        .where(models.employee_company_groups.c.company_group_id == group_id)
-    )
-    if delete_result.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Employee is not in this group")
-
-    for campaign in affected_campaigns:
-        campaign_service.validate_scheduled_campaign(campaign, db)
+    update_memberships(person, set(), {group_id}, db)
     db.commit()
 
-    member_count = (
-        db.query(models.employee_company_groups)
-        .filter(models.employee_company_groups.c.company_group_id == group_id)
-        .count()
-    )
-    return {
-        "id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "member_count": member_count,
-    }
-
-
-def import_people_groups(*, file: UploadFile, db: Session):
-    import_rows = people_import_service.read_import_rows(file.file, file.filename, GROUP_IMPORT_HEADERS, "group")
-
-    errors = []
-    rows = []
-    seen_names = set()
-    existing_names = {
-        name.lower()
-        for (name,) in db.query(models.CompanyGroup.name).all()
-    }
-
-    for row_number, values in import_rows:
-        name = str(values[0]).strip() if values[0] is not None else ""
-        description = str(values[1]).strip() if values[1] is not None else ""
-
-        if name == "":
-            errors.append(f"Row {row_number}: Group Name is required.")
-
-        name_key = name.lower()
-        if name_key != "" and name_key in seen_names:
-            errors.append(f"Row {row_number}: Group Name is duplicated in the file.")
-        if name_key != "" and name_key in existing_names:
-            errors.append(f"Row {row_number}: Group Name already exists in the database.")
-
-        seen_names.add(name_key)
-        rows.append((name, description))
-
-    if len(rows) == 0:
-        errors.append("The uploaded template does not contain any group rows.")
-
-    if len(errors) > 0:
-        return {"created_count": 0, "errors": errors}
-
-    for name, description in rows:
-        db.add(
-            models.CompanyGroup(
-                name=name,
-                description=description if description != "" else None,
-            )
-        )
-
-    db.commit()
-    return {"created_count": len(rows), "errors": []}
-
-
-def import_people_employees(*, file: UploadFile, db: Session, actor: models.User):
-    import_rows = people_import_service.read_import_rows(file.file, file.filename, EMPLOYEE_IMPORT_HEADERS, "employee")
-
-    errors = []
-    rows = []
-    seen_emails = set()
-    used_usernames = {username for (username,) in db.query(models.User.username).all()}
-    existing_emails = {
-        email.lower()
-        for (email,) in db.query(models.User.email).all()
-    }
-    actor_permissions = permissions.role_permissions(db, actor.system_role_id)
-    all_roles = {role.name.casefold(): role for role in db.query(models.SystemRole).all()}
-    default_role = all_roles.get(DEFAULT_SYSTEM_ROLE.casefold())
-    if default_role is None:
-        raise HTTPException(status_code=500, detail="Employee system role is unavailable")
-    # Like adding one person, an empty System Role means Employee. Any other role is a role
-    # assignment, so it needs roles.assign and never more access than the importer holds.
-    can_assign = "roles.assign" in actor_permissions
-    system_roles = {name: role for name, role in all_roles.items()
-                    if can_assign and permissions.role_permissions(db, role.id) <= actor_permissions}
-    system_roles[DEFAULT_SYSTEM_ROLE.casefold()] = default_role
-
-    for row_number, values in import_rows:
-        name = str(values[0]).strip() if values[0] is not None else ""
-        email = str(values[1]).strip() if values[1] is not None else ""
-        company_role_name = str(values[2]).strip() if values[2] is not None else ""
-        system_role_name = str(values[3]).strip() if values[3] is not None else ""
-
-        if name == "":
-            errors.append(f"Row {row_number}: Employee Name is required.")
-        if email == "":
-            errors.append(f"Row {row_number}: Employee Email Address is required.")
-        else:
-            try:
-                email_validator.validate_python(email)
-            except ValidationError:
-                errors.append(f"Row {row_number}: Employee Email Address is not a valid email.")
-        if company_role_name == "":
-            errors.append(f"Row {row_number}: Employee Company Role is required.")
-        if system_role_name == "":
-            system_role_name = DEFAULT_SYSTEM_ROLE
-        elif system_role_name.casefold() not in all_roles:
-            errors.append(f"Row {row_number}: Employee System Role “{system_role_name}” does not exist.")
-        elif system_role_name.casefold() not in system_roles:
-            errors.append(f"Row {row_number}: You are not allowed to assign the “{system_role_name}” system role. "
-                          f"Leave the column empty to add the employee as {DEFAULT_SYSTEM_ROLE}.")
-
-        email_key = email.lower()
-        if email_key != "" and email_key in seen_emails:
-            errors.append(f"Row {row_number}: Employee Email Address is duplicated in the file.")
-        if email_key != "" and email_key in existing_emails:
-            errors.append(f"Row {row_number}: Employee Email Address already exists in the database.")
-
-        seen_emails.add(email_key)
-        rows.append((row_number, name, email_key, company_role_name, system_role_name))
-
-    if len(rows) == 0:
-        errors.append("The uploaded template does not contain any employee rows.")
-
-    if len(errors) > 0:
-        return {"created_count": 0, "errors": errors}
-
-    created: list[tuple[int, models.User]] = []
-    try:
-        for row_number, name, email, company_role_name, system_role_name in rows:
-            company_role = get_or_create_company_role(company_role_name, db)
-            system_role = system_roles[system_role_name.casefold()]
-            new_user = models.User(
-                    username=employee_username(" ".join(name.split()), email, used_usernames),
-                    email=email,
-                    password_hash="",
-                    system_role_id=system_role.id,
-                    is_active=True,
-                )
-            db.add(new_user)
-            db.flush()
-            db.add(models.Employee(user_id=new_user.id, full_name=" ".join(name.split()),
-                                   company_role_id=company_role.id, is_active=True))
-            created.append((row_number, new_user))
-        db.commit()
-    except IntegrityError as error:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Employee email or username already exists") from error
-    except Exception:
-        db.rollback()
-        raise
-
-    # Employees are already saved; a failed invitation can be resent from the People page.
-    invitations_sent, invitation_errors = 0, []
-    for row_number, new_user in created:
-        invited = invitation_service.invite_user(new_user, actor, db)
-        if invited.invitation_status == "sent":
-            invitations_sent += 1
-        elif invited.invitation_status == "failed":
-            invitation_errors.append(f"Row {row_number} ({invited.email}): {account_service.invitation_error_message(invited.invitation_error)}")
-    return {"created_count": len(rows), "errors": [], "invitations_sent": invitations_sent,
-            "invitation_errors": invitation_errors}
+    return group_responses([group], db)[0]
 
 
 def ensure_group_membership_mutable(group_id: int | None, employee_id: int, db: Session, *, role_change: bool = False):
