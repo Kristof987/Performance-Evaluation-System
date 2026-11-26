@@ -130,6 +130,8 @@ company_group_leaders = Table(
 
 class FilledForm(Base):
     __tablename__ = "filled_forms"
+    # An evaluator evaluates an employee at most once per campaign (a self-evaluation is the pair with itself).
+    __table_args__ = (UniqueConstraint("campaign_id", "evaluator_id", "evaluatee_id", name="uq_filled_forms_campaign_pair"),)
 
     id = Column(Integer, primary_key=True, index=True)
 

@@ -3,7 +3,6 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 import models
@@ -38,7 +37,7 @@ def list_employee_evaluations(employee: models.Employee, db: Session) -> list[di
         .join(models.Form, models.Form.id == models.FilledForm.form_id)
         .join(models.Employee, models.Employee.id == models.FilledForm.evaluatee_id)
         .filter(models.FilledForm.evaluator_id == employee.id)
-        .filter(or_(campaign_service.issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
+        .filter(campaign_service.issued_snapshot_filter())
         .order_by(
             models.FilledForm.finish_date.isnot(None).asc(),
             models.Campaign.end_date.asc().nullslast(),
@@ -153,7 +152,7 @@ def get_employee_dashboard(*, user_id: int, db: Session, actor: models.User, emp
                                     models.Campaign.status.in_([
                                         models.CampaignStatus.PAUSED.value, models.CampaignStatus.CLOSED.value,
                                      ]))
-                             .filter(or_(campaign_service.issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
+                             .filter(campaign_service.issued_snapshot_filter())
                              .distinct().all())
     return {
         "current_date": campaign_today(),

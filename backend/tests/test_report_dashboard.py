@@ -92,7 +92,7 @@ def test_dashboard_combines_matrix_deltas_and_trend(db, permissions):
     world.rate_everyone(old, alpha=(3, 2), beta=(3, 2))
     current = world.campaign(2091)
     world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
-    world.review(current, world.groups[0], world.people[0], world.people[1], 1, 1, completed=False)
+    world.review(current, world.groups[0], world.people[3], world.people[1], 1, 1, completed=False)
     world.campaign(2092, status="active")  # A later, still running campaign is not history.
 
     result = report_dashboard_service.build_campaign_dashboard(current.id, world.actor, db)
@@ -278,7 +278,7 @@ def test_group_detail_lists_member_scores(db, permissions):
     world = World(db)
     current = world.campaign(2100)
     world.rate_everyone(current, alpha=(5, 3), beta=(4, 2))
-    world.review(current, world.groups[0], world.people[1], world.people[0], 1, 1, completed=False)
+    world.review(current, world.groups[0], world.people[3], world.people[0], 1, 1, completed=False)
 
     result = reporting_service.build_group_detail(current.id, world.groups[0].id, world.actor, db)
 

@@ -95,8 +95,6 @@ export default function CompletionStatus() {
 
         <CampaignEmails campaignId={campaignId} isActive={data.campaign.is_active} hasEndDate={data.campaign.end_date !== null} />
 
-        {data.duplicate_assignment_count > 0 && <InlineMessage tone="warning">{data.duplicate_assignment_count} duplicate assignment {data.duplicate_assignment_count === 1 ? 'group' : 'groups'} detected. Each evaluation is still counted separately.</InlineMessage>}
-
         <section className="card completion-table-card">
           <div className="completion-toolbar">
             <input className="form-control completion-search" value={search} placeholder="Search evaluator" onChange={(event) => { setSearch(event.target.value); setPage(1); }} />

@@ -54,7 +54,13 @@ class World:
         self.campaign = add(db, models.Campaign(name=f"Campaign {suffix}", status="active", is_active=True,
                                                 start_date=now - timedelta(days=1), end_date=now + timedelta(days=2),
                                                 created_by=self.users[0].id))
-        self.filled = add(db, models.FilledForm(campaign_id=self.campaign.id, evaluator_id=self.people[0].id,
+        group = add(db, models.CompanyGroup(name=f"Group {suffix}"))
+        db.execute(models.campaign_company_groups.insert().values(campaign_id=self.campaign.id, company_group_id=group.id))
+        for person in self.people:
+            db.execute(models.employee_company_groups.insert().values(employee_id=person.id, company_group_id=group.id))
+        add(db, models.CampaignEvaluationRule(campaign_id=self.campaign.id, company_group_id=group.id,
+                                              evaluator_role_id=role.id, evaluatee_role_id=role.id, form_id=self.form.id))
+        self.filled = add(db, models.FilledForm(campaign_id=self.campaign.id, company_group_id=group.id, evaluator_id=self.people[0].id,
                                                 evaluatee_id=self.people[1].id, form_id=self.form.id, answers=[]))
         assert issue_activation_snapshots(self.campaign, db) == []
         db.flush()

@@ -1,4 +1,4 @@
-import type { CampaignLifecycleStatus, CampaignWorkflowStatus } from './campaign.lifecycle';
+import type { CampaignWorkflowStatus } from './campaign.lifecycle';
 export type CampaignStatus = CampaignWorkflowStatus;
 
 export type Campaign = {
@@ -44,7 +44,6 @@ export type CampaignResponse = {
   issued_forms_count: number;
   submitted_forms_count: number;
   current_date: string;
-  lifecycle_status: CampaignLifecycleStatus;
   campaign_status: CampaignStatus;
   paused_from_status: 'active' | 'review' | null;
   is_archived: boolean;

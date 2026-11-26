@@ -7,26 +7,18 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
-from services import campaign_service, form_service, people_service, reporting_service
+from services import campaign_service, form_service, people_service
+
+
+def _groups_response(assigned_group_ids: list[int], db: Session) -> dict:
+    return {"available_groups": db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all(),
+            "assigned_group_ids": assigned_group_ids}
 
 
 def get_campaign_groups(*, campaign_id: int, db: Session):
-    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
-    if campaign is None:
+    if db.get(models.Campaign, campaign_id) is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-
-    groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
-    assigned_group_ids = [
-        group_id
-        for (group_id,) in db.query(models.campaign_company_groups.c.company_group_id)
-        .filter(models.campaign_company_groups.c.campaign_id == campaign_id)
-        .all()
-    ]
-
-    return {
-        "available_groups": groups,
-        "assigned_group_ids": assigned_group_ids,
-    }
+    return _groups_response(campaign_service.get_campaign_assigned_group_ids(campaign_id, db), db)
 
 
 def update_campaign_groups(*, campaign_id: int, payload: schemas.CampaignGroupsUpdate, db: Session, manager: models.User):
@@ -67,23 +59,16 @@ def update_campaign_groups(*, campaign_id: int, payload: schemas.CampaignGroupsU
         db.flush()
         remaining_members = {group_id: {person.id: person for person, _ in people_service.get_group_employees(group_id, db)}
                              for group_id in unique_group_ids}
-        occupied = {(row.evaluator_id, row.evaluatee_id) for row in db.query(models.FilledForm).filter(
-            models.FilledForm.campaign_id == campaign_id,
-            ~models.FilledForm.company_group_id.in_(removed_ids),
-        ).all()}
+        # A pair is unique in the campaign, so a planned pair of a removed group moves to a remaining group that has both people.
         for record in group_assignments:
-            pair = (record.evaluator_id, record.evaluatee_id)
             target = next((group_id for group_id, members in remaining_members.items()
                            if record.evaluator_id in members and record.evaluatee_id in members), None)
-            if replanning and (pair in occupied or target is None):
-                db.delete(record)  # A planned pair with no remaining group, or already planned there, goes.
+            if target is None and replanning:
+                db.delete(record)  # Before launch a pair with no remaining group goes with its group.
                 continue
-            if pair in occupied:
-                raise HTTPException(status_code=409, detail="Overlapping groups already contain this evaluation pair")
             if target is None:
                 raise HTTPException(status_code=409, detail="Selected pairs must remain in a campaign group")
             record.company_group_id = target
-            occupied.add(pair)
             if record.evaluator_id != record.evaluatee_id:
                 record.form_id = campaign_service.get_form_id_for_employee_pair(
                     campaign_id, target, remaining_members[target][record.evaluator_id],
@@ -111,12 +96,7 @@ def update_campaign_groups(*, campaign_id: int, payload: schemas.CampaignGroupsU
     db.flush()
     campaign_service.unschedule_if_incomplete(campaign, db, manager.id)
     db.commit()
-
-    groups = db.query(models.CompanyGroup).order_by(models.CompanyGroup.name.asc()).all()
-    return {
-        "available_groups": groups,
-        "assigned_group_ids": unique_group_ids,
-    }
+    return _groups_response(unique_group_ids, db)
 
 
 def get_self_evaluation_participants(campaign_id: int, db: Session, group_ids: list[int] | None = None):
@@ -242,13 +222,10 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session, group_ids: list[in
         models.FilledForm.company_group_id.in_(assigned_group_ids),
         models.FilledForm.evaluator_id != models.FilledForm.evaluatee_id,
     ).all() if assigned_group_ids else []
-    employee_ids = {employee_id for row in planned for employee_id in (row.evaluator_id, row.evaluatee_id)}
-    employee_roles = dict(db.query(models.Employee.id, models.Employee.company_role_id).filter(
-        models.Employee.id.in_(employee_ids)).all()) if employee_ids else {}
+    employee_roles = _employee_roles({employee_id for row in planned for employee_id in (row.evaluator_id, row.evaluatee_id)}, db)
     required_pairs = {
         (row.company_group_id, employee_roles[row.evaluator_id], employee_roles[row.evaluatee_id])
         for row in planned if not campaign_service.assignment_is_immutable(row)
-        and row.evaluator_id in employee_roles and row.evaluatee_id in employee_roles
     }
 
     matrices = []
@@ -283,22 +260,21 @@ def build_campaign_rule_matrix(campaign_id: int, db: Session, group_ids: list[in
     }
 
 
+def _employee_roles(employee_ids: set[int], db: Session) -> dict[int, int]:
+    return dict(db.query(models.Employee.id, models.Employee.company_role_id).filter(
+        models.Employee.id.in_(employee_ids)).all()) if employee_ids else {}
+
+
 def issued_role_pair_keys(campaign_id: int, db: Session):
-    assignments = db.query(models.FilledForm).filter(
+    """Role rules used by issued peer evaluations, by the roles frozen at issuance."""
+    return {(group_id, evaluator_role, evaluatee_role) for group_id, evaluator_role, evaluatee_role in db.query(
+        models.FilledForm.company_group_id, models.FilledForm.evaluator_company_role_id, models.FilledForm.evaluatee_company_role_id,
+    ).filter(
         models.FilledForm.campaign_id == campaign_id,
         models.FilledForm.company_group_id.isnot(None),
         models.FilledForm.evaluator_id != models.FilledForm.evaluatee_id,
-    ).all()
-    issued = [assignment for assignment in assignments if campaign_service.assignment_is_immutable(assignment)]
-    employee_ids = {employee_id for assignment in issued for employee_id in (assignment.evaluator_id, assignment.evaluatee_id)}
-    roles = {person.id: person.company_role_id for person in db.query(models.Employee).filter(models.Employee.id.in_(employee_ids)).all()} if employee_ids else {}
-    keys = set()
-    for assignment in issued:
-        evaluator_role = reporting_service.assignment_role_id(assignment, roles, evaluator=True)
-        evaluatee_role = reporting_service.assignment_role_id(assignment, roles)
-        if evaluator_role is not None and evaluatee_role is not None:
-            keys.add((assignment.company_group_id, evaluator_role, evaluatee_role))
-    return keys
+        campaign_service.issued_snapshot_filter(),
+    )}
 
 
 def build_campaign_evaluation_matrix(campaign_id: int, db: Session, issuance_errors=None, group_ids: list[int] | None = None):
@@ -312,17 +288,11 @@ def build_campaign_evaluation_matrix(campaign_id: int, db: Session, issuance_err
             .all()
         )
 
-    filled_forms_by_pair = {}
-    for filled_form in (
-        db.query(models.FilledForm)
-        .filter(models.FilledForm.campaign_id == campaign_id)
-        .filter(models.FilledForm.company_group_id.isnot(None))
-        .all()
-    ):
-        key = (filled_form.company_group_id, filled_form.evaluator_id, filled_form.evaluatee_id)
-        existing = filled_forms_by_pair.get(key)
-        if existing is None or campaign_service.assignment_is_immutable(filled_form) and not campaign_service.assignment_is_immutable(existing):
-            filled_forms_by_pair[key] = filled_form
+    filled_forms_by_pair = {
+        (filled_form.company_group_id, filled_form.evaluator_id, filled_form.evaluatee_id): filled_form
+        for filled_form in db.query(models.FilledForm).filter(
+            models.FilledForm.campaign_id == campaign_id, models.FilledForm.company_group_id.isnot(None))
+    }
 
     matrices = []
     for group in groups:
@@ -434,17 +404,15 @@ def update_campaign_evaluation_rules(*, campaign_id: int, payload: schemas.Campa
                 evaluatee_role_id=evaluatee_role_id,
                 form_id=form_id,
             ))
-    for assignment in db.query(models.FilledForm).filter(
+    planned = db.query(models.FilledForm).filter(
         models.FilledForm.campaign_id == campaign_id,
         campaign_service.unissued_snapshot_filter(),
         models.FilledForm.company_group_id.isnot(None),
-    ).all():
-        if assignment.finish_date is not None or assignment.answers or assignment.evaluator_id == assignment.evaluatee_id:
-            continue
-        evaluator = db.query(models.Employee).filter(models.Employee.id == assignment.evaluator_id).first()
-        evaluatee = db.query(models.Employee).filter(models.Employee.id == assignment.evaluatee_id).first()
-        form_id = selected_rules.get((assignment.company_group_id, evaluator.company_role_id, evaluatee.company_role_id)) if evaluator and evaluatee else None
-        assignment.form_id = form_id
+        models.FilledForm.evaluator_id != models.FilledForm.evaluatee_id,
+    ).all()
+    roles = _employee_roles({employee_id for row in planned for employee_id in (row.evaluator_id, row.evaluatee_id)}, db)
+    for assignment in planned:
+        assignment.form_id = selected_rules.get((assignment.company_group_id, roles[assignment.evaluator_id], roles[assignment.evaluatee_id]))
     db.flush()
     campaign_service.unschedule_if_incomplete(campaign, db, manager.id)
     db.commit()
@@ -460,19 +428,10 @@ def get_campaign_evaluation_matrix(*, campaign_id: int, db: Session):
     return build_campaign_evaluation_matrix(campaign_id, db)
 
 
-def validate_matrix_issued_assignments(existing_by_pair, scoped_pairs, selected_pairs, requested_tasks, existing_tasks):
+def validate_matrix_issued_assignments(existing_by_pair, scoped_pairs, selected_pairs):
     issued_pairs = {pair for pair, form in existing_by_pair.items() if campaign_service.assignment_is_immutable(form)}
     if issued_pairs.intersection(scoped_pairs) - selected_pairs:
         raise HTTPException(status_code=409, detail="Issued evaluations cannot be removed from the matrix. Reload and keep their selections")
-
-    new_tasks = set()
-    for group_id, evaluator_id, evaluatee_id, _form_id in requested_tasks:
-        if (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
-            continue
-        task = (evaluator_id, evaluatee_id)
-        if task in existing_tasks or task in new_tasks:
-            raise HTTPException(status_code=409, detail="This evaluation already exists in another group; select it in only one group")
-        new_tasks.add(task)
 
 
 def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.CampaignEvaluationMatrixUpdate, db: Session, manager: models.User):
@@ -499,14 +458,8 @@ def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.Camp
         .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id).all()
     }
     existing_self_forms = {form.evaluator_id: form for form in existing_forms if form.evaluator_id == form.evaluatee_id and campaign_service.assignment_is_immutable(form)}
-    existing_by_pair = {}
-    for filled_form in existing_forms:
-        if filled_form.company_group_id is None:
-            continue
-        key = (filled_form.company_group_id, filled_form.evaluator_id, filled_form.evaluatee_id)
-        if key in existing_by_pair:
-            raise HTTPException(status_code=409, detail="Duplicate issued evaluations exist for a matrix pair; resolve them before saving")
-        existing_by_pair[key] = filled_form
+    existing_by_pair = {(filled_form.company_group_id, filled_form.evaluator_id, filled_form.evaluatee_id): filled_form
+                        for filled_form in existing_forms if filled_form.company_group_id is not None}
     scoped_group_user_pairs.update(pair for pair, assignment in existing_by_pair.items() if campaign_service.assignment_is_immutable(assignment))
 
     seen_assignments = set()
@@ -562,15 +515,7 @@ def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.Camp
             raise HTTPException(status_code=409, detail="Only one assignment per evaluator/evaluatee pair is allowed in a campaign")
         selected_people_pairs.add(pair)
 
-    # Duplicate pairs are forbidden even when different groups specify different forms.
-    existing_tasks = {
-        (form.evaluator_id, form.evaluatee_id)
-        for form in existing_forms
-        if campaign_service.assignment_is_immutable(form)
-    }
-    validate_matrix_issued_assignments(
-        existing_by_pair, scoped_group_user_pairs, seen_assignments, desired_assignments, existing_tasks
-    )
+    validate_matrix_issued_assignments(existing_by_pair, scoped_group_user_pairs, seen_assignments)
 
     desired_by_pair = {(group_id, evaluator_id, evaluatee_id): form_id for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments}
     removed_count = 0
@@ -593,21 +538,8 @@ def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.Camp
     for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
         if (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
             continue
-        form = db.query(models.Form).filter(models.Form.id == form_id).first() if form_id is not None else None
-        if form_id is not None and form is None:
-            raise HTTPException(status_code=400, detail="Assignment form does not exist")
-        record = models.FilledForm(
-            campaign_id=campaign_id,
-            company_group_id=group_id,
-            evaluator_id=evaluator_id,
-            evaluatee_id=evaluatee_id,
-            form_id=form_id,
-            finish_date=None,
-            answers=[],
-            form_snapshot=None,
-            snapshot_status=None,
-        )
-        db.add(record)
+        db.add(models.FilledForm(campaign_id=campaign_id, company_group_id=group_id, evaluator_id=evaluator_id,
+                                 evaluatee_id=evaluatee_id, form_id=form_id, answers=[]))
         created_count += 1
 
     db.flush()
@@ -632,30 +564,13 @@ def issue_ready_campaign_evaluations(*, campaign_id: int, db: Session, manager: 
     if campaign.start_date > now or campaign.end_date is not None and campaign.end_date <= now:
         raise HTTPException(status_code=409, detail="The campaign deadline has passed; extend it before issuing new evaluations")
 
-    planned = db.query(models.FilledForm).filter(
-        models.FilledForm.campaign_id == campaign_id, campaign_service.unissued_snapshot_filter(),
-        models.FilledForm.finish_date.is_(None), models.FilledForm.answers == [],
-    ).order_by(models.FilledForm.id).all()
+    planned = db.query(models.FilledForm.form_id).filter(
+        models.FilledForm.campaign_id == campaign_id, campaign_service.unissued_snapshot_filter()).all()
     if not planned:
         raise HTTPException(status_code=409, detail="No planned evaluations are waiting for issuance")
-    group_ids = set(campaign_service.get_campaign_assigned_group_ids(campaign_id, db))
-    members = {group_id: {person.id: person for person, _ in people_service.get_group_employees(group_id, db)}
-               for group_id in group_ids}
-    self_forms = {row.employee_id: row.form_id for row in db.query(models.CampaignEmployeeSelfEvaluation)
-                  .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign_id)}
-    for row in planned:
-        group_members = members.get(row.company_group_id, {})
-        evaluator = group_members.get(row.evaluator_id)
-        evaluatee = group_members.get(row.evaluatee_id)
-        if evaluator is None or evaluatee is None:
-            raise HTTPException(status_code=409, detail="Planned evaluation employees must belong to an active selected group")
-        expected = self_forms.get(row.evaluator_id) if row.evaluator_id == row.evaluatee_id else campaign_service.get_form_id_for_employee_pair(
-            campaign_id, row.company_group_id, evaluator, evaluatee, db)
-        if expected is None:
-            raise HTTPException(status_code=409, detail="Assign questionnaires to all planned evaluation pairs before issuing")
-        if row.form_id != expected:
-            raise HTTPException(status_code=409, detail="A planned evaluation has a stale questionnaire; save its role assignments before issuing")
-
+    if any(form_id is None for (form_id,) in planned):
+        raise HTTPException(status_code=409, detail="Assign questionnaires to all planned evaluation pairs before issuing")
+    # Issuing checks every row against the current groups and role rules, and reports the ones that no longer match.
     errors = campaign_service.issue_activation_snapshots(campaign, db, actor_user_id=manager.id)
     if errors:
         db.rollback()

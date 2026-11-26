@@ -318,9 +318,7 @@ class CampaignCreate(BaseModel):
     description: str | None = None
     start_date: date | datetime
     end_date: date | datetime | None = None
-    is_active: bool = True
     comment: str | None = None
-    created_by: int | None = None
 
 
 class CampaignUpdate(BaseModel):
@@ -328,9 +326,6 @@ class CampaignUpdate(BaseModel):
     description: str | None = None
     start_date: date | datetime | None = None
     end_date: date | datetime | None = None
-    start_at: datetime | None = None
-    end_at: datetime | None = None
-    is_active: bool = True
     comment: str | None = None
 
 
@@ -346,7 +341,6 @@ class CampaignResponse(BaseModel):
     issued_forms_count: int = 0
     submitted_forms_count: int = 0
     current_date: date
-    lifecycle_status: Literal["Scheduled", "Ongoing", "Completed", "Disabled"]
     campaign_status: CampaignStatus
     paused_from_status: CampaignStatus | None = None
     start_at: datetime
@@ -489,7 +483,6 @@ class CompletionStatusResponse(BaseModel):
     summary: CompletionStatusSummary
     rows: list[CompletionStatusRow]
     pagination: CompletionStatusPagination
-    duplicate_assignment_count: int = 0
 
 
 class ReportCampaignOption(BaseModel):

@@ -1,27 +1,27 @@
 """Campaign business rules: configuration checks, scheduling validation and issued work."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 import models
-from services import campaign_lifecycle, form_service, people_service
-from sqlalchemy import or_
-from datetime import date
-from services import campaign_reminder_service
-from services import form_snapshot_service
-from business_calendar import business_date
-from business_calendar import business_today as campaign_today
-from business_calendar import campaign_instant
-from sqlalchemy import case
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 import schemas
+from business_calendar import business_date, campaign_instant
+from business_calendar import business_today as campaign_today
+from services import (
+    campaign_lifecycle,
+    campaign_reminder_service,
+    form_service,
+    form_snapshot_service,
+    people_service,
+)
 
 
 def assignment_is_immutable(assignment):
-    return assignment.form_snapshot is not None or assignment.finish_date is not None or bool(assignment.answers)
+    """Issued: answering and submitting both need the issued snapshot, so it alone decides."""
+    return assignment.form_snapshot is not None
 
 
 def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> list[str]:
@@ -45,13 +45,8 @@ def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> l
                   .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign.id)}
     assignments = db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign.id).all()
     form_ids = {row.form_id for row in assignments if row.form_id is not None}
-    forms = {form.id: form for form in db.query(models.Form).filter(models.Form.id.in_(form_ids)).all()} if form_ids else {}
-    for form_id in form_ids:
-        form = forms.get(form_id)
-        if form is None:
-            errors.append(f"Form {form_id} does not exist")
-        else:
-            errors.extend(f"Form {form.name}: {error}" for error in form_service.form_issuance_errors(form.questions, db))
+    for form in db.query(models.Form).filter(models.Form.id.in_(form_ids)).order_by(models.Form.id).all() if form_ids else []:
+        errors.extend(f"Form {form.name}: {error}" for error in form_service.form_issuance_errors(form.questions, db))
     for group_id, people in members.items():
         if not people:
             errors.append(f"Group {group_names.get(group_id, group_id)} has no active employees")
@@ -61,12 +56,7 @@ def validate_campaign_configuration(campaign: models.Campaign, db: Session) -> l
             errors.append(f"Self-evaluation participant {employee_id} is not in a selected group")
     if not assignments:
         errors.append("Select at least one evaluation assignment")
-    seen = set()
-    for row in assignments:
-        pair = (row.evaluator_id, row.evaluatee_id)
-        if pair in seen:
-            errors.append(f"Duplicate evaluation pair {pair}")
-        seen.add(pair)
+    for row in assignments:  # The database keeps each evaluator/evaluatee pair unique per campaign.
         if row.company_group_id not in members or row.evaluator_id not in members[row.company_group_id] or row.evaluatee_id not in members[row.company_group_id]:
             errors.append(f"Assignment {row.id} is outside an active selected group")
             continue
@@ -151,22 +141,10 @@ def forms_used_by_campaigns(db: Session, campaign_id: int | None = None) -> set[
 
 
 def get_campaign_form_ids(campaign_id: int, db: Session):
-    rule_form_ids = {
-        form_id
-        for (form_id,) in db.query(models.CampaignEvaluationRule.form_id)
-        .filter(models.CampaignEvaluationRule.campaign_id == campaign_id)
-        .distinct()
-        .all()
-    }
-    filled_form_ids = {
-        form_id
-        for (form_id,) in db.query(models.FilledForm.form_id)
-        .filter(models.FilledForm.campaign_id == campaign_id)
-        .distinct()
-        .all()
-    }
-
-    return sorted((rule_form_ids | filled_form_ids) - {None})
+    """Forms of the campaign's role rules and assignments (self-evaluation settings alone do not count)."""
+    form_ids = {form_id for model in (models.CampaignEvaluationRule, models.FilledForm)
+                for (form_id,) in db.query(model.form_id).filter(model.campaign_id == campaign_id).distinct()}
+    return sorted(form_ids - {None})
 
 
 def get_campaign_participants(campaign_id: int, db: Session):
@@ -214,22 +192,18 @@ def get_campaign_participants(campaign_id: int, db: Session):
     return list(participants_by_id.values())
 
 
-def campaign_lifecycle_status(campaign: models.Campaign, today: date) -> str:
-    return {
-        models.CampaignStatus.DRAFT.value: "Disabled",
-        models.CampaignStatus.SCHEDULED.value: "Scheduled",
-        models.CampaignStatus.ACTIVE.value: "Ongoing",
-        models.CampaignStatus.PAUSED.value: "Disabled",
-        models.CampaignStatus.REVIEW.value: "Completed",
-        models.CampaignStatus.CLOSED.value: "Completed",
-    }[campaign.status]
+def form_counts(campaign_id: int, db: Session) -> tuple[int, int]:
+    """(issued, submitted) questionnaires of a campaign."""
+    issued, submitted = db.query(func.count(models.FilledForm.id), func.count(models.FilledForm.finish_date)).filter(
+        models.FilledForm.campaign_id == campaign_id, issued_snapshot_filter()).one()
+    return issued, submitted
 
 
 def campaign_payload(campaign: models.Campaign, today: date, issued: int = 0, submitted: int = 0) -> dict:
     return {**campaign.__dict__, "start_date": business_date(campaign.start_date),
             "end_date": business_date(campaign.end_date), "start_at": campaign_instant(campaign.start_date),
             "end_at": campaign_instant(campaign.end_date), "campaign_status": campaign.status,
-            "current_date": today, "lifecycle_status": campaign_lifecycle_status(campaign, today),
+            "current_date": today,
             "activation_error": campaign.lifecycle_error if campaign.status == models.CampaignStatus.SCHEDULED.value else None,
             "activation_retry_at": campaign.lifecycle_retry_at if campaign.status == models.CampaignStatus.SCHEDULED.value else None,
             "activation_attempts": campaign.lifecycle_attempts if campaign.status == models.CampaignStatus.SCHEDULED.value else 0,
@@ -257,7 +231,7 @@ def ensure_campaign_issued(campaign_id: int, db: Session, *, commit: bool = True
             or (campaign.end_date is not None and campaign.end_date <= now)):
         return []
 
-    errors = issue_activation_snapshots(campaign, db, actor_user_id=actor_user_id, require_all=False)
+    errors = issue_activation_snapshots(campaign, db, actor_user_id=actor_user_id)
     if commit:
         db.commit()
     return errors
@@ -271,48 +245,40 @@ def unschedule_if_incomplete(campaign: models.Campaign, db: Session, actor_user_
         )
 
 
-def issue_activation_snapshots(campaign: models.Campaign, db: Session,
-                               *, actor_user_id: int | None = None, require_all: bool = True) -> list[str]:
-    """Issue only untouched planned rows; caller owns the campaign lock and transaction."""
+def issue_activation_snapshots(campaign: models.Campaign, db: Session, *, actor_user_id: int | None = None) -> list[str]:
+    """Issue every planned row that still matches the setup; caller owns the campaign lock and transaction.
+
+    Rows without a questionnaire are left planned; rows whose people left the group or whose
+    role rule changed since planning are reported and left planned too.
+    """
     errors = []
     issued_count = 0
     group_members = {}
-    self_form_ids = None
+    self_form_ids = {row.employee_id: row.form_id for row in db.query(models.CampaignEmployeeSelfEvaluation)
+                     .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign.id)}
     for assignment in db.query(models.FilledForm).filter(
         models.FilledForm.campaign_id == campaign.id,
         unissued_snapshot_filter(),
     ).order_by(models.FilledForm.id).all():
         if assignment.form_id is None:
-            if require_all:
-                errors.append(f"Assignment {assignment.id}: select a form before issuance")
             continue
-        if not require_all:
-            if assignment.company_group_id not in group_members:
-                group_members[assignment.company_group_id] = {
-                    person.id: person for person, _role in people_service.get_group_employees(assignment.company_group_id, db)
-                } if assignment.company_group_id is not None else {}
-            members = group_members[assignment.company_group_id]
-            evaluator = members.get(assignment.evaluator_id)
-            evaluatee = members.get(assignment.evaluatee_id)
-            if evaluator is None or evaluatee is None:
-                errors.append(f"Assignment {assignment.id}: employees are not active members of the selected group")
-                continue
-            if assignment.evaluator_id == assignment.evaluatee_id:
-                if self_form_ids is None:
-                    self_form_ids = {row.employee_id: row.form_id for row in db.query(models.CampaignEmployeeSelfEvaluation)
-                                     .filter(models.CampaignEmployeeSelfEvaluation.campaign_id == campaign.id)}
-                expected = self_form_ids.get(assignment.evaluator_id)
-            else:
-                expected = get_form_id_for_employee_pair(
-                    campaign.id, assignment.company_group_id, evaluator, evaluatee, db)
-            if expected != assignment.form_id:
-                errors.append(f"Assignment {assignment.id}: saved questionnaire no longer matches the pair's role assignment")
-                continue
-        form = db.query(models.Form).filter(models.Form.id == assignment.form_id).first()
-        if form is None:
-            errors.append(f"Assignment {assignment.id}: source form no longer exists")
+        if assignment.company_group_id not in group_members:
+            group_members[assignment.company_group_id] = {
+                person.id: person for person, _role in people_service.get_group_employees(assignment.company_group_id, db)
+            } if assignment.company_group_id is not None else {}
+        members = group_members[assignment.company_group_id]
+        evaluator = members.get(assignment.evaluator_id)
+        evaluatee = members.get(assignment.evaluatee_id)
+        if evaluator is None or evaluatee is None:
+            errors.append(f"Assignment {assignment.id}: employees are not active members of the selected group")
             continue
-        problems = form_service.form_issuance_errors(form.questions if isinstance(form.questions, list) else [], db)
+        expected = (self_form_ids.get(assignment.evaluator_id) if assignment.evaluator_id == assignment.evaluatee_id
+                    else get_form_id_for_employee_pair(campaign.id, assignment.company_group_id, evaluator, evaluatee, db))
+        if expected != assignment.form_id:
+            errors.append(f"Assignment {assignment.id}: saved questionnaire no longer matches the pair's role assignment")
+            continue
+        form = db.get(models.Form, assignment.form_id)
+        problems = form_service.form_issuance_errors(form.questions, db)
         if problems:
             errors.append(f"Assignment {assignment.id} ({form.name}): {' '.join(problems)}")
             continue
@@ -327,11 +293,8 @@ def issue_activation_snapshots(campaign: models.Campaign, db: Session,
 
 def snapshot_assignment_roles(assignment: models.FilledForm, db: Session) -> None:
     """Freeze both company roles when an assignment is issued."""
-    for employee_id, field in ((assignment.evaluator_id, "evaluator_company_role_id"),
-                               (assignment.evaluatee_id, "evaluatee_company_role_id")):
-        if getattr(assignment, field) is None:
-            person = db.get(models.Employee, employee_id)
-            setattr(assignment, field, person.company_role_id if person else None)
+    assignment.evaluator_company_role_id = db.get(models.Employee, assignment.evaluator_id).company_role_id
+    assignment.evaluatee_company_role_id = db.get(models.Employee, assignment.evaluatee_id).company_role_id
 
 
 def get_campaign_completion_status(*, campaign_id: int, search: str | None = None, status: str | None = None, overdue_only: bool = False, sort: str = "outstanding", order: str = "desc", page: int = 1, page_size: int = 25, db: Session):
@@ -356,13 +319,12 @@ def get_campaign_completion_status(*, campaign_id: int, search: str | None = Non
         .join(models.Employee, models.Employee.id == models.FilledForm.evaluator_id)
         .outerjoin(models.User, models.User.id == models.Employee.user_id)
         .filter(models.FilledForm.campaign_id == campaign.id)
-        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
+        .filter(issued_snapshot_filter())
         .all()
     )
 
     due_date = business_date(campaign.end_date)
     people: dict[int, dict] = {}
-    pair_counts: dict[tuple, int] = {}
     for row in rows:
         status_key = campaign_lifecycle.status_of(row)
         person = people.setdefault(row.evaluator_id, {
@@ -378,8 +340,6 @@ def get_campaign_completion_status(*, campaign_id: int, search: str | None = Non
             person["overdue"] += 1
         if row.finish_date is not None and (person["last_completed_at"] is None or row.finish_date > person["last_completed_at"]):
             person["last_completed_at"] = row.finish_date
-        key = (row.evaluator_id, row.evaluatee_id, row.form_id, row.company_group_id)
-        pair_counts[key] = pair_counts.get(key, 0) + 1
 
     def progress_key(person: dict) -> str:
         if person["completed"] == person["total"]:
@@ -446,14 +406,12 @@ def get_campaign_completion_status(*, campaign_id: int, search: str | None = Non
             "start_date": business_date(campaign.start_date),
             "end_date": business_date(campaign.end_date),
             "current_date": today,
-            "lifecycle_status": campaign_lifecycle_status(campaign, today),
             "campaign_status": campaign.status,
             "is_archived": campaign.is_archived,
         },
         "summary": summary,
         "rows": page_rows,
         "pagination": {"page": page, "page_size": page_size, "total_items": total_items, "total_pages": total_pages},
-        "duplicate_assignment_count": sum(1 for count in pair_counts.values() if count > 1),
     }
 
 
@@ -470,58 +428,24 @@ def get_campaigns(*, db: Session):
         .all()
     )
     today = campaign_today()
-    issued_counts = dict(
-        db.query(models.FilledForm.campaign_id, func.count(models.FilledForm.id))
-        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
-        .group_by(models.FilledForm.campaign_id)
-        .all()
-    )
-    submitted_counts = dict(
-        db.query(models.FilledForm.campaign_id, func.count(models.FilledForm.id))
-        .filter(models.FilledForm.finish_date.isnot(None))
-        .group_by(models.FilledForm.campaign_id)
-        .all()
-    )
-
-    return [
-        campaign_payload(campaign, today, issued_counts.get(campaign.id, 0), submitted_counts.get(campaign.id, 0))
-        for campaign in campaigns
-    ]
+    counts = {campaign_id: (issued, submitted) for campaign_id, issued, submitted in db.query(
+        models.FilledForm.campaign_id, func.count(models.FilledForm.id), func.count(models.FilledForm.finish_date),
+    ).filter(issued_snapshot_filter()).group_by(models.FilledForm.campaign_id)}
+    return [campaign_payload(campaign, today, *counts.get(campaign.id, (0, 0))) for campaign in campaigns]
 
 
 def get_campaign(*, campaign_id: int, db: Session):
-    campaign = (
-        db.query(models.Campaign)
-        .filter(models.Campaign.id == campaign_id)
-        .first()
-    )
-
+    campaign = db.get(models.Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-
-    today = campaign_today()
-    issued_forms_count = (
-        db.query(models.FilledForm)
-        .filter(models.FilledForm.campaign_id == campaign_id)
-        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
-        .count()
-    )
-
-    submitted_forms_count = db.query(models.FilledForm).filter(
-            models.FilledForm.campaign_id == campaign_id,
-            models.FilledForm.finish_date.isnot(None),
-        ).count()
-    return campaign_payload(campaign, today, issued_forms_count, submitted_forms_count)
+    return campaign_payload(campaign, campaign_today(), *form_counts(campaign_id, db))
 
 
 def get_campaign_operational_metrics(*, campaign_id: int, db: Session):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    rows = db.query(models.FilledForm).filter(
-        models.FilledForm.campaign_id == campaign_id,
-        or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)),
-    ).all()
+    rows = db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign_id, issued_snapshot_filter()).all()
     now = datetime.now(timezone.utc)
     submitted = sum(row.finish_date is not None for row in rows)
     total = len(rows)
@@ -539,16 +463,21 @@ def get_campaign_deletion_eligibility(*, campaign_id: int, db: Session):
     return {"campaign_id": campaign_id, "can_delete": reason is None, "reason": reason}
 
 
-def change_campaign_archive(campaign_id: int, archived: bool, db: Session, actor: models.User):
+def _lifecycle_change(db: Session, change) -> dict:
+    """Commit a lifecycle change; its errors become 404 (unknown campaign) or 409."""
     try:
-        campaign = campaign_lifecycle.set_campaign_archived(
-            db, campaign_id, archived, actor_user_id=actor.id, now=datetime.now(timezone.utc))
+        campaign = change()
         db.commit()
     except campaign_lifecycle.CampaignLifecycleError as error:
         db.rollback()
         raise HTTPException(status_code=404 if str(error) == "Campaign not found" else 409, detail=str(error)) from error
     db.refresh(campaign)
     return campaign_payload(campaign, campaign_today())
+
+
+def change_campaign_archive(campaign_id: int, archived: bool, db: Session, actor: models.User):
+    return _lifecycle_change(db, lambda: campaign_lifecycle.set_campaign_archived(
+        db, campaign_id, archived, actor_user_id=actor.id, now=datetime.now(timezone.utc)))
 
 
 def delete_campaign(*, campaign_id: int, db: Session, manager: models.User):
@@ -584,21 +513,13 @@ def duplicate_campaign_name(db: Session, name: str, exclude_id: int | None = Non
 
 
 def change_campaign_schedule(campaign_id: int, target: models.CampaignStatus, db: Session, actor: models.User):
-    try:
-        campaign = campaign_lifecycle.transition_campaign(
-            db, campaign_id, target, now=datetime.now(timezone.utc), actor_user_id=actor.id,
-            validate_configuration=validate_campaign_configuration,
-        )
-        db.commit()
-    except campaign_lifecycle.CampaignLifecycleError as error:
-        db.rollback()
-        raise HTTPException(status_code=404 if str(error) == "Campaign not found" else 409, detail=str(error)) from error
-    db.refresh(campaign)
-    return campaign_payload(campaign, campaign_today())
+    return _lifecycle_change(db, lambda: campaign_lifecycle.transition_campaign(
+        db, campaign_id, target, now=datetime.now(timezone.utc), actor_user_id=actor.id,
+        validate_configuration=validate_campaign_configuration))
 
 
 def resume_campaign(*, campaign_id: int, db: Session, actor: models.User):
-    try:
+    def resume():
         campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).populate_existing().with_for_update().one_or_none()
         if campaign is None:
             raise campaign_lifecycle.CampaignLifecycleError("Campaign not found")
@@ -607,30 +528,28 @@ def resume_campaign(*, campaign_id: int, db: Session, actor: models.User):
                   or (campaign.end_date is not None and now >= campaign.end_date) else models.CampaignStatus.ACTIVE)
         campaign = campaign_lifecycle.transition_campaign(db, campaign_id, target, now=now, actor_user_id=actor.id)
         ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=actor.id)
-        db.commit()
-    except campaign_lifecycle.CampaignLifecycleError as error:
-        db.rollback()
-        raise HTTPException(status_code=404 if str(error) == "Campaign not found" else 409, detail=str(error)) from error
-    db.refresh(campaign)
-    return campaign_payload(campaign, campaign_today())
+        return campaign
+    return _lifecycle_change(db, resume)
+
+
+def _campaign_dates(start, end) -> tuple[datetime, datetime | None]:
+    try:
+        start_at, end_at = campaign_instant(start), campaign_instant(end)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if start_at is None:
+        raise HTTPException(status_code=400, detail="Start date cannot be null")
+    if end_at is not None and end_at <= start_at:
+        raise HTTPException(status_code=400, detail="End date cannot be earlier than start date")
+    return start_at, end_at
 
 
 def create_campaign(*, campaign: schemas.CampaignCreate, db: Session, actor: models.User):
     if not campaign.name.strip():
         raise HTTPException(status_code=400, detail="Campaign name is required")
-    try:
-        start_at, end_at = campaign_instant(campaign.start_date), campaign_instant(campaign.end_date)
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    if end_at is not None and (end_at < start_at or (end_at == start_at and not (type(campaign.start_date) is date and type(campaign.end_date) is date))):
-        raise HTTPException(status_code=400, detail="End date cannot be earlier than start date")
-
-    if campaign.created_by is not None and campaign.created_by != actor.id:
-        raise HTTPException(status_code=403, detail="Campaign creator does not match authenticated user")
-
+    start_at, end_at = _campaign_dates(campaign.start_date, campaign.end_date)
     if duplicate_campaign_name(db, campaign.name):
         raise HTTPException(status_code=409, detail="A campaign with this name already exists.")
-
     new_campaign = models.Campaign(
         name=campaign.name.strip(),
         description=campaign.description,
@@ -642,17 +561,9 @@ def create_campaign(*, campaign: schemas.CampaignCreate, db: Session, actor: mod
         created_by=actor.id,
         launch_email_enabled=campaign_reminder_service.workspace_reminder_defaults(db)[1],
     )
-
     db.add(new_campaign)
-    try:
-        db.commit()
-    except IntegrityError as error:
-        db.rollback()
-        if getattr(getattr(error.orig, "diag", None), "constraint_name", None) == "uq_campaigns_normalized_name":
-            raise HTTPException(status_code=409, detail="A campaign with this name already exists.") from error
-        raise
+    db.commit()
     db.refresh(new_campaign)
-
     return campaign_payload(new_campaign, campaign_today())
 
 
@@ -660,81 +571,24 @@ def update_campaign(*, campaign_id: int, campaign_update: schemas.CampaignUpdate
                     actor: models.User | None = None):
     if not campaign_update.name.strip():
         raise HTTPException(status_code=400, detail="Campaign name is required")
-    campaign = (
-        db.query(models.Campaign)
-        .filter(models.Campaign.id == campaign_id)
-        .with_for_update()
-        .first()
-    )
-
+    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
     require_mutable_campaign_configuration(campaign)
-
     if duplicate_campaign_name(db, campaign_update.name, campaign_id):
         raise HTTPException(status_code=409, detail="A campaign with this name already exists.")
 
-    issued_forms_count = (
-        db.query(models.FilledForm)
-        .filter(models.FilledForm.campaign_id == campaign_id)
-        .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
-        .count()
-    )
-
     supplied = campaign_update.model_fields_set
-    if "is_active" in supplied and campaign_update.is_active != campaign.is_active:
-        raise HTTPException(status_code=409, detail="Use the campaign lifecycle to change availability")
-    start_at, end_at = campaign.start_date, campaign.end_date
-    try:
-        if "start_date" in supplied:
-            if campaign_update.start_date is None:
-                raise ValueError("Start date cannot be null")
-            requested = campaign_instant(campaign_update.start_date)
-            if isinstance(campaign_update.start_date, date) and not isinstance(campaign_update.start_date, datetime) and business_date(start_at) == campaign_update.start_date:
-                requested = start_at
-            start_at = requested
-        if "end_date" in supplied:
-            requested = campaign_instant(campaign_update.end_date)
-            if type(campaign_update.end_date) is date and business_date(end_at) == campaign_update.end_date:
-                requested = end_at
-            end_at = requested
-        if "start_at" in supplied:
-            if campaign_update.start_at is None:
-                raise ValueError("Start timestamp cannot be null")
-            precise = campaign_instant(campaign_update.start_at)
-            if "start_date" in supplied and (
-                campaign_instant(campaign_update.start_date) != precise if isinstance(campaign_update.start_date, datetime)
-                else business_date(precise) != campaign_update.start_date
-            ):
-                raise ValueError("Start date and timestamp disagree")
-            start_at = precise
-        if "end_at" in supplied:
-            precise = campaign_instant(campaign_update.end_at)
-            if "end_date" in supplied and (
-                campaign_instant(campaign_update.end_date) != precise if isinstance(campaign_update.end_date, datetime)
-                else business_date(precise) != campaign_update.end_date
-            ):
-                raise ValueError("End date and timestamp disagree")
-            end_at = precise
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    date_only_equal = type(campaign_update.start_date) is date and type(campaign_update.end_date) is date
-    if end_at is not None and (end_at < start_at or (end_at == start_at and (start_at != campaign.start_date or end_at != campaign.end_date) and not date_only_equal)):
-        raise HTTPException(status_code=400, detail="End date cannot be earlier than start date")
-
+    start_at, end_at = _campaign_dates(
+        campaign_update.start_date if "start_date" in supplied else campaign.start_date,
+        campaign_update.end_date if "end_date" in supplied else campaign.end_date)
     if (start_at, end_at) != (campaign.start_date, campaign.end_date):
         try:
             campaign_lifecycle.validate_date_edit(campaign, start_at, end_at, now=datetime.now(timezone.utc),
                                                    validate_configuration=lambda _campaign, _start, _end: validate_campaign_configuration(campaign, db))
         except campaign_lifecycle.CampaignLifecycleError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
-
-    if (
-        issued_forms_count > 0
-        and campaign.end_date is not None
-        and end_at is not None
-        and end_at < campaign.end_date
-    ):
+    if campaign.end_date is not None and end_at is not None and end_at < campaign.end_date and form_counts(campaign_id, db)[0]:
         raise HTTPException(status_code=400, detail="End date cannot be moved earlier after questionnaires have been issued")
 
     if campaign.status == models.CampaignStatus.ACTIVE.value and end_at != campaign.end_date:
@@ -745,32 +599,13 @@ def update_campaign(*, campaign_id: int, campaign_update: schemas.CampaignUpdate
 
     campaign.name = campaign_update.name.strip()
     campaign.description = campaign_update.description
-    if campaign.start_date != start_at:
-        campaign.start_date = start_at
-    if campaign.end_date != end_at:
-        campaign.end_date = end_at
+    campaign.start_date, campaign.end_date = start_at, end_at
     campaign.comment = campaign_update.comment
-
-    try:
-        db.flush()
-        validate_scheduled_campaign(campaign, db)
-        db.commit()
-    except IntegrityError as error:
-        db.rollback()
-        if getattr(getattr(error.orig, "diag", None), "constraint_name", None) == "uq_campaigns_normalized_name":
-            raise HTTPException(status_code=409, detail="A campaign with this name already exists.") from error
-        raise
-    issued_forms_count = db.query(models.FilledForm).filter(
-        models.FilledForm.campaign_id == campaign_id,
-        or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)),
-    ).count()
+    db.flush()
+    validate_scheduled_campaign(campaign, db)
+    db.commit()
     db.refresh(campaign)
-
-    submitted_forms_count = db.query(models.FilledForm).filter(
-            models.FilledForm.campaign_id == campaign_id,
-            models.FilledForm.finish_date.isnot(None),
-        ).count()
-    return campaign_payload(campaign, campaign_today(), issued_forms_count, submitted_forms_count)
+    return campaign_payload(campaign, campaign_today(), *form_counts(campaign_id, db))
 
 
 def get_form_id_for_employee_pair(campaign_id: int, group_id: int, evaluator, evaluatee, db: Session):

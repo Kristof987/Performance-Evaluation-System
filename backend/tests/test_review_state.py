@@ -43,7 +43,7 @@ def deadline_audits(db, campaign):
 def test_an_active_deadline_can_be_extended_and_is_audited(db):
     world = World(db)
     later = world.campaign.end_date + timedelta(days=3)
-    update(world, start_at=world.campaign.start_date, end_at=later)
+    update(world, start_date=world.campaign.start_date, end_date=later)
     assert world.campaign.end_date == later
     assert deadline_audits(db, world.campaign) == 1
 
@@ -63,7 +63,7 @@ def test_an_active_campaign_rejects_other_date_changes(db, change):
         start = start - timedelta(days=1)
     else:
         end = None
-    expect(409, update, world, start_at=start, end_at=end)
+    expect(409, update, world, start_date=start, end_date=end)
     assert deadline_audits(db, world.campaign) == 0
 
 
@@ -71,7 +71,7 @@ def test_an_overdue_active_campaign_can_be_reopened_with_a_new_deadline(db):
     world = World(db)
     world.campaign.end_date = datetime.now(timezone.utc) - timedelta(hours=1)
     db.flush()
-    update(world, start_at=world.campaign.start_date, end_at=datetime.now(timezone.utc) + timedelta(days=1))
+    update(world, start_date=world.campaign.start_date, end_date=datetime.now(timezone.utc) + timedelta(days=1))
     world.save([{"question_id": "required", "value": "Late but welcome"}], submit=True)
 
 

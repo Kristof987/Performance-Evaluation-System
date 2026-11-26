@@ -41,7 +41,6 @@ export type CompletionStatusResponse = {
   summary: CompletionStatusSummary;
   rows: CompletionStatusRow[];
   pagination: { page: number; page_size: number; total_items: number; total_pages: number };
-  duplicate_assignment_count: number;
 };
 
 type CompletionStatusQuery = {
