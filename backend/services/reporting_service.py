@@ -166,10 +166,13 @@ def campaign_report_rows(campaign_id: int, db: Session) -> list[Any]:
 def build_written_feedback(campaign_id: int, question_key: str | None, evaluation_type: str,
                            actor: models.User, db: Session, *, employee_id: int | None = None,
                            section_id: int | None = None) -> dict[str, Any]:
-    """Release submitted issued Text answers to HR without reviewer metadata.
+    """Release submitted issued Text answers without reviewer metadata.
 
-    Identity-hidden presentation does not make raw prose anonymous: its content
-    and comparison across campaign/employee views may reveal its author.
+    HR (campaign management) sees every employee once questionnaires are issued. A group
+    leader, who discusses the results with HR, sees the members of the groups they lead
+    (never themself) once the campaign is in Review or Closed, and colleague answers only
+    under the same reviewer threshold as their scores. Identity-hidden presentation does
+    not make raw prose anonymous: its content may still reveal its author.
     """
     from services import question_analytics_service
 
@@ -180,12 +183,21 @@ def build_written_feedback(campaign_id: int, question_key: str | None, evaluatio
     if models.CampaignStatus(campaign.status) not in (models.CampaignStatus.ACTIVE, models.CampaignStatus.REVIEW,
                                                       models.CampaignStatus.PAUSED, models.CampaignStatus.CLOSED):
         raise HTTPException(status_code=409, detail="Written feedback is available only after questionnaires are issued")
-    if not permissions.has_permission(actor, db, "campaigns.manage"):
+    team = None if permissions.has_permission(actor, db, "campaigns.manage") else _team_groups.get()
+    if team is None and not permissions.has_permission(actor, db, "campaigns.manage"):
         raise HTTPException(status_code=403, detail="Campaign management permission is required")
+    if team is not None and not campaign_lifecycle.reporting_allowed(campaign):
+        raise HTTPException(status_code=409, detail="Reports are available only for campaigns in review or closed status")
     rows = campaign_report_rows(campaign_id, db)
-    if employee_id is not None and employee_id not in campaign_participant_ids(campaign_id, rows, db):
+    targets = campaign_participant_ids(campaign_id, rows, db)
+    if team is not None:
+        targets &= team_employee_ids(campaign_id, team, actor, db)
+    if employee_id is not None and employee_id not in targets:
         raise HTTPException(status_code=404, detail="Employee is not part of this campaign report")
     metadata, observations, issued_scopes = question_analytics_service._collect(rows, db, include_text=question_key is not None)
+    if team is not None:
+        observations = [item for item in observations if item.evaluatee_id in targets]
+        issued_scopes = {key: {scope for scope in scopes if scope[2] in targets} for key, scopes in issued_scopes.items()}
     if question_key is None:
         questions = []
         for key, definition in metadata.items():
@@ -204,7 +216,7 @@ def build_written_feedback(campaign_id: int, question_key: str | None, evaluatio
         questions.sort(key=lambda item: (item["section_id"] is None, item["section_name"].casefold(),
                                          item["text"].casefold(), item["key"]))
         # This target directory identifies evaluatees, never who authored a response.
-        target_ids = {row[0].evaluatee_id for row in rows} if employee_id is None else set()
+        target_ids = {row[0].evaluatee_id for row in rows if row[0].evaluatee_id in targets} if employee_id is None else set()
         evaluatees = sorted(({"evaluatee_id": person.id, "evaluatee_name": person.full_name}
                             for person in db.query(models.Employee).filter(models.Employee.id.in_(target_ids)).all()),
                            key=lambda person: (person["evaluatee_name"].casefold(), person["evaluatee_id"])) if target_ids else []
@@ -229,6 +241,9 @@ def build_written_feedback(campaign_id: int, question_key: str | None, evaluatio
     cohort = [item for item in text_items if employee_id is None or item.evaluatee_id == employee_id]
     if not cohort:
         return {**response, "availability": "no_data", "response_count": 0}
+    if team is not None and evaluation_type == "peer" and not question_analytics_service._peer_release_allowed(
+            cohort, single_employee=employee_id is not None):
+        return {**response, "availability": "suppressed"}
 
     # Alphabetical order depends on the text alone, never on who submitted it or when.
     bodies = sorted(item.value for item in cohort)

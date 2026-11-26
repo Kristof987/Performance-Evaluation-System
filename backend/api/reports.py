@@ -81,8 +81,10 @@ def get_campaign_written_feedback(
     section_id: int | None = Query(default=None, gt=0),
     employee_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
+    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
+    # HR sees every employee; a group leader the members of the groups they lead (see build_written_feedback).
+    reporting_service.enter_report_scope(actor, db)
     return reporting_service.build_written_feedback(
         campaign_id, question_key, evaluation_type, actor, db,
         employee_id=employee_id, section_id=section_id,

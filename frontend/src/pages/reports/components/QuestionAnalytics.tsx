@@ -36,7 +36,11 @@ export default function QuestionAnalytics(props: AnalyticsProps) {
 
 function EmployeeQuestions({ campaignId, getAccessToken, employeeId, feedbackStatus, focusSection }: AnalyticsProps) {
   const { state } = useAppAuth();
-  const feedbackAuthorized = state.status === 'authenticated' && state.user.permissions.includes('reports.read') && state.user.permissions.includes('campaigns.manage') && !!feedbackStatus && !!getAccessToken;
+  // HR reads written feedback; a group leader, who discusses results with HR, reads that of their members in Review/Closed.
+  const permissions = state.status === 'authenticated' ? state.user.permissions : [];
+  const hrFeedback = permissions.includes('reports.read') && permissions.includes('campaigns.manage');
+  const leaderFeedback = !permissions.includes('reports.read') && permissions.includes('reports.read_team') && (feedbackStatus === 'review' || feedbackStatus === 'closed');
+  const feedbackAuthorized = (hrFeedback || leaderFeedback) && !!feedbackStatus && !!getAccessToken;
   const [reports, setReports] = useState<{ peer: ReportQuestions; self: ReportQuestions } | null>(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
