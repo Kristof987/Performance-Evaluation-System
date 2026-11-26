@@ -392,8 +392,6 @@ class AIAnalysisGenerationJob(Base):
     created_at = Column(DateTime(timezone=True), nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
-    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
-    worker_token = Column(String(36), nullable=True)
     analysis_id = Column(Integer, nullable=True)
     error_code = Column(String(64), nullable=True)
 

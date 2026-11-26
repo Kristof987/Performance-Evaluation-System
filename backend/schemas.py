@@ -594,13 +594,6 @@ class DashboardBenchmark(BaseModel):
     sections: dict[int, DashboardScore]
 
 
-class DashboardRater(BaseModel):
-    id: int
-    name: str
-    evaluator_count: int
-    overall: DashboardScore
-
-
 class CampaignDashboardResponse(BaseModel):
     campaign: ReportCampaignOption
     previous_campaign: ReportCampaignOption | None = None
@@ -610,7 +603,6 @@ class CampaignDashboardResponse(BaseModel):
     groups: list[DashboardGroup]
     benchmark: "DashboardBenchmark | None" = None
     roles: list[DashboardGroup] = []
-    raters: list[DashboardRater] = []
     trend: list[DashboardTrendPoint]
 
 

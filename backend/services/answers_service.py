@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
+from services import permissions
 from services import reporting_service
 from services.form_snapshot_service import snapshot_form_name
 from services.question_analytics_service import _options
@@ -31,7 +32,7 @@ def _require_access(campaign_id: int, actor: models.User, db: Session) -> tuple[
         raise HTTPException(status_code=404, detail="Campaign not found")
     if models.CampaignStatus(campaign.status) not in ANSWER_STATUSES:
         raise HTTPException(status_code=409, detail="Answers are available only after questionnaires are issued")
-    if not reporting_service._has_permission(actor, db, "campaigns.manage"):
+    if not permissions.has_permission(actor, db, "campaigns.manage"):
         raise HTTPException(status_code=403, detail="Campaign management permission is required")
     rows = reporting_service.campaign_report_rows(campaign_id, db)
     return campaign, rows

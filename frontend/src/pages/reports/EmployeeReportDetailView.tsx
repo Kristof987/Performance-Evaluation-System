@@ -114,7 +114,7 @@ export default function EmployeeReportDetailView({ data, onBack, getAccessToken 
       actions={historyOptions.length > 1 ? <label className="reports-q-order"><span>Show</span><select value={selectedHistory?.key} onChange={(event) => setHistoryKey(event.target.value)}>{historyOptions.map(({ series, key }) => <option key={key} value={key}>{series.section_id === null ? 'Overall' : series.section_name}</option>)}</select></label> : undefined}>
       <TrendLines theme={theme} points={trendPoints} series={trendSeries} onSelect={(point) => { if (typeof point.campaignId === 'number' && point.campaignId !== data.campaign.id) navigate(`/reports/campaigns/${point.campaignId}/employees/${data.employee.id}`); }} />
     </ChartCard>}
-    <div id="employee-question-analytics"><QuestionAnalytics campaignId={data.campaign.id} getAccessToken={getAccessToken} scope={{ employee_id: data.employee.id }} feedbackStatus={data.campaign.campaign_status} focusSection={focusSection} /></div>
+    <div id="employee-question-analytics"><QuestionAnalytics campaignId={data.campaign.id} getAccessToken={getAccessToken} employeeId={data.employee.id} feedbackStatus={data.campaign.campaign_status} focusSection={focusSection} /></div>
     <div id="employee-ai-analysis"><EmployeeAIAnalysisPanel scope={{ type: 'employee', campaignId: data.campaign.id, employeeId: data.employee.id }} getAccessToken={getAccessToken} /></div>
     <section className="reports-card reports-employee-coverage">
       <h2>Evaluation coverage</h2>

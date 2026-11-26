@@ -80,13 +80,9 @@ def _summarize(campaign: models.Campaign, roles: dict[int, int], aggregate_acces
         "role_counts": {key: (len(role_completed.get(key, ())), len(ids)) for key, ids in role_totals.items()},
         "role_people": {key: len(ids) for key, ids in role_people.items()},
         "scores": company if team is None else _team_scores(scored, campaign.id, team),
-        "groups": section_scoring_service.group_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
+        "groups": section_scoring_service.group_scores(scored, campaign.id, aggregate_access=aggregate_access),
         # Group leaders get no role views: split by role, small teams would isolate people.
         "roles": {} if team is not None else section_scoring_service.role_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
-        "raters": {} if team is not None else section_scoring_service.evaluator_role_scores(scored, campaign.id, roles, aggregate_access=aggregate_access),
-        "rater_people": {role_id: len({item.evaluator_id for item in scored if item.campaign_id == campaign.id and item.evaluator_id != item.evaluatee_id
-                                       and section_scoring_service.role_of(item, roles, evaluator=True) == role_id})
-                         for role_id in {section_scoring_service.role_of(item, roles, evaluator=True) for item in scored} if role_id is not None} if team is None else {},
         "names": names,
     }
 
@@ -162,14 +158,6 @@ def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) 
             "overall": {**_score(result.overall if result else None), "previous_score": previous_role(role_id)},
             "sections": {section_id: _score(result.sections.get(section_id) if result else None) for section_id in section_ids},
         })
-    # How each evaluator role rates others, for calibration; same evaluator-side privacy rules as the roles report.
-    raters = [{
-        "id": role_id,
-        "name": role_names.get(role_id, "Unknown role"),
-        "evaluator_count": current["rater_people"].get(role_id, 0),
-        "overall": _score(result.overall),
-    } for role_id, result in sorted(current["raters"].items(), key=lambda pair: (role_names.get(pair[0], "").casefold(), pair[0]))]
-
     return {
         "campaign": reporting_service._report_campaign_option(campaign),
         "previous_campaign": reporting_service._report_campaign_option(previous["campaign"]) if previous else None,
@@ -186,7 +174,6 @@ def build_campaign_dashboard(campaign_id: int, actor: models.User, db: Session) 
             "sections": {section_id: _score(current["company"].sections.get(section_id)) for section_id in section_ids},
         },
         "roles": role_rows,
-        "raters": raters,
         "trend": [{
             "campaign": reporting_service._report_campaign_option(item["campaign"]),
             "overall": _released(item["scores"].overall),
@@ -316,8 +303,7 @@ def employee_benchmarks(campaign: models.Campaign, employee_id: int, rows: list[
               if group.id in groups_by_employee.get(employee_id, set()) and (team_groups is None or group.id in team_groups)]
     group_rows = rows if team_groups is None else [row for row in rows if row[0].company_group_id in team_groups]
     scored, _names = reporting_service._section_report_data(group_rows, db)
-    roles = {person_id: role.id for person_id, (_employee, role) in reporting_service.users_by_id(db).items()}
-    results = section_scoring_service.group_scores(scored, campaign.id, roles, aggregate_access=aggregate_access)
+    results = section_scoring_service.group_scores(scored, campaign.id, aggregate_access=aggregate_access)
 
     def profile(result) -> dict[str, Any]:
         return {"overall": _released(result.overall) if result else None,

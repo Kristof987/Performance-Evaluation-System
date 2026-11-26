@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
+from services import permissions
 from services import campaign_lifecycle
 from services import workspace_settings_service
 from business_calendar import business_date
@@ -45,21 +46,6 @@ def status_key(status_name: str | None, finish_date: date | None) -> str:
     return "not_started"
 
 
-def _has_permission(actor: models.User, db: Session, permission: str) -> bool:
-    return (
-        db.query(models.User.id)
-        .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
-        .join(models.system_role_permissions,
-              models.system_role_permissions.c.system_role_id == models.SystemRole.id)
-        .join(models.SystemPermission,
-              models.SystemPermission.id == models.system_role_permissions.c.permission_id)
-        .filter(models.User.id == actor.id)
-        .filter(models.User.is_active.is_(True))
-        .filter(models.SystemPermission.name == permission)
-        .first() is not None
-    )
-
-
 # Team leads (reports.read_team) see reports only for the groups they lead. Team-enabled routes
 # call enter_report_scope first; every other report entry point keeps requiring reports.read.
 _team_groups: ContextVar[frozenset[int] | None] = ContextVar("report_team_groups", default=None)
@@ -75,10 +61,10 @@ def led_group_ids(actor: models.User, db: Session) -> frozenset[int]:
 
 def enter_report_scope(actor: models.User, db: Session) -> frozenset[int] | None:
     """Return None for workspace-wide report access, or the groups a team lead may see."""
-    if _has_permission(actor, db, "reports.read"):
+    if permissions.has_permission(actor, db, "reports.read"):
         _team_groups.set(None)
         return None
-    if not _has_permission(actor, db, "reports.read_team"):
+    if not permissions.has_permission(actor, db, "reports.read_team"):
         raise HTTPException(status_code=403, detail="User is not authorized to view reports")
     groups = led_group_ids(actor, db)
     _team_groups.set(groups)
@@ -123,8 +109,8 @@ def require_team_employee(campaign_id: int, employee_id: int, actor: models.User
 
 
 def require_reports_access(campaign_id: int | None, actor: models.User, db: Session) -> models.Campaign | None:
-    if not _has_permission(actor, db, "reports.read") and not (
-            _team_groups.get() is not None and _has_permission(actor, db, "reports.read_team")):
+    if not permissions.has_permission(actor, db, "reports.read") and not (
+            _team_groups.get() is not None and permissions.has_permission(actor, db, "reports.read_team")):
         raise HTTPException(status_code=403, detail="User is not authorized to view reports")
     _privacy_thresholds.set(workspace_settings_service.privacy_thresholds(db))
 
@@ -146,7 +132,7 @@ def aggregate_reporting_access(campaign_id: int, actor: models.User, db: Session
     caller cannot turn on this policy by supplying a role label or query flag.
     """
     require_reports_access(campaign_id, actor, db)
-    return _has_permission(actor, db, "campaigns.manage")
+    return permissions.has_permission(actor, db, "campaigns.manage")
 
 
 def _report_campaign_option(campaign: models.Campaign) -> dict[str, Any]:
@@ -203,7 +189,7 @@ def build_written_feedback(campaign_id: int, question_key: str | None, evaluatio
     if models.CampaignStatus(campaign.status) not in (models.CampaignStatus.ACTIVE, models.CampaignStatus.REVIEW,
                                                       models.CampaignStatus.PAUSED, models.CampaignStatus.CLOSED):
         raise HTTPException(status_code=409, detail="Written feedback is available only after questionnaires are issued")
-    if not _has_permission(actor, db, "campaigns.manage"):
+    if not permissions.has_permission(actor, db, "campaigns.manage"):
         raise HTTPException(status_code=403, detail="Campaign management permission is required")
     rows = campaign_report_rows(campaign_id, db)
     if employee_id is not None and employee_id not in campaign_participant_ids(campaign_id, rows, db):
@@ -365,8 +351,7 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
 
     scored, names = _section_report_data(rows, db)
     campaign_performance = section_scoring_service.campaign_scores(scored, campaign.id, aggregate_access=aggregate_access)
-    group_roles = {employee_id: role.id for employee_id, (_employee, role) in users_by_id(db).items()}
-    group_performance = section_scoring_service.group_scores(scored, campaign.id, group_roles, aggregate_access=aggregate_access)
+    group_performance = section_scoring_service.group_scores(scored, campaign.id, aggregate_access=aggregate_access)
     section_scores = _section_score_rows(campaign_performance, scored, names)
     issued_questions: dict[int, set[str]] = defaultdict(set)
     seen_assignments: set[int] = set()
@@ -473,8 +458,7 @@ def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> 
         completed_rows = [row for row in completed_rows if row[0].company_group_id in team_groups]
     members_by_group, _ = membership_maps(db)
     scored, _names = _section_report_data(rows, db)
-    group_roles = {employee_id: role.id for employee_id, (_employee, role) in users_by_id(db).items()}
-    group_results = section_scoring_service.group_scores(scored, campaign.id, group_roles, aggregate_access=aggregate_access)
+    group_results = section_scoring_service.group_scores(scored, campaign.id, aggregate_access=aggregate_access)
     participating = set()
     reportable_groups = 0
     group_summaries = []
@@ -530,7 +514,7 @@ def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: 
     group_scored = [evaluation for evaluation in scored if evaluation.company_group_id == group_id]
     employees_by_id = users_by_id(db)
     role_map = {employee_id: role.id for employee_id, (_employee, role) in employees_by_id.items()}
-    group_result = section_scoring_service.group_scores(scored, campaign_id, role_map, aggregate_access=aggregate_access).get(group_id) or section_scoring_service.campaign_scores([], campaign_id)
+    group_result = section_scoring_service.group_scores(scored, campaign_id, aggregate_access=aggregate_access).get(group_id) or section_scoring_service.campaign_scores([], campaign_id)
     group_sections = _section_score_rows(group_result, group_scored, names)
     members_by_group, _ = membership_maps(db)
     member_ids = members_by_group[group_id]
@@ -596,43 +580,36 @@ def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: 
     }
 
 
-def normalize_perspective(perspective: str) -> str:
-    return "evaluator" if perspective == "evaluator" else "evaluatee"
-
-
-def _role_slice(rows: list[Any], scored: list[Any], role_map: dict[int, int], role_id: int, evaluator: bool):
-    """Peer assignments, scored evaluations and people on one side of the role at issuance."""
+def _role_slice(rows: list[Any], scored: list[Any], role_map: dict[int, int], role_id: int):
+    """Peer assignments, scored evaluations and evaluated people of one role at issuance."""
     from services import section_scoring_service
 
     role_rows = [row for row in rows if row[0].evaluator_id != row[0].evaluatee_id
-                 and assignment_role_id(row[0], role_map, evaluator=evaluator) == role_id]
+                 and assignment_role_id(row[0], role_map) == role_id]
     role_scored = [item for item in scored if item.evaluator_id != item.evaluatee_id
-                   and section_scoring_service.role_of(item, role_map, evaluator=evaluator) == role_id]
-    employee_ids = {row[0].evaluator_id if evaluator else row[0].evaluatee_id for row in role_rows}
+                   and section_scoring_service.role_of(item, role_map) == role_id]
+    employee_ids = {row[0].evaluatee_id for row in role_rows}
     return role_rows, role_scored, employee_ids
 
 
-def build_roles_overview(campaign_id: int, actor: models.User, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
+def build_roles_overview(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     from services import section_scoring_service
 
     campaign = require_reports_access(campaign_id, actor, db)
     assert campaign is not None
     aggregate_access = aggregate_reporting_access(campaign_id, actor, db)
-    perspective = normalize_perspective(perspective)
     rows = campaign_report_rows(campaign.id, db)
     scored, names = _section_report_data(rows, db)
     employees_by_id = users_by_id(db)
     role_map = {employee_id: role.id for employee_id, (_employee, role) in employees_by_id.items()}
-    role_results = (section_scoring_service.evaluator_role_scores(scored, campaign.id, role_map, aggregate_access=aggregate_access) if perspective == "evaluator"
-                    else section_scoring_service.role_scores(scored, campaign.id, role_map, aggregate_access=aggregate_access))
+    role_results = section_scoring_service.role_scores(scored, campaign.id, role_map, aggregate_access=aggregate_access)
     roles = db.query(models.CompanyRole).order_by(models.CompanyRole.name.asc()).all()
     role_summaries = []
     section_candidate: dict[int, list[dict[str, Any]]] = defaultdict(list)
     suppressed_sections = set()
     participating_employees: set[int] = set()
-    evaluator_side = perspective == "evaluator"
     for role in roles:
-        role_rows, role_scored, employee_ids = _role_slice(rows, scored, role_map, role.id, evaluator_side)
+        role_rows, role_scored, employee_ids = _role_slice(rows, scored, role_map, role.id)
         participating_employees.update(employee_ids)
         completed = [row for row in role_rows if status_key(row[2], row[0].finish_date) == "completed"]
         result = role_results.get(role.id)
@@ -651,35 +628,32 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session, pers
                 "available_sections": sum(section.availability == "available" for section in result.sections.values()) if result else 0,
                 "average_score": average,
                 "score_availability": result.overall.availability if result else "no_data",
-                "average_score_context": ("Peer ratings given by this company role" if perspective == "evaluator" else "Peer ratings received by this company role") if average is not None else "Insufficient peer feedback" if result and result.overall.availability == "suppressed" else "No scored peer Sections",
+                "average_score_context": "Peer ratings received by this company role" if average is not None else "Insufficient peer feedback" if result and result.overall.availability == "suppressed" else "No scored peer Sections",
             })
     comparison = next(({"section_id": section_id, "section_name": names.get(section_id, UNNAMED_SECTION), "roles": items} for section_id, items in sorted(section_candidate.items(), key=lambda pair: (names.get(pair[0], UNNAMED_SECTION).lower(), pair[0])) if len(items) >= 2 and section_id not in suppressed_sections), None)
     return {
         "campaign": _report_campaign_option(campaign),
-        "perspective": perspective,
         "kpis": {"roles_in_campaign": len(role_summaries), "participating_employees": len(participating_employees), "completed_evaluations": sum(item["completed_evaluations"] for item in role_summaries), "roles_with_reportable_results": sum(1 for item in role_summaries if item["average_score"] is not None)},
         "roles": role_summaries,
         "section_comparison": comparison,
-        "notes": {"scoring": "Normalized Section scores use submitted schema-v2 snapshots and evaluated-employee weighting.", "role_history": "Company roles are recorded when evaluations are issued; later role changes do not alter this campaign.", "confidentiality": "Authorized campaign managers may view aggregate role scores regardless of cohort size." if aggregate_access else f"A Section requires {min_aggregate_evaluatees()} evaluated employees; evaluator-role results also require {min_aggregate_evaluatees()} distinct peer evaluators."},
+        "notes": {"scoring": "Normalized Section scores use submitted schema-v2 snapshots and evaluated-employee weighting.", "role_history": "Company roles are recorded when evaluations are issued; later role changes do not alter this campaign.", "confidentiality": "Authorized campaign managers may view aggregate role scores regardless of cohort size." if aggregate_access else f"A Section requires {min_aggregate_evaluatees()} evaluated employees."},
     }
 
 
-def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Session, perspective: str = "evaluatee") -> dict[str, Any]:
+def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     from services import section_scoring_service
 
-    overview = build_roles_overview(campaign_id, actor, db, perspective)
+    overview = build_roles_overview(campaign_id, actor, db)
     aggregate_access = aggregate_reporting_access(campaign_id, actor, db)
     role_summary = next((role for role in overview["roles"] if role["role_id"] == role_id), None)
     if role_summary is None:
         raise HTTPException(status_code=404, detail="Role report not found")
-    perspective = overview["perspective"]
     rows = campaign_report_rows(campaign_id, db)
     employees_by_id = users_by_id(db)
     role_map = {employee_id: role.id for employee_id, (_employee, role) in employees_by_id.items()}
     scored, names = _section_report_data(rows, db)
-    role_rows, role_scored, role_employee_ids = _role_slice(rows, scored, role_map, role_id, perspective == "evaluator")
-    role_result = (section_scoring_service.evaluator_role_scores(scored, campaign_id, role_map, aggregate_access=aggregate_access) if perspective == "evaluator"
-                    else section_scoring_service.role_scores(scored, campaign_id, role_map, aggregate_access=aggregate_access)).get(role_id)
+    role_rows, role_scored, role_employee_ids = _role_slice(rows, scored, role_map, role_id)
+    role_result = section_scoring_service.role_scores(scored, campaign_id, role_map, aggregate_access=aggregate_access).get(role_id)
     section_rows = _section_score_rows(role_result, role_scored, names) if role_result else []
     groups = assigned_campaign_groups(campaign_id, db)
     members_by_group, _ = membership_maps(db)
@@ -687,11 +661,8 @@ def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Se
     for group in groups:
         group_rows = [row for row in role_rows if row[0].company_group_id == group.id]
         group_scored = [item for item in role_scored if item.company_group_id == group.id]
-        group_employee_ids = (members_by_group[group.id] & role_employee_ids) | {
-            item.evaluator_id if perspective == "evaluator" else item.evaluatee_id for item in group_scored
-        }
-        group_result = (section_scoring_service.evaluator_role_scores(group_scored, campaign_id, role_map, aggregate_access=aggregate_access).get(role_id) if perspective == "evaluator"
-                        else section_scoring_service.group_scores(group_scored, campaign_id, role_map, aggregate_access=aggregate_access).get(group.id))
+        group_employee_ids = (members_by_group[group.id] & role_employee_ids) | {item.evaluatee_id for item in group_scored}
+        group_result = section_scoring_service.group_scores(group_scored, campaign_id, aggregate_access=aggregate_access).get(group.id)
         if group_result and not aggregate_access:
             group_result = section_scoring_service.suppress_small_complements(group_result, role_scored, group_scored)
             group_result = section_scoring_service.suppress_small_complements(group_result, scored, group_scored)
@@ -700,7 +671,6 @@ def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Se
     return {
         "campaign": overview["campaign"],
         "role": {"id": role_summary["role_id"], "name": role_summary["role_name"]},
-        "perspective": perspective,
         "kpis": {
             "employees": role_summary["employee_count"],
             "completed_evaluations": role_summary["completed_evaluations"],

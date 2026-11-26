@@ -1,15 +1,15 @@
 """Versioned HR workflow for campaign, assigned group, and evaluatee-role AI reports."""
 
-from datetime import datetime, timedelta, timezone
-from hashlib import sha256
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from services import ai_trace
 from services import ai_workflow_service
 import models
+from services import permissions
 from services import workspace_settings_service
 from services import reporting_service
 from services.ai_aggregate_service import (
@@ -19,7 +19,7 @@ from services.ai_analysis_models import AggregateAnalysisContext, EmployeeAIAnal
 from services.ai_generation_service import (
     AnalysisGenerationError, generate_aggregate_ai_analysis_from_context, validate_aggregate_ai_analysis,
 )
-from services.ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, APPROVE, GENERATE, capabilities, has_permission, visible_versions
+from services.ai_workflow_service import _analysis_json, _commit_generation_result, _lock_campaign, APPROVE, GENERATE, capabilities, visible_versions
 
 
 def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
@@ -34,7 +34,7 @@ def _context(db: Session, campaign_id: int, scope_type: str, scope_id: int | Non
 
 
 def _writable(db: Session, campaign_id: int, actor: models.User, permission: str = GENERATE) -> None:
-    if not has_permission(actor, db, permission):
+    if not permissions.has_permission(actor, db, permission):
         raise HTTPException(status_code=403, detail="Analysis management permission required")
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign.is_archived:
@@ -147,62 +147,44 @@ def list_analyses(db: Session, campaign_id: int, scope_type: str, scope_id: int 
 
 
 def generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, *, actor: models.User,
-             job_id: int | None = None, worker_token: str | None = None) -> dict:
-    initial = _context(db, campaign_id, scope_type, scope_id, actor)
+             job_id: int | None = None) -> dict:
+    """One context, one paid call, one Draft; the job queue already allows one generation per scope."""
+    context = _context(db, campaign_id, scope_type, scope_id, actor)
     _writable(db, campaign_id, actor)
-    db.rollback()
-    lock_key = int.from_bytes(sha256(f"compass:aggregate-ai:{campaign_id}:{scope_type}:{scope_id}".encode()).digest()[:8],
-                              "big", signed=True)
-    with db.get_bind().connect() as lease:
-        acquired = lease.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": lock_key}).scalar()
-        lease.commit()
-        if not acquired:
-            raise HTTPException(status_code=409, detail="Analysis generation is already in progress")
-        try:
-            context = _context(db, campaign_id, scope_type, scope_id, actor)
-            _writable(db, campaign_id, actor)
-            if not context.evidence:
-                raise AnalysisGenerationError("insufficient_analysis_data")
-            recent = _query(db, context).filter(models.AggregateAIAnalysis.parent_analysis_id.is_(None)).order_by(
-                models.AggregateAIAnalysis.generated_at.desc()).first()
-            if recent and recent.generated_at > datetime.now(timezone.utc) - timedelta(seconds=30):
-                raise HTTPException(status_code=409, detail="Please wait before regenerating this analysis")
-            fingerprint = context.source_fingerprint
-            db.rollback()  # Never retain Reports' campaign lock during a paid provider call.
-            analysis, trace = generate_aggregate_ai_analysis_from_context(
-                context, job_id=job_id, language=ai_workflow_service.preferred_language(db, actor))
-            _lock_campaign(db, campaign_id)
-            fresh = _context(db, campaign_id, scope_type, scope_id, actor)
-            _writable(db, campaign_id, actor)
-            if fingerprint != fresh.source_fingerprint:
-                raise HTTPException(status_code=409, detail="Report sources changed; generate again")
-            record = models.AggregateAIAnalysis(
-                campaign_id=campaign_id, scope_type=scope_type, scope_id=scope_id,
-                version=_version(db, context), status="draft", is_current_approved=False,
-                analysis=analysis.model_dump(mode="json"), evidence_summary=_evidence_summary(context, analysis),
-                **ai_trace.trace_fields(db, trace), generated_at=datetime.now(timezone.utc), generated_by_user_id=actor.id,
-                source_fingerprint=fingerprint, schema_version=1,
-            )
-            _audit_aggregate(db, actor, record, context.scope_label, "generated")
-            _commit_generation_result(db, record, job_id, worker_token)
-            db.refresh(record)
-            return _serialize(record, fingerprint)
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            lease.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key})
-            lease.commit()
+    if not context.evidence:
+        raise AnalysisGenerationError("insufficient_analysis_data")
+    language = ai_workflow_service.preferred_language(db, actor)
+    db.rollback()  # Hold no database lock while waiting on the provider.
+    analysis, trace = generate_aggregate_ai_analysis_from_context(context, job_id=job_id, language=language)
+    try:
+        _lock_campaign(db, campaign_id)
+        record = models.AggregateAIAnalysis(
+            campaign_id=campaign_id, scope_type=scope_type, scope_id=scope_id,
+            version=_version(db, context), status="draft", is_current_approved=False,
+            analysis=analysis.model_dump(mode="json"), evidence_summary=_evidence_summary(context, analysis),
+            **ai_trace.trace_fields(db, trace), generated_at=datetime.now(timezone.utc), generated_by_user_id=actor.id,
+            source_fingerprint=context.source_fingerprint, schema_version=1,
+        )
+        _audit_aggregate(db, actor, record, context.scope_label, "generated")
+        _commit_generation_result(db, record, job_id)
+        db.refresh(record)
+        return _serialize(record, _context(db, campaign_id, scope_type, scope_id, actor).source_fingerprint)
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _locked_context(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
+                    actor: models.User, permission: str) -> AggregateAnalysisContext:
+    _lock_campaign(db, campaign_id)
+    context = _context(db, campaign_id, scope_type, scope_id, actor)
+    _writable(db, campaign_id, actor, permission)
+    return context
 
 
 def edit(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, analysis_id: int,
          content: EmployeeAIAnalysis, *, actor: models.User) -> dict:
-    _context(db, campaign_id, scope_type, scope_id, actor)
-    _writable(db, campaign_id, actor)
-    db.rollback()
-    _lock_campaign(db, campaign_id)
-    context = _context(db, campaign_id, scope_type, scope_id, actor)
-    _writable(db, campaign_id, actor)
+    context = _locked_context(db, campaign_id, scope_type, scope_id, actor, GENERATE)
     record = _record(db, context, analysis_id)
     if record.status != "draft":
         raise HTTPException(status_code=409, detail="Approved versions are read-only")
@@ -210,7 +192,7 @@ def edit(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, a
         raise HTTPException(status_code=409, detail="Only the latest Draft version can be edited")
     if record.source_fingerprint != context.source_fingerprint or not context.evidence:
         raise HTTPException(status_code=409, detail="Outdated analysis; regenerate before editing")
-    validated = validate_aggregate_ai_analysis(context, content)
+    validated = validate_aggregate_ai_analysis(context, content, check_prose=False)
     new_record = models.AggregateAIAnalysis(
         campaign_id=campaign_id, scope_type=scope_type, scope_id=scope_id,
         version=_version(db, context), parent_analysis_id=record.id, status="draft", is_current_approved=False,
@@ -230,19 +212,14 @@ def edit(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, a
 
 def approve(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
             analysis_id: int, *, actor: models.User) -> dict:
-    _context(db, campaign_id, scope_type, scope_id, actor)
-    _writable(db, campaign_id, actor, APPROVE)
-    db.rollback()
-    _lock_campaign(db, campaign_id)
-    context = _context(db, campaign_id, scope_type, scope_id, actor)
-    _writable(db, campaign_id, actor, APPROVE)
+    context = _locked_context(db, campaign_id, scope_type, scope_id, actor, APPROVE)
     record = _record(db, context, analysis_id)
     if record.status != "draft":
         raise HTTPException(status_code=409, detail="Only Draft versions can be approved")
     if record.source_fingerprint != context.source_fingerprint or not context.evidence:
         raise HTTPException(status_code=409, detail="Outdated analysis; regenerate before approval")
     try:
-        validate_aggregate_ai_analysis(context, EmployeeAIAnalysis.model_validate(record.analysis))
+        validate_aggregate_ai_analysis(context, EmployeeAIAnalysis.model_validate(record.analysis), check_prose=False)
     except (AnalysisGenerationError, ValueError):
         raise HTTPException(status_code=409, detail="Analysis evidence is no longer valid; regenerate") from None
     prior = _query(db, context).filter(models.AggregateAIAnalysis.is_current_approved.is_(True)).first()

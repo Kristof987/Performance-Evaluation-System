@@ -84,27 +84,17 @@ _AGGREGATE_INSTRUCTIONS = _INSTRUCTIONS + "\nThere are no written comments in th
 _RANKING = re.compile(r"\b(?:strongest|weakest|highest|lowest|best|worst|most positively rated|least positively rated)\b", re.I)
 _RELATIVE = re.compile(r"\b(?:stronger than|weaker than|less strong|more positive than|less positive than|higher than|lower than|relative to)\b", re.I)
 _EXPLICIT_COMPARISON = re.compile(r"\b(?:more \w+(?: \w+)? than|less \w+(?: \w+)? than|better than|worse than|compared (?:with|to)|relative to|outperform\w*)\b", re.I)
-_TEMPORAL_TREND = re.compile(
-    r"\b(?:trend\w*|over time|improv\w* over|declin\w* over|repeatedly|"
-    r"consisten\w*\s+(?:improv\w*|declin\w*|increas\w*|decreas\w*|worsen\w*|ris\w*|fall\w*)|"
-    r"(?:improv\w*|declin\w*|increas\w*|decreas\w*|worsen\w*)\s+consisten\w*)\b", re.I)
-_REVIEWER_CONSISTENCY = re.compile(
-    r"\b(?:reviewers?|peers?|colleagues?|evaluators?)\b[^.!?]{0,100}?"
-    r"\b(?:consisten\w*\b(?!\s+with\b)|uniform\w*|same (?:rating|score)|in agreement)\b|"
-    r"\b(?:consistent\w*\b(?!\s+with\b)|uniform\w*)\s+(?:\w+\s+){0,2}?"
-    r"(?:peer|reviewer|evaluator|rating|score|feedback)\b", re.I)
-_RATING_CONSISTENCY = re.compile(
-    r"\b(?:ratings?|scores?|peer feedback|reviewer feedback|evaluator feedback)\b"
-    r"[^.!?]{0,60}?\b(?:consisten\w*\b(?!\s+with\b)|uniform\w*|same (?:rating|score))\b", re.I)
-_SELF_REPORTED_CONSISTENCY = re.compile(
-    r"\b(?:employee|self[- ]?(?:reflection|feedback|report|evaluation))\b[^.!?]{0,120}?"
-    r"\b(?:wants?|wish(?:es)?|desire|goal|aims?|plans?|wrote|says?|states?|points to)\b"
-    r"[^.!?]{0,120}?\bconsisten\w*\b(?!\s+with\b)", re.I)
+# The prompt forbids these words outright: one campaign shows neither change over time nor agreement.
+_TREND_OR_CONSISTENCY = re.compile(
+    r"\b(?:consistent\w*\b(?!\s+with\b)|consistently|repeatedly|trend\w*|over time)", re.I)
 _PEER = re.compile(r"\b(?:peer|reviewer|colleague|coworker|other evaluator|other employee|team feedback)\w*\b", re.I)
 _SELF = re.compile(r"\b(?:self[- ]?evaluat\w*|self[- ]?assess\w*|self[- ]?rat\w*|self[- ]?report\w*)\b", re.I)
 _ACTION = re.compile(r"\b(?:action plan|next steps|improvement plan|recommend(?:s|ed)? (?:that|to|training|coaching)|(?:should|must|needs? to|ought to) (?:improve|develop|practice|seek|take|work|focus|attend|pursue|increase|reduce|change))\b", re.I)
-_EMPLOYMENT_DECISION = re.compile(r"\b(?:promot\w*|terminat\w*|dismiss\w*|fired|firing|salary|compensat\w*|pay raise)\b", re.I)
-# This grammar applies ONLY to structured claim values, not arbitrary prose.
+# Decision phrases only: "promotes collaboration", "dismissive" or "compensates for" are ordinary prose.
+_EMPLOYMENT_DECISION = re.compile(
+    r"\b(?:promotion|(?:be|get|gets|getting|been) promoted|promoted to|terminat(?:e|ed|ing|ion)\s+(?:of\s+)?(?:his|her|their|the)?\s*"
+    r"(?:contract|employment)|termination|dismissal|dismissed from|fired|firing|let go|salary|compensation|pay raise|bonus(?:es)?)\b",
+    re.I)
 
 
 MAX_PEER_COMMENT_FACTS = 60
@@ -217,7 +207,6 @@ def _fact_registry(scope_key: str, categories: dict[str, str], statistics: dict[
             fact.evidence_ids, operands, operands, fact.direction)
     # A bounded prompt; prefer Section observations, matched comparisons, and then questions.
     priority = {"observation:scale_position": 2, "observation:self_report": 1,
-                "observation:consistency": 1,
                 "comparison:self_peer": 0, "comparison:ranking": 1, "comparison:relative": 3}
     # Colleagues' comments are always offered in full; the measures fill the rest of the budget.
     comments = [fact for fact in candidates if fact.kind == "observation:peer_comment"]
@@ -268,14 +257,6 @@ def _employee_observations(context: EmployeeAnalysisContext, statistics: dict[st
                                           f"{scope}:{key}:{category}:average_normalized", statistics)
                 if fact:
                     facts[_observation_id(fact)] = fact
-            if (scope == "question" and row.peer.availability == "available" and row.peer.answer_count is not None
-                    and row.peer.answer_count >= 2 and len(row.peer.original_distribution) == 1):
-                identifier = f"question:{key}:peer:answer_count"
-                fact = _ObservationFact(scope, subject, "consistency", (identifier,),
-                                        frozenset(row.peer.evidence_ids),
-                                        f"All reportable peer ratings for {subject} use the same original rating.",
-                                        "Only these submitted ratings; not evidence of stability over time.")
-                facts[_observation_id(fact)] = fact
     for item in context.qualitative_evidence:
         if item.reference.category == "self":
             fact = _ObservationFact("written_feedback", item.reference.question_text, "self_report", (),
@@ -300,13 +281,6 @@ def _aggregate_observations(context: AggregateAnalysisContext, statistics: dict[
                                   f"{item.evidence_id}:average_normalized", statistics)
         if fact:
             facts[_observation_id(fact)] = fact
-        if (item.scope == "question" and item.category == "peer" and item.details.get("answer_count", 0) >= 2
-                and len(item.details.get("original_distribution") or []) == 1):
-            uniform = _ObservationFact("question", item.question_text, "consistency",
-                                       (f"{item.evidence_id}:answer_count",), frozenset([item.evidence_id]),
-                                       f"All reportable peer ratings for {item.question_text} use the same original rating.",
-                                       "Only these submitted ratings; not evidence of stability over time.")
-            facts[_observation_id(uniform)] = uniform
     return facts
 
 
@@ -457,131 +431,49 @@ def _released(statistics: QuantitativeStatistics) -> dict[str, Any] | None:
     return statistics.model_dump(exclude={"availability"}, exclude_none=True)
 
 
-def _register_statistics(registry: dict[str, _Statistic], prefix: str, statistics: QuantitativeStatistics,
-                         *, scale_max: int | None = None, count_kind: str = "answer_count") -> dict[str, str]:
-    if _released(statistics) is None:
-        return {}
-    identifiers = {}
-    evidence = frozenset(statistics.evidence_ids)
+def _register_average(registry: dict[str, _Statistic], prefix: str, statistics: QuantitativeStatistics) -> None:
+    """Facts cite released averages only; the model itself never sees a number."""
+    if _released(statistics) is None or statistics.average_normalized is None:
+        return
     scope, category = prefix.split(":", 1)[0], prefix.rsplit(":", 1)[-1]
     label = f"{category} {scope}" if scope != "overall" else f"overall {category}"
-    for field in ("average_normalized", "minimum_normalized", "maximum_normalized", "normalized_range"):
-        value = getattr(statistics, field)
-        if value is not None:
-            identifier = f"{prefix}:{field}"
-            registry[identifier] = _Statistic(Decimal(str(value)), "normalized" if field != "normalized_range" else "difference", evidence,
-                                              f"{label} {field.replace('_', ' ')}",
-                                              5 if field != "normalized_range" else None)
-            identifiers[field] = identifier
-    if statistics.answer_count is not None:
-        identifier = f"{prefix}:{count_kind}"
-        count_label = ("distinct peer reviewers" if category == "peer" else "self evaluations") if count_kind == "reviewer_count" else (
-            "reportable Sections" if count_kind == "reportable_section_count" else "submitted answers")
-        registry[identifier] = _Statistic(Decimal(statistics.answer_count), "count", evidence, f"{label} {count_label}")
-        identifiers[count_kind] = identifier
-    for bin_ in statistics.original_distribution:
-        if scale_max is None:
-            continue
-        score_id = f"{prefix}:original_score:{bin_.original_value}"
-        count_id = f"{prefix}:original_score:{bin_.original_value}:count"
-        registry[score_id] = _Statistic(Decimal(bin_.original_value), "original", evidence,
-                                        f"{label} original rating", scale_max)
-        registry[count_id] = _Statistic(Decimal(bin_.count), "count", evidence,
-                                        f"{label} answers at original rating {bin_.original_value}")
-        identifiers[f"original_score_{bin_.original_value}"] = score_id
-        identifiers[f"original_score_{bin_.original_value}_count"] = count_id
-    return identifiers
+    registry[f"{prefix}:average_normalized"] = _Statistic(Decimal(str(statistics.average_normalized)), "normalized",
+                                                          frozenset(statistics.evidence_ids),
+                                                          f"{label} average normalized", 5)
 
 
-def _prompt_data(context: EmployeeAnalysisContext) -> tuple[dict[str, Any], dict[str, str], dict[str, _Statistic]]:
-    """Explicit allowlist: no names, employee IDs, source records or suppressed values."""
-    payload: dict[str, Any] = {
-        "subject": "employee_under_review",
-        "scale_note": context.metadata.normalization,
-        "overall_weighting": context.overall.weighting,
-        "warnings": [item.code for item in context.warnings],
-        "questions": [], "sections": [], "overall": {}, "comparisons": [], "self_written_evidence": [],
-    }
+def _released_statistics(context: EmployeeAnalysisContext) -> tuple[dict[str, str], dict[str, _Statistic]]:
+    """The released evidence (ID → peer/self) and the averages that facts may cite.
+
+    Explicit allowlist: no names, employee IDs, source records or suppressed values.
+    """
     statistics: dict[str, _Statistic] = {}
-    for question in context.questions:
-        peer, self_score = _released(question.peer), _released(question.self_evaluation)
-        if peer is not None or self_score is not None:
-            if peer is not None:
-                peer["statistic_ids"] = _register_statistics(statistics, f"question:{question.question_key}:peer", question.peer,
-                                                              scale_max=question.scale_max)
-            if self_score is not None:
-                self_score["statistic_ids"] = _register_statistics(statistics, f"question:{question.question_key}:self", question.self_evaluation,
-                                                                    scale_max=question.scale_max)
-            payload["questions"].append({
-                "text": question.question_text, "section_name": question.section_name,
-                "scale_min": question.scale_min, "scale_max": question.scale_max,
-                "min_label": question.min_label, "max_label": question.max_label,
-                "peer": peer, "self_evaluation": self_score,
-            })
-    for section in context.sections:
-        peer, self_score = _released(section.peer), _released(section.self_evaluation)
-        if peer is not None or self_score is not None:
-            if peer is not None:
-                peer["statistic_ids"] = _register_statistics(statistics, f"section:{section.section_id}:peer", section.peer,
-                                                              count_kind="reviewer_count")
-            if self_score is not None:
-                self_score["statistic_ids"] = _register_statistics(statistics, f"section:{section.section_id}:self", section.self_evaluation,
-                                                                    count_kind="reviewer_count")
-            payload["sections"].append({"name": section.section_name, "peer": peer, "self_evaluation": self_score})
+    categories: dict[str, str] = {}
+    for scope, rows in (("question", context.questions), ("section", context.sections)):
+        for row in rows:
+            key = row.question_key if scope == "question" else row.section_id
+            for category, stat in (("peer", row.peer), ("self", row.self_evaluation)):
+                if _released(stat) is not None:
+                    _register_average(statistics, f"{scope}:{key}:{category}", stat)
+                    categories.update({item: category for item in stat.evidence_ids})
     for category, score in (("peer", context.overall.peer), ("self", context.overall.self_evaluation)):
-        released = _released(score)
-        if released is not None:
-            released["statistic_ids"] = _register_statistics(statistics, f"overall:{category}", score,
-                                                               count_kind="reportable_section_count")
-        payload["overall"][category] = released
+        _register_average(statistics, f"overall:{category}", score)
     for comparison in context.comparisons:
         peer = next((item.peer for item in context.sections if item.section_id == comparison.section_id), None)
         self_score = next((item.self_evaluation for item in context.sections if item.section_id == comparison.section_id), None)
         if peer is None or self_score is None or _released(peer) is None or _released(self_score) is None:
             continue
-        prefix = f"comparison:{comparison.section_id}"
-        identifiers = {}
         for field in ("peer_average", "self_average", "self_minus_peer"):
-            identifier = f"{prefix}:{field}"
-            statistics[identifier] = _Statistic(Decimal(str(getattr(comparison, field))),
-                                                 "difference" if field == "self_minus_peer" else "normalized",
-                                                 frozenset(comparison.evidence_ids),
-                                                 f"Section self-versus-peer {field.replace('_', ' ')}",
-                                                 None if field == "self_minus_peer" else 5)
-            identifiers[field] = identifier
-        payload["comparisons"].append({
-            "section_name": next((item.section_name for item in context.sections if item.section_id == comparison.section_id), None),
-            "peer_average": comparison.peer_average, "self_average": comparison.self_average,
-            "self_minus_peer": comparison.self_minus_peer, "evidence_ids": comparison.evidence_ids,
-            "statistic_ids": identifiers,
-        })
-    payload["self_written_evidence"] = [
-        {"evidence_id": item.reference.evidence_id, "question_text": item.reference.question_text,
-         "section_name": item.reference.section_name, "response_text": item.response_text}
-        for item in context.qualitative_evidence if item.reference.category == "self"
-    ]
-    # Citations must appear in the actual released prompt, not merely elsewhere in Phase 1.
-    categories: dict[str, str] = {}
-    for question in context.questions:
-        for category, stat in (("peer", question.peer), ("self", question.self_evaluation)):
-            if _released(stat) is not None:
-                categories.update({item: category for item in stat.evidence_ids})
-    for section in context.sections:
-        for category, stat in (("peer", section.peer), ("self", section.self_evaluation)):
-            if _released(stat) is not None:
-                categories.update({item: category for item in stat.evidence_ids})
-    for item in payload["self_written_evidence"]:
-        categories[item["evidence_id"]] = "self"
+            statistics[f"comparison:{comparison.section_id}:{field}"] = _Statistic(
+                Decimal(str(getattr(comparison, field))), "difference" if field == "self_minus_peer" else "normalized",
+                frozenset(comparison.evidence_ids), f"Section self-versus-peer {field.replace('_', ' ')}",
+                None if field == "self_minus_peer" else 5)
     for item in context.qualitative_evidence:
-        if item.reference.category == "peer":
-            categories[item.reference.evidence_id] = "peer"
+        categories[item.reference.evidence_id] = item.reference.category
     authorized = {item.evidence_id: item.category for item in context.evidence_references}
     if any(authorized.get(evidence_id) != category for evidence_id, category in categories.items()):
         raise AnalysisGenerationError("invalid_analysis_context")
-    # Exactly the same permitted set is supplied to the model and used by the
-    # validator; never publish suppressed or unreferenced Phase 1 source IDs.
-    payload["valid_evidence_ids"] = sorted(categories)
-    return payload, categories, statistics
+    return categories, statistics
 
 
 def _aggregate_statistics(context: AggregateAnalysisContext) -> tuple[dict[str, str], dict[str, _Statistic]]:
@@ -606,17 +498,12 @@ def _aggregate_statistics(context: AggregateAnalysisContext) -> tuple[dict[str, 
 
 
 def _verify_finding(finding: AnalysisFinding, categories: dict[str, str], statistics: dict[str, _Statistic],
-                    registry: dict[str, _AuthorizedFact]) -> AnalysisFinding:
+                    registry: dict[str, _AuthorizedFact], *, check_prose: bool = True) -> AnalysisFinding:
+    """Cited facts must still exist with the same values; the wording rules apply to model output only."""
     cited = set(finding.supporting_evidence_ids)
 
-    def prose_failure(code: str, category: str, match: re.Match[str] | None,
-                      reason: str, required: str) -> None:
-        raise AnalysisGenerationError(code, category=category, diagnostic={
-            "validator": "_verify_finding", "rule": category,
-            "trigger_start": match.start() if match else None,
-            "trigger_end": match.end() if match else None,
-            "reason": reason, "required_fact": required,
-        })
+    def prose_failure(code: str, category: str) -> None:
+        raise AnalysisGenerationError(code, category=category, diagnostic={"validator": "_verify_finding", "rule": category})
     if not cited or not cited <= categories.keys():
         raise AnalysisGenerationError("invalid_analysis_evidence", category="unknown_evidence_id")
     selected = finding.fact_ids
@@ -629,79 +516,54 @@ def _verify_finding(finding: AnalysisFinding, categories: dict[str, str], statis
     if any(any(identifier not in statistics or statistics[identifier].value != value
                for identifier, value in zip(fact.statistic_ids, fact.statistic_values)) for fact in referenced):
         raise AnalysisGenerationError("invalid_analysis_evidence", category="fact_statistic_mismatch")
+    if not check_prose:
+        return finding
     prose = f"{finding.assessment} {finding.reasoning}"
-    number = re.search(r"\d|%|\b(?:zero|two|three|four|five|six|seven|eight|nine|ten|percent|per cent)\b", prose, re.I)
-    if number or "{{" in prose or "}}" in prose:
-        prose_failure("invalid_analysis_claim", "unverified_explicit_number", number,
-                      "Explicit numerical prose cannot be verified by the qualitative F-handle contract.",
-                      "no explicit numbers or markers in prose")
-    action = _ACTION.search(prose)
-    if action:
-        prose_failure("invalid_analysis_claim", "prohibited_action_language", action,
-                      "An action or recommendation trigger occurs in the generated prose.",
-                      "descriptive analysis only")
-    decision = _EMPLOYMENT_DECISION.search(prose)
-    if decision:
-        prose_failure("invalid_analysis_claim", "prohibited_employment_decision", decision,
-                      "Employment-decision language is prohibited in an AI analysis.",
-                      "descriptive analysis only")
+    if (re.search(r"\d|%|\b(?:zero|two|three|four|five|six|seven|eight|nine|ten|percent|per cent)\b", prose, re.I)
+            or "{{" in prose or "}}" in prose):
+        prose_failure("invalid_analysis_claim", "unverified_explicit_number")
+    if _ACTION.search(prose):
+        prose_failure("invalid_analysis_claim", "prohibited_action_language")
+    if _EMPLOYMENT_DECISION.search(prose):
+        prose_failure("invalid_analysis_claim", "prohibited_employment_decision")
     cited_categories = {categories[item] for item in cited}
     if (_PEER.search(prose) and "peer" not in cited_categories
             or _SELF.search(prose) and "self" not in cited_categories):
-        trigger = (_PEER.search(prose) if "peer" not in cited_categories else _SELF.search(prose))
-        prose_failure("invalid_analysis_evidence", "category_mismatch", trigger,
-                      "The cited facts' evidence categories do not include the category named in prose.",
-                      "a released fact from the named peer or self category")
+        prose_failure("invalid_analysis_evidence", "category_mismatch")
     comparative = [fact for fact in referenced if fact.kind.startswith("comparison:")]
     ranking = _RANKING.search(prose)
     ranking_direction = ("left_higher" if ranking and ranking.group().lower() in
                          {"strongest", "highest", "best", "most positively rated"} else "right_higher")
     if ranking and not any(fact.kind == "comparison:ranking" and fact.direction == ranking_direction
                            for fact in comparative):
-        prose_failure("invalid_analysis_evidence", "unsupported_prose_ranking", ranking,
-                      "No selected ranking fact has the direction expressed by the ranking trigger.",
-                      f"comparison:ranking with direction {ranking_direction}")
+        prose_failure("invalid_analysis_evidence", "unsupported_prose_ranking")
     comparative_language = _EXPLICIT_COMPARISON.search(prose) or _RELATIVE.search(prose)
     if comparative_language and not comparative:
-        prose_failure("invalid_analysis_evidence", "unsupported_prose_comparison", comparative_language,
-                      "No selected fact has a comparison type; observations alone do not support a relative claim.",
-                      "comparison fact for the stated subjects and direction")
+        prose_failure("invalid_analysis_evidence", "unsupported_prose_comparison")
     if (_SELF.search(prose) and _PEER.search(prose) and comparative_language
             and not any(fact.kind == "comparison:self_peer" for fact in comparative)):
-        prose_failure("invalid_analysis_evidence", "unsupported_self_peer_claim", comparative_language,
-                      "The finding mentions self and peer views with comparative language, but selects no matched self-versus-peer fact.",
-                      "comparison:self_peer for the same released cohort")
-    temporal = _TEMPORAL_TREND.search(prose)
-    if temporal:
-        prose_failure("invalid_analysis_claim", "unsupported_trend_or_consistency", temporal,
-                      "The trigger describes change over time or repetition; no temporal facts are available in this registry.",
-                      "temporal_change (not available)")
-    reviewer_consistency = _REVIEWER_CONSISTENCY.search(prose) or _RATING_CONSISTENCY.search(prose)
-    if reviewer_consistency and not any(fact.kind == "observation:consistency" for fact in referenced):
-        prose_failure("invalid_analysis_claim", "unsupported_trend_or_consistency", reviewer_consistency,
-                      "Reviewer-rating uniformity requires a selected released uniform-rating fact.",
-                      "observation:consistency")
-    self_intention = _SELF_REPORTED_CONSISTENCY.search(prose)
-    if self_intention and not any(fact.kind == "observation:self_report" for fact in referenced):
-        prose_failure("invalid_analysis_evidence", "unsupported_self_reported_intention", self_intention,
-                      "An attributed development intention requires selected written self-feedback.",
-                      "observation:self_report")
+        prose_failure("invalid_analysis_evidence", "unsupported_self_peer_claim")
+    if _TREND_OR_CONSISTENCY.search(prose):
+        prose_failure("invalid_analysis_claim", "unsupported_trend_or_consistency")
     return finding
 
 
 def _verify_analysis(analysis: EmployeeAIAnalysis, categories: dict[str, str],
-                     context: EmployeeAnalysisContext, statistics: dict[str, _Statistic]) -> EmployeeAIAnalysis:
+                     context: EmployeeAnalysisContext, statistics: dict[str, _Statistic], *,
+                     check_prose: bool = True) -> EmployeeAIAnalysis:
     observations = _employee_observations(context, statistics)
     facts = _employee_comparison_facts(context, statistics)
     registry = _canonical_facts(_fact_registry(
         f"employee:{context.campaign_id}:{context.evaluatee_employee_id}", categories, statistics,
         observations, facts, self_text=_written(context)))
-    return _verify_with_comparisons(analysis, categories, statistics, registry, comments=_peer_comments(context))
+    return _verify_with_comparisons(analysis, categories, statistics, registry, comments=_peer_comments(context),
+                                    check_prose=check_prose)
 
 
 def _verify_with_comparisons(analysis: EmployeeAIAnalysis, categories: dict[str, str],
                              statistics: dict[str, _Statistic], registry: dict[str, _AuthorizedFact], *,
-                             comments: dict[str, tuple[str, str]] | None = None) -> EmployeeAIAnalysis:
+                             comments: dict[str, tuple[str, str]] | None = None,
+                             check_prose: bool = True) -> EmployeeAIAnalysis:
     comments = comments or {}
     texts = [text for text, _author in comments.values()]
 
@@ -711,13 +573,11 @@ def _verify_with_comparisons(analysis: EmployeeAIAnalysis, categories: dict[str,
 
     def quote_failure(section: str, index: int) -> AnalysisGenerationError:
         return AnalysisGenerationError("invalid_analysis_claim", category="verbatim_quote", diagnostic={
-            "section": section, "finding_index": index, "validator": "_verify_with_comparisons", "rule": "verbatim_quote",
-            "reason": f"The text repeats {QUOTE_WORDS} or more consecutive words of a colleague's comment.",
-            "required_fact": "a summary in the model's own words"})
+            "section": section, "finding_index": index, "validator": "_verify_with_comparisons", "rule": "verbatim_quote"})
 
     def validate(item: AnalysisFinding, section: str, index: int) -> AnalysisFinding:
         try:
-            verified = _verify_finding(item, categories, statistics, registry)
+            verified = _verify_finding(item, categories, statistics, registry, check_prose=check_prose)
         except AnalysisGenerationError as error:
             error.diagnostic.update({"section": section, "finding_index": index,
                                      "validator": error.diagnostic.get("validator", "_verify_finding"),
@@ -728,20 +588,18 @@ def _verify_with_comparisons(analysis: EmployeeAIAnalysis, categories: dict[str,
         return verified.model_copy(update={"comment_mentions": mentions(verified.supporting_evidence_ids)})
 
     def validate_theme(theme: AnalysisTheme, index: int) -> AnalysisTheme:
-        def failure(rule: str, reason: str) -> AnalysisGenerationError:
+        def failure(rule: str) -> AnalysisGenerationError:
             return AnalysisGenerationError("invalid_analysis_evidence", category=rule, diagnostic={
-                "section": "themes", "finding_index": index, "validator": "_verify_with_comparisons", "rule": rule,
-                "reason": reason, "required_fact": "observation:peer_comment facts"})
+                "section": "themes", "finding_index": index, "validator": "_verify_with_comparisons", "rule": rule})
         selected = [registry.get(identifier) for identifier in theme.fact_ids]
         if not comments or any(fact is None or fact.kind != "observation:peer_comment" for fact in selected):
-            raise failure("theme_without_comments", "A theme must cite only colleagues' written comments.")
+            raise failure("theme_without_comments")
         if set().union(*(fact.evidence_ids for fact in selected)) != set(theme.supporting_evidence_ids):
-            raise failure("fact_evidence_mismatch", "The theme's evidence does not match its comments.")
-        if re.search(r"\d|%", theme.label):
+            raise failure("fact_evidence_mismatch")
+        if check_prose and re.search(r"\d|%", theme.label):
             raise AnalysisGenerationError("invalid_analysis_claim", category="unverified_explicit_number", diagnostic={
                 "section": "themes", "finding_index": index, "validator": "_verify_with_comparisons",
-                "rule": "unverified_explicit_number", "reason": "Theme labels cannot contain numbers.",
-                "required_fact": "no explicit numbers"})
+                "rule": "unverified_explicit_number"})
         if quotes_comment(theme.label, texts):
             raise quote_failure("themes", index)
         return theme.model_copy(update={"mentions": mentions(theme.supporting_evidence_ids)})
@@ -766,8 +624,7 @@ def _resolve_generated_analysis(analysis: GeneratedAnalysis, registry: dict[str,
         if any(handle not in registry for handle in finding.fact_ids):
             raise AnalysisGenerationError("invalid_analysis_evidence", category="unknown_fact_handle", diagnostic={
                 "section": section, "finding_index": index, "validator": "_resolve_generated_analysis",
-                "rule": "unknown_fact_handle", "reason": "A selected F-handle is absent from this request's authorized registry.",
-                "required_fact": "an F-handle in the captured registry"})
+                "rule": "unknown_fact_handle"})
         selected = [registry[handle] for handle in finding.fact_ids]
         return AnalysisFinding(
             assessment=finding.assessment, reasoning=finding.reasoning,
@@ -779,8 +636,7 @@ def _resolve_generated_analysis(analysis: GeneratedAnalysis, registry: dict[str,
         if any(handle not in registry for handle in theme.fact_ids):
             raise AnalysisGenerationError("invalid_analysis_evidence", category="unknown_fact_handle", diagnostic={
                 "section": "themes", "finding_index": index, "validator": "_resolve_generated_analysis",
-                "rule": "unknown_fact_handle", "reason": "A selected F-handle is absent from this request's authorized registry.",
-                "required_fact": "an F-handle in the captured registry"})
+                "rule": "unknown_fact_handle"})
         selected = [registry[handle] for handle in theme.fact_ids]
         return AnalysisTheme(label=theme.label, tone=theme.tone, fact_ids=[fact.identifier for fact in selected],
                              supporting_evidence_ids=sorted(set().union(*(fact.evidence_ids for fact in selected))))
@@ -808,13 +664,7 @@ def _request_analysis(payload: dict[str, Any], *, correction_category: str | Non
         raise AnalysisGenerationError("analysis_context_too_large")
     messages = [{"role": "developer", "content": instructions}]
     if correction_category is not None:
-        consistency_guidance = (
-            " 'Consistent with' can express compatibility without claiming reviewer uniformity. "
-            "An employee's stated wish to communicate more consistently is a self-reported goal "
-            "and must cite the written self-report fact, not a uniform-rating fact. "
-            "Only claim that reviewers rated consistently when a selected uniform-rating fact supports it; "
-            "do not describe change over time without historical facts."
-            if correction_category == "unsupported_trend_or_consistency" else
+        guidance = (
             " Summarize colleagues' comments in your own words; do not reuse their phrasing or any run of their words."
             if correction_category == "verbatim_quote" else ""
         )
@@ -823,7 +673,7 @@ def _request_analysis(payload: dict[str, Any], *, correction_category: str | Non
             "Produce a fresh response citing only F-handles from the unchanged facts list. "
             "Do not add evidence IDs, numerical claims or unsupported comparisons. "
             "Omit unsupported findings; the overall finding must cite a valid fact."
-            + consistency_guidance
+            + guidance
         )})
     if trace is not None:
         trace.prompt_text = "\n\n".join(message["content"] for message in messages)
@@ -949,7 +799,7 @@ def translate_analysis(analysis: EmployeeAIAnalysis, language: str, *, comments:
 def generate_employee_ai_analysis_from_context(context: EmployeeAnalysisContext, *, job_id: int | None = None,
                                                language: str = "en") -> tuple[EmployeeAIAnalysis, ai_trace.GenerationTrace]:
     """Use only a previously authorized Phase 1 context; caller releases its DB transaction first."""
-    _payload, categories, statistics = _prompt_data(context)
+    categories, statistics = _released_statistics(context)
     registry = _fact_registry(f"employee:{context.campaign_id}:{context.evaluatee_employee_id}", categories,
                               statistics, _employee_observations(context, statistics),
                               _employee_comparison_facts(context, statistics),
@@ -962,9 +812,8 @@ def generate_employee_ai_analysis_from_context(context: EmployeeAnalysisContext,
     return translate_analysis(analysis, language, comments=comments, trace=trace), trace
 
 
-# Added by the backend, not the model, so that it can never be left out. The wording passes the same
-# prose checks as generated text (no peer or self-assessment terms, numbers or rankings), because an
-# approval verifies the saved analysis again.
+# Added by the backend, not the model, so that it can never be left out. The wording still keeps to the
+# rules of generated text (no peer or self-assessment terms, numbers or rankings).
 MAX_REASONING_LENGTH = next(item.max_length for item in AnalysisFinding.model_fields["reasoning"].metadata
                             if getattr(item, "max_length", None))
 OTHERS_WITHHELD_NOTE = ("Evaluations from others are withheld in this review because too few were submitted "
@@ -987,27 +836,27 @@ def _with_data_limitations(analysis: EmployeeAIAnalysis, context: EmployeeAnalys
     return analysis.model_copy(update={"overall_assessment": overall.model_copy(update={"reasoning": reasoning})})
 
 
-def validate_aggregate_ai_analysis(context: AggregateAnalysisContext, analysis: EmployeeAIAnalysis) -> EmployeeAIAnalysis:
+def validate_aggregate_ai_analysis(context: AggregateAnalysisContext, analysis: EmployeeAIAnalysis, *,
+                                   check_prose: bool = True) -> EmployeeAIAnalysis:
     """Validate canonical saved/edited citations against freshly authorized released metrics."""
     categories, statistics = _aggregate_statistics(context)
-    return _verify_aggregate_analysis(context, analysis, categories, statistics)
+    return _verify_aggregate_analysis(context, analysis, categories, statistics, check_prose=check_prose)
 
 
 def _verify_aggregate_analysis(context: AggregateAnalysisContext, analysis: EmployeeAIAnalysis,
-                               categories: dict[str, str], statistics: dict[str, _Statistic]) -> EmployeeAIAnalysis:
+                               categories: dict[str, str], statistics: dict[str, _Statistic], *,
+                               check_prose: bool = True) -> EmployeeAIAnalysis:
     performance = {item.evidence_id for item in context.evidence if item.scope in {"question", "section", "overall"}}
     if not performance.intersection(analysis.overall_assessment.supporting_evidence_ids):
         raise AnalysisGenerationError("invalid_analysis_evidence", category="missing_performance_evidence",
                                       diagnostic={"section": "overall_assessment", "finding_index": 0,
                                                   "validator": "_verify_aggregate_analysis",
-                                                  "rule": "missing_performance_evidence",
-                                                  "reason": "The overall finding selects no released performance evidence.",
-                                                  "required_fact": "released question, section or overall performance fact"})
+                                                  "rule": "missing_performance_evidence"})
     observations = _aggregate_observations(context, statistics)
     facts = _aggregate_comparison_facts(context, statistics)
     registry = _canonical_facts(_fact_registry(
         f"{context.campaign_id}:{context.scope_type}:{context.scope_id}", categories, statistics, observations, facts))
-    return _verify_with_comparisons(analysis, categories, statistics, registry)
+    return _verify_with_comparisons(analysis, categories, statistics, registry, check_prose=check_prose)
 
 
 def generate_aggregate_ai_analysis_from_context(context: AggregateAnalysisContext, *, job_id: int | None = None,

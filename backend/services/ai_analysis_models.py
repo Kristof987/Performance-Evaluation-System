@@ -1,6 +1,5 @@
 """Internal, authorized performance-analysis data contract (not an API response)."""
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -8,21 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 class AnalysisModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-
-class CampaignAnalysisMetadata(AnalysisModel):
-    campaign_id: int
-    campaign_name: str
-    lifecycle_status: Literal["review", "closed"]
-    analyzed_at: datetime
-    normalization: str = "Issued integer ratings mapped to 1-5; ordinal averages are descriptive, not interval measurements."
-
-
-class EvaluationSource(AnalysisModel):
-    filled_form_id: int
-    questionnaire_name: str
-    snapshot_schema_version: int
-    category: Literal["self", "peer"]
 
 
 class EvidenceReference(AnalysisModel):
@@ -53,9 +37,6 @@ class QuantitativeStatistics(AnalysisModel):
     availability: Literal["available", "no_data", "suppressed"]
     answer_count: int | None = None
     average_normalized: float | None = None
-    minimum_normalized: float | None = None
-    maximum_normalized: float | None = None
-    normalized_range: float | None = None
     original_distribution: list[RatingDistributionBin] = []
     evidence_ids: list[str] = []
 
@@ -84,7 +65,6 @@ class SectionStatistics(AnalysisModel):
 class OverallStatistics(AnalysisModel):
     peer: QuantitativeStatistics
     self_evaluation: QuantitativeStatistics
-    weighting: str = "Mean of reportable Section means; standalone ratings are reported at question level only."
 
 
 class EvaluatorCategoryComparison(AnalysisModel):
@@ -103,9 +83,6 @@ class DataQualityWarning(AnalysisModel):
 class EmployeeAnalysisContext(AnalysisModel):
     campaign_id: int
     evaluatee_employee_id: int
-    submitted_evaluation_count: int
-    metadata: CampaignAnalysisMetadata
-    sources: list[EvaluationSource]
     questions: list[QuestionEvidence]
     sections: list[SectionStatistics]
     overall: OverallStatistics

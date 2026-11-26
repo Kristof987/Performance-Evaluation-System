@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
+from services.permissions import permission_names
 from integrations import auth0_management
 from services import workspace_settings_service
 from business_calendar import BUSINESS_TIMEZONE
@@ -80,19 +81,11 @@ def get_auth_me(*, user: models.User, db: Session):
     )
     if roles is None:
         raise HTTPException(status_code=500, detail="Account role configuration is unavailable")
-    permissions = (
-        db.query(models.SystemPermission.name)
-        .join(models.system_role_permissions,
-              models.system_role_permissions.c.permission_id == models.SystemPermission.id)
-        .filter(models.system_role_permissions.c.system_role_id == user.system_role_id)
-        .order_by(models.SystemPermission.name)
-        .all()
-    )
     record_sign_in(user, db)
     employee = user.employee
     return {"id": user.id, "username": user.username, "email": user.email,
             "system_role_id": user.system_role_id, "system_role_name": roles.system_role_name,
-            "permissions": [name for (name,) in permissions],
+            "permissions": sorted(permission_names(user, db)),
             "is_active": user.is_active, "ai_enabled": workspace_settings_service.ai_enabled(db),
             "timezone": BUSINESS_TIMEZONE.key,
             "employee": {"id": employee.id, "full_name": employee.full_name,

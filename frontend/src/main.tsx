@@ -15,8 +15,6 @@ import CompletionStatus from './pages/completion-status/CompletionStatus'
 import CampaignOverviewPage, { ReportsIndexPage } from './pages/reports/CampaignOverviewPage'
 import AllAnswersPage from './pages/reports/AllAnswersPage'
 import AIAnalysisPage from './pages/reports/AIAnalysisPage'
-import QuestionAnalyticsPage from './pages/reports/QuestionAnalyticsPage'
-import { GroupDetailPage, GroupsRolesPage, RoleDetailPage } from './pages/reports/GroupsRolesPage'
 import { EmployeeReportDetailPage, EmployeeReportsPage } from './pages/reports/EmployeeReportsPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import NotFound from './pages/layout/NotFound'
@@ -104,11 +102,6 @@ export default function AppRoutes() {
         <Route path="/reports/campaigns/:campaignId" element={page(['Overview', 'Reports'], <CampaignOverviewRoute />, ACCESS.reports)} />
         <Route path="/reports/campaigns/:campaignId/answers" element={page(['All answers', 'Reports'], <AllAnswersPage />, ACCESS.campaignReports)} />
         <Route path="/reports/campaigns/:campaignId/ai-analysis" element={page(['AI analysis', 'Reports'], <AIAnalysisPage />, ACCESS.campaignReports)} />
-        <Route path="/reports/campaigns/:campaignId/questions" element={page(['Question analytics', 'Reports'], <QuestionAnalyticsPage />, ACCESS.campaignReports)} />
-        <Route path="/reports/campaigns/:campaignId/groups" element={page(['Groups', 'Reports'], <GroupsRolesPage />, ACCESS.reports)} />
-        <Route path="/reports/campaigns/:campaignId/groups/:groupId" element={page(['Group', 'Reports'], <GroupDetailPage />, ACCESS.reports)} />
-        <Route path="/reports/campaigns/:campaignId/roles" element={page(['Roles', 'Reports'], <GroupsRolesPage />, ACCESS.campaignReports)} />
-        <Route path="/reports/campaigns/:campaignId/roles/:roleId" element={page(['Role', 'Reports'], <RoleDetailPage />, ACCESS.campaignReports)} />
         <Route path="/reports/campaigns/:campaignId/employees" element={page(['Employees', 'Reports'], <EmployeeReportsPage />, ACCESS.reports)} />
         <Route path="/reports/campaigns/:campaignId/employees/:employeeId" element={page(['Employee', 'Reports'], <EmployeeReportDetailPage />, ACCESS.reports)} />
         <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />

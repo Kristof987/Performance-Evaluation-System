@@ -5,8 +5,8 @@ import pytest
 from fastapi import HTTPException
 
 from services import answers_service
+from services import permissions as permission_service
 import models
-from services import reporting_service
 from database import SessionLocal
 
 
@@ -26,7 +26,7 @@ PERMISSIONS = {"reports.read", "campaigns.manage"}
 
 @pytest.fixture(autouse=True)
 def permissions(monkeypatch):
-    monkeypatch.setattr(reporting_service, "_has_permission", lambda _actor, _db, permission: permission in PERMISSIONS)
+    monkeypatch.setattr(permission_service, "has_permission", lambda _actor, _db, *names: any(name in PERMISSIONS for name in names))
 
 
 def add(db, item):
@@ -138,7 +138,7 @@ def test_requires_campaign_management_and_an_issued_campaign(db, monkeypatch):
     world.campaign.status = "active"
     db.flush()
     assert answers_service.build_answers_index(world.campaign.id, world.actor, db)["employees"] == []
-    monkeypatch.setattr(reporting_service, "_has_permission", lambda _a, _d, permission: permission == "reports.read")
+    monkeypatch.setattr(permission_service, "has_permission", lambda _a, _d, *names: any(name == "reports.read" for name in names))
     with pytest.raises(HTTPException) as denied:
         answers_service.build_employee_answers(world.campaign.id, world.people[0].id, world.actor, db)
     assert denied.value.status_code == 403

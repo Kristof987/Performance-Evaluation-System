@@ -4,6 +4,7 @@ import pytest
 
 from integrations.llm import openai_provider
 from services import ai_generation_service
+from services import permissions
 from services import ai_workflow_service
 
 
@@ -46,7 +47,7 @@ def test_temperature_only_for_models_that_accept_it(model, has_temperature):
 def test_drafts_are_only_visible_to_people_who_generate_or_approve(monkeypatch):
     draft, approved = SimpleNamespace(status="draft"), SimpleNamespace(status="approved")
     granted: set[str] = set()
-    monkeypatch.setattr(ai_workflow_service, "has_permission", lambda _actor, _db, permission: permission in granted)
+    monkeypatch.setattr(permissions, "has_permission", lambda _actor, _db, *names: any(name in granted for name in names))
 
     assert ai_workflow_service.visible_versions([draft, approved], object(), None) == [approved]
     granted.add(ai_workflow_service.APPROVE)

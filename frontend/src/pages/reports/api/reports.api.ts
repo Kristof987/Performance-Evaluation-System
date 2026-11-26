@@ -1,5 +1,5 @@
 import { authenticatedApiFetch, type AccessTokenGetter } from '../../../auth/authenticated-api';
-import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, EmployeeReportDetail, EmployeeReportsOverview, GroupReportDetail, ReportCampaignOption, ReportQuestions, RolePerspective, WrittenFeedbackResponse } from '../types/reports.types';
+import type { AnswersIndex, EmployeeAnswers, CampaignDashboard, CampaignRatingDistribution, SectionQuestions, EmployeeReportDetail, EmployeeReportsOverview, GroupReportDetail, ReportCampaignOption, ReportQuestions, WrittenFeedbackResponse } from '../types/reports.types';
 
 async function requestReports<T>(getAccessToken: AccessTokenGetter, path: string, signal: AbortSignal, fallback: string): Promise<T> {
   const response = await authenticatedApiFetch(getAccessToken, `/reports${path}`, { signal });
@@ -33,11 +33,8 @@ export function fetchCampaignRatingDistribution(getAccessToken: AccessTokenGette
   return requestReports<CampaignRatingDistribution>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/rating-distribution`, signal, 'Rating distribution could not be loaded.');
 }
 
-export function fetchReportQuestions(getAccessToken: AccessTokenGetter, campaignId: number, scope: { group_id?: number; role_id?: number; employee_id?: number; perspective?: RolePerspective }, evaluationType: 'peer' | 'self', signal: AbortSignal) {
-  const params = new URLSearchParams({ evaluation_type: evaluationType });
-  for (const [key, value] of Object.entries(scope)) {
-    if (value !== undefined) params.set(key, String(value));
-  }
+export function fetchReportQuestions(getAccessToken: AccessTokenGetter, campaignId: number, employeeId: number, evaluationType: 'peer' | 'self', signal: AbortSignal) {
+  const params = new URLSearchParams({ evaluation_type: evaluationType, employee_id: String(employeeId) });
   return requestReports<ReportQuestions>(getAccessToken, `/campaigns/${encodeURIComponent(campaignId)}/questions?${params}`, signal, 'Question analytics could not be loaded.');
 }
 

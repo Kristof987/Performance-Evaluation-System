@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 import models
+from services import permissions as permission_service
 from services import report_dashboard_service
 from services import reporting_service
 from database import SessionLocal
@@ -23,7 +24,7 @@ def db():
 @pytest.fixture
 def permissions(monkeypatch):
     granted = {"reports.read", "campaigns.manage"}
-    monkeypatch.setattr(reporting_service, "_has_permission", lambda _actor, _db, permission: permission in granted)
+    monkeypatch.setattr(permission_service, "has_permission", lambda _actor, _db, *names: any(name in granted for name in names))
     return granted
 
 
@@ -241,7 +242,7 @@ def test_team_lead_employee_benchmarks_stay_inside_led_groups(db, permissions):
     assert [group["id"] for group in result["benchmarks"]["groups"]] == [world.groups[0].id]
 
 
-def test_dashboard_compares_roles_and_rater_calibration(db, permissions):
+def test_dashboard_compares_roles(db, permissions):
     world = World(db)
     support_role = add(db, models.CompanyRole(name=f"Support role {uuid4().hex}"))
     for person in world.people[3:]:
@@ -261,9 +262,6 @@ def test_dashboard_compares_roles_and_rater_calibration(db, permissions):
     assert support["sections"][world.section_b.id] == {"score": 2.0, "availability": "available"}
     assert result["trend"][0]["roles"][support_role.id] == 2.0
     assert result["trend"][1]["role_sections"][world.role.id][world.section_a.id] == 5.0
-    raters = {item["id"]: item for item in result["raters"]}
-    assert raters[world.role.id]["overall"]["score"] == 4.5 and raters[world.role.id]["evaluator_count"] == 3
-    assert raters[support_role.id]["overall"]["score"] == 2.5
 
     questions = report_dashboard_service.build_section_questions(current.id, world.section_a.id, [], world.actor, db, role_ids=[support_role.id])
     assert questions["dimension"] == "roles"
@@ -313,7 +311,7 @@ def test_team_lead_dashboard_covers_only_led_groups_with_company_reference(db, p
     assert [section["score"] for section in result["sections"]] == [5.0, 4.0]
     assert result["benchmark"]["overall"] == {"score": 3.5, "availability": "available"}
     assert {key: cell["score"] for key, cell in result["benchmark"]["sections"].items()} == {world.section_a.id: 4.0, world.section_b.id: 3.0}
-    assert result["roles"] == [] and result["raters"] == []
+    assert result["roles"] == []
     assert world.groups[1].id not in result["trend"][-1]["groups"]
 
 
@@ -373,7 +371,7 @@ def test_team_scores_withhold_a_combination_that_isolates_one_led_group():
     ids = count(1)
 
     def reviews(group_id, evaluatees, score):
-        return [EvaluationSections(next(ids), 1, evaluator, evaluatee, group_id, date(2090, 1, 1), frozenset({7}), {7: score}, {7: frozenset({"q7"})})
+        return [EvaluationSections(next(ids), 1, evaluator, evaluatee, group_id, date(2090, 1, 1), frozenset({7}), {7: score})
                 for evaluatee in evaluatees for evaluator in (1000 + evaluatee, 2000 + evaluatee)]
 
     big, small, other = reviews(10, [1, 2, 3], 4.0), reviews(20, [4], 1.0), reviews(30, [5, 6, 7], 3.0)

@@ -7,6 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 import models
+from services import permissions
 import schemas
 from services import campaign_service, form_service, people_service, reporting_service
 
@@ -669,13 +670,7 @@ def update_campaign_setup(*, campaign_id: int, payload: schemas.CampaignSetupUpd
     """Replace a draft/scheduled configuration in one transaction, without issuing forms."""
     try:
         if payload.memberships:
-            grant = db.query(models.SystemPermission.id).select_from(models.User).join(
-                models.SystemRole, models.SystemRole.id == models.User.system_role_id,
-            ).join(models.system_role_permissions,
-                   models.system_role_permissions.c.system_role_id == models.SystemRole.id).join(
-                models.SystemPermission, models.SystemPermission.id == models.system_role_permissions.c.permission_id,
-            ).filter(models.User.id == manager.id, models.SystemPermission.name == "groups.manage").first()
-            if grant is None:
+            if not permissions.has_permission(manager, db, "groups.manage"):
                 raise HTTPException(status_code=403, detail="Group membership changes require groups.manage")
         campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update().first()
         if campaign is None:

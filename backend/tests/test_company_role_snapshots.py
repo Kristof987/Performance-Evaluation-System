@@ -67,16 +67,15 @@ def assignment(db, campaign_id, group_id, evaluator, evaluatee, *, issued=True):
     return row
 
 
-def evaluation(evaluator_id, evaluatee_id, *, evaluator_role=None, evaluatee_role=None):
-    return scoring.EvaluationSections(1, 1, evaluator_id, evaluatee_id, 1, None, frozenset({7}), {7: 0.5}, {},
-                                      evaluator_role, evaluatee_role)
+def evaluation(evaluator_id, evaluatee_id, *, evaluatee_role=None):
+    return scoring.EvaluationSections(1, 1, evaluator_id, evaluatee_id, 1, None, frozenset({7}), {7: 0.5},
+                                      evaluatee_role)
 
 
 def test_issued_roles_win_over_current_roles():
     current = {10: 1, 20: 1}
-    snapshotted = evaluation(10, 20, evaluator_role=2, evaluatee_role=3)
+    snapshotted = evaluation(10, 20, evaluatee_role=3)
     assert scoring.role_of(snapshotted, current) == 3
-    assert scoring.role_of(snapshotted, current, evaluator=True) == 2
     assert scoring.role_of(evaluation(10, 20), current) == 1
 
 

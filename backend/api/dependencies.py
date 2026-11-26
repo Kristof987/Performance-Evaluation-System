@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 import models
 from database import SessionLocal
 from integrations.auth0 import bearer_scheme, get_verified_auth0_sub
+from services import permissions
 
 
 def get_db():
@@ -54,20 +55,7 @@ def get_current_employee(user: models.User = Depends(get_current_user)) -> model
 def require_permission(*permission_names: str) -> Callable[..., models.User]:
     """Use as Depends(require_permission("campaigns.manage")); several names mean any of them."""
     def check_permission(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)) -> models.User:
-        grant = (
-            db.query(models.SystemPermission.id)
-            .select_from(models.User)
-            .join(models.SystemRole, models.SystemRole.id == models.User.system_role_id)
-            .join(models.system_role_permissions,
-                  models.system_role_permissions.c.system_role_id == models.SystemRole.id)
-            .join(models.SystemPermission,
-                  models.SystemPermission.id == models.system_role_permissions.c.permission_id)
-            .filter(models.User.id == user.id)
-            .filter(models.User.is_active.is_(True))
-            .filter(models.SystemPermission.name.in_(permission_names))
-            .first()
-        )
-        if grant is None:
+        if not permissions.has_permission(user, db, *permission_names):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
 

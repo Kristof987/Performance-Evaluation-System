@@ -1,21 +1,22 @@
 """Authorized, versioned HR review of individual analyses (no employee publication)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 
 from fastapi import HTTPException
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from services import ai_trace
 import models
+from services import permissions
 from services import reporting_service
 from services import workspace_settings_service
 from services.ai_analysis_models import EmployeeAIAnalysis, EmployeeAnalysisContext
 from services.ai_analysis_service import build_employee_analysis_context
 from services.ai_generation_service import (
-    AnalysisGenerationError, _prompt_data, _verify_analysis,
+    AnalysisGenerationError, _released_statistics, _verify_analysis,
     generate_employee_ai_analysis_from_context,
 )
 
@@ -30,15 +31,6 @@ def preferred_language(db: Session, actor: models.User) -> str:
     return preferences.language if preferences is not None else "en"
 
 
-def has_permission(actor: models.User, db: Session, permission: str) -> bool:
-    return db.query(models.User.id).join(models.SystemRole, models.SystemRole.id == models.User.system_role_id).join(
-        models.system_role_permissions, models.system_role_permissions.c.system_role_id == models.SystemRole.id,
-    ).join(models.SystemPermission, models.SystemPermission.id == models.system_role_permissions.c.permission_id).filter(
-        models.User.id == actor.id, models.User.is_active.is_(True),
-        models.SystemPermission.name == permission,
-    ).first() is not None
-
-
 def _audit_employee(db: Session, actor: models.User, record: models.EmployeeAIAnalysis, action: str) -> None:
     employee = db.get(models.Employee, record.evaluatee_employee_id)
     campaign = db.get(models.Campaign, record.campaign_id)
@@ -51,7 +43,7 @@ def _audit_employee(db: Session, actor: models.User, record: models.EmployeeAIAn
 
 def can_see_drafts(actor: models.User, db: Session) -> bool:
     """Unapproved AI text is unreviewed: only people who generate, edit or approve it may read it."""
-    return has_permission(actor, db, GENERATE) or has_permission(actor, db, APPROVE)
+    return permissions.has_permission(actor, db, GENERATE) or permissions.has_permission(actor, db, APPROVE)
 
 
 def visible_versions(records: list, actor: models.User, db: Session) -> list:
@@ -61,13 +53,13 @@ def visible_versions(records: list, actor: models.User, db: Session) -> list:
 def capabilities(actor: models.User, db: Session, *, archived: bool) -> dict:
     """Flags the Reports UI uses to show generate, edit and approve controls."""
     enabled = workspace_settings_service.ai_enabled(db)
-    can_generate = has_permission(actor, db, GENERATE) and not archived
+    can_generate = permissions.has_permission(actor, db, GENERATE) and not archived
     return {"can_manage": can_generate, "can_generate": can_generate and enabled,
-            "can_approve": has_permission(actor, db, APPROVE) and not archived, "ai_enabled": enabled}
+            "can_approve": permissions.has_permission(actor, db, APPROVE) and not archived, "ai_enabled": enabled}
 
 
 def _writable(context: EmployeeAnalysisContext, db: Session, actor: models.User, permission: str = GENERATE) -> None:
-    if not has_permission(actor, db, permission):
+    if not permissions.has_permission(actor, db, permission):
         raise HTTPException(status_code=403, detail="Analysis management permission required")
     campaign = db.query(models.Campaign).filter(models.Campaign.id == context.campaign_id).first()
     if campaign.is_archived:
@@ -188,14 +180,14 @@ def _lock_campaign(db: Session, campaign_id: int) -> None:
     db.query(models.Campaign).filter(models.Campaign.id == campaign_id).populate_existing().with_for_update().one()
 
 
-def _commit_generation_result(db: Session, record, job_id: int | None, worker_token: str | None) -> None:
+def _commit_generation_result(db: Session, record, job_id: int | None) -> None:
     if job_id is not None:
         job = db.query(models.AIAnalysisGenerationJob).filter(
             models.AIAnalysisGenerationJob.id == job_id,
         ).with_for_update().first()
         record_scope = "employee" if isinstance(record, models.EmployeeAIAnalysis) else record.scope_type
         record_id = record.evaluatee_employee_id if record_scope == "employee" else record.scope_id
-        if (job is None or job.status != "running" or job.worker_token != worker_token
+        if (job is None or job.status != "running"
                 or job.campaign_id != record.campaign_id or job.scope_type != record_scope
                 or job.scope_id != record_id or job.requested_by_user_id != record.generated_by_user_id):
             raise HTTPException(status_code=409, detail="Generation job is no longer active")
@@ -205,71 +197,50 @@ def _commit_generation_result(db: Session, record, job_id: int | None, worker_to
         job.status = "succeeded"
         job.analysis_id = record.id
         job.finished_at = datetime.now(timezone.utc)
-        job.lease_expires_at = None
-        job.worker_token = None
     else:
         db.add(record)
     db.commit()
 
 
 def generate(db: Session, campaign_id: int, employee_id: int, *, actor: models.User,
-             job_id: int | None = None, worker_token: str | None = None) -> dict:
+             job_id: int | None = None) -> dict:
+    """One context, one paid call, one Draft; the job queue already allows one generation per employee."""
     context = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
     _writable(context, db, actor)
-    # Phase 1's shared campaign lock must not remain held while waiting on OpenAI.
-    db.rollback()
-    lock_key = int.from_bytes(sha256(f"compass:employee-ai:{campaign_id}:{employee_id}".encode()).digest()[:8], "big", signed=True)
-    with db.get_bind().connect() as lease:
-        acquired = lease.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": lock_key}).scalar()
-        lease.commit()
-        if not acquired:
-            raise HTTPException(status_code=409, detail="Analysis generation is already in progress")
-        try:
-            context = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-            _writable(context, db, actor)
-            previous = db.query(models.EmployeeAIAnalysis.generated_at).filter(
-                models.EmployeeAIAnalysis.campaign_id == campaign_id,
-                models.EmployeeAIAnalysis.evaluatee_employee_id == employee_id,
-                models.EmployeeAIAnalysis.parent_analysis_id.is_(None),
-            ).order_by(models.EmployeeAIAnalysis.generated_at.desc()).first()
-            if previous and previous[0] > datetime.now(timezone.utc) - timedelta(seconds=30):
-                raise HTTPException(status_code=409, detail="Please wait before regenerating this analysis")
-            fingerprint = _fingerprint(db, campaign_id, employee_id)
-            db.rollback()
-            analysis, trace = generate_employee_ai_analysis_from_context(context, job_id=job_id,
-                                                                         language=preferred_language(db, actor))
-            _lock_campaign(db, campaign_id)
-            fresh = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-            _writable(fresh, db, actor)
-            if _fingerprint(db, campaign_id, employee_id) != fingerprint:
-                raise HTTPException(status_code=409, detail="Submitted evaluations changed; generate again")
-            now = datetime.now(timezone.utc)
-            record = models.EmployeeAIAnalysis(
-                campaign_id=campaign_id, evaluatee_employee_id=employee_id, version=_version(db, campaign_id, employee_id),
-                status="draft", is_current_approved=False, analysis=analysis.model_dump(mode="json"),
-                evidence_summary=_evidence_summary(context, analysis), **ai_trace.trace_fields(db, trace),
-                generated_at=now, generated_by_user_id=actor.id, source_fingerprint=fingerprint, schema_version=1,
-            )
-            _audit_employee(db, actor, record, "generated")
-            _commit_generation_result(db, record, job_id, worker_token)
-            db.refresh(record)
-            return _serialize(record, fingerprint)
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            lease.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key})
-            lease.commit()
+    fingerprint = _fingerprint(db, campaign_id, employee_id)
+    language = preferred_language(db, actor)
+    db.rollback()  # Hold no database lock while waiting on the provider.
+    analysis, trace = generate_employee_ai_analysis_from_context(context, job_id=job_id, language=language)
+    try:
+        # Saved with the fingerprint it was built from: if evaluations changed meanwhile, it shows as outdated.
+        _lock_campaign(db, campaign_id)
+        record = models.EmployeeAIAnalysis(
+            campaign_id=campaign_id, evaluatee_employee_id=employee_id, version=_version(db, campaign_id, employee_id),
+            status="draft", is_current_approved=False, analysis=analysis.model_dump(mode="json"),
+            evidence_summary=_evidence_summary(context, analysis), **ai_trace.trace_fields(db, trace),
+            generated_at=datetime.now(timezone.utc), generated_by_user_id=actor.id, source_fingerprint=fingerprint,
+            schema_version=1,
+        )
+        _audit_employee(db, actor, record, "generated")
+        _commit_generation_result(db, record, job_id)
+        db.refresh(record)
+        return _serialize(record, _fingerprint(db, campaign_id, employee_id))
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _locked_context(db: Session, campaign_id: int, employee_id: int, actor: models.User,
+                    permission: str) -> EmployeeAnalysisContext:
+    _lock_campaign(db, campaign_id)
+    context = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
+    _writable(context, db, actor, permission)
+    return context
 
 
 def edit(db: Session, campaign_id: int, employee_id: int, analysis_id: int,
          content: EmployeeAIAnalysis, *, actor: models.User) -> dict:
-    initial = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-    _writable(initial, db, actor)
-    db.rollback()
-    _lock_campaign(db, campaign_id)
-    context = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-    _writable(context, db, actor)
+    context = _locked_context(db, campaign_id, employee_id, actor, GENERATE)
     record = _record(db, campaign_id, employee_id, analysis_id)
     if record.status != "draft":
         raise HTTPException(status_code=409, detail="Approved versions are read-only")
@@ -278,8 +249,9 @@ def edit(db: Session, campaign_id: int, employee_id: int, analysis_id: int,
     fingerprint = _fingerprint(db, campaign_id, employee_id)
     if record.source_fingerprint != fingerprint:
         raise HTTPException(status_code=409, detail="Outdated analysis; regenerate before editing")
-    _payload, categories, statistics = _prompt_data(context)
-    validated = _verify_analysis(content, categories, context, statistics)
+    categories, statistics = _released_statistics(context)
+    # HR's own wording is not held to the model's prose rules; cited facts and the quotation ban still apply.
+    validated = _verify_analysis(content, categories, context, statistics, check_prose=False)
     now = datetime.now(timezone.utc)
     new_record = models.EmployeeAIAnalysis(
         campaign_id=campaign_id, evaluatee_employee_id=employee_id, version=_version(db, campaign_id, employee_id),
@@ -299,12 +271,7 @@ def edit(db: Session, campaign_id: int, employee_id: int, analysis_id: int,
 
 
 def approve(db: Session, campaign_id: int, employee_id: int, analysis_id: int, *, actor: models.User) -> dict:
-    initial = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-    _writable(initial, db, actor, APPROVE)
-    db.rollback()
-    _lock_campaign(db, campaign_id)
-    context = build_employee_analysis_context(db, campaign_id, employee_id, actor=actor)
-    _writable(context, db, actor, APPROVE)
+    context = _locked_context(db, campaign_id, employee_id, actor, APPROVE)
     record = _record(db, campaign_id, employee_id, analysis_id)
     if record.status != "draft":
         raise HTTPException(status_code=409, detail="Only Draft versions can be approved")
@@ -313,8 +280,9 @@ def approve(db: Session, campaign_id: int, employee_id: int, analysis_id: int, *
         raise HTTPException(status_code=409, detail="Outdated analysis; regenerate before approval")
     try:
         content = EmployeeAIAnalysis.model_validate(record.analysis)
-        _payload, categories, statistics = _prompt_data(context)
-        _verify_analysis(content, categories, context, statistics)
+        categories, statistics = _released_statistics(context)
+        # The text was checked when it was written; here only its facts must still hold.
+        _verify_analysis(content, categories, context, statistics, check_prose=False)
     except Exception as error:
         if isinstance(error, (AnalysisGenerationError, ValueError)):
             raise HTTPException(status_code=409, detail="Analysis evidence is no longer valid; regenerate") from None

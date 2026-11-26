@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 import models
@@ -61,30 +61,15 @@ def get_campaign_rating_distribution(
 @router.get("/reports/campaigns/{campaign_id}/questions", response_model=schemas.ReportQuestionsResponse)
 def get_campaign_report_questions(
     campaign_id: int,
-    group_id: int | None = Query(default=None),
-    role_id: int | None = Query(default=None),
-    employee_id: int | None = Query(default=None),
-    perspective: str = Query(default="evaluatee"),
+    employee_id: int = Query(gt=0),
     evaluation_type: Literal["peer", "self"] = Query(default="peer"),
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
 ):
-    if sum(value is not None for value in (group_id, role_id, employee_id)) > 1:
-        raise HTTPException(status_code=400, detail="Select one Reports scope at a time")
-    if perspective not in {"evaluatee", "evaluator"} or (perspective == "evaluator" and role_id is None):
-        raise HTTPException(status_code=400, detail="Invalid question analytics perspective")
-    # Team leads may explore questions for a group they lead or one of its employees only.
-    if employee_id is not None:
-        reporting_service.require_team_employee(campaign_id, employee_id, actor, db)
-    elif group_id is not None:
-        reporting_service.require_team_group(campaign_id, group_id, actor, db)
-    else:
-        reporting_service.enter_report_scope(actor, db)
-        if reporting_service._team_groups.get() is not None:
-            raise HTTPException(status_code=403, detail="Campaign-wide question analytics require full report access")
+    # Team leads may explore the questions of an employee in a group they lead only.
+    reporting_service.require_team_employee(campaign_id, employee_id, actor, db)
     return question_analytics_service.build_question_report(
-        campaign_id, actor, db, group_id=group_id, role_id=role_id, employee_id=employee_id,
-        perspective=perspective, evaluation_type=evaluation_type,
+        campaign_id, actor, db, employee_id=employee_id, evaluation_type=evaluation_type,
     )
 
 
@@ -123,16 +108,6 @@ def get_employee_answers(
     return answers_service.build_employee_answers(campaign_id, employee_id, actor, db)
 
 
-@router.get("/reports/campaigns/{campaign_id}/groups")
-def get_campaign_report_groups(
-    campaign_id: int,
-    db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read", "reports.read_team")),
-):
-    reporting_service.enter_report_scope(actor, db)
-    return reporting_service.build_groups_overview(campaign_id, actor, db)
-
-
 @router.get("/reports/campaigns/{campaign_id}/groups/{group_id}")
 def get_campaign_report_group_detail(
     campaign_id: int,
@@ -142,27 +117,6 @@ def get_campaign_report_group_detail(
 ):
     reporting_service.require_team_group(campaign_id, group_id, actor, db)
     return reporting_service.build_group_detail(campaign_id, group_id, actor, db)
-
-
-@router.get("/reports/campaigns/{campaign_id}/roles")
-def get_campaign_report_roles(
-    campaign_id: int,
-    perspective: str = Query(default="evaluatee"),
-    db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
-):
-    return reporting_service.build_roles_overview(campaign_id, actor, db, perspective)
-
-
-@router.get("/reports/campaigns/{campaign_id}/roles/{role_id}")
-def get_campaign_report_role_detail(
-    campaign_id: int,
-    role_id: int,
-    perspective: str = Query(default="evaluatee"),
-    db: Session = Depends(get_db),
-    actor: models.User = Depends(require_permission("reports.read")),
-):
-    return reporting_service.build_role_detail(campaign_id, role_id, actor, db, perspective)
 
 
 @router.get("/reports/campaigns/{campaign_id}/employees")

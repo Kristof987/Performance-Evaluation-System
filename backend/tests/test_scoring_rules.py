@@ -22,7 +22,7 @@ def review(evaluator, evaluatee, score, *, group=1):
     return scoring.EvaluationSections(
         assignment_id=next(_ids), campaign_id=CAMPAIGN, evaluator_id=evaluator, evaluatee_id=evaluatee,
         company_group_id=group, finish_date=date(2026, 1, 1), section_ids=frozenset({SECTION}),
-        sections={SECTION: score}, question_keys={SECTION: frozenset({"q1"})})
+        sections={SECTION: score})
 
 
 @pytest.mark.parametrize(("answer", "low", "high", "expected"), [

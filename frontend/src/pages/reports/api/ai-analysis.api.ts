@@ -14,7 +14,6 @@ const generationErrors: Record<string, string> = {
   invalid_analysis_evidence: 'The AI response cited unsupported evidence. No analysis was saved.',
   invalid_analysis_claim: 'The AI response contained an unsupported claim. No analysis was saved.',
   worker_interrupted: 'Generation was interrupted before completion. No analysis was saved; retry explicitly.',
-  generation_queue_expired: 'Generation could not be started in time. Retry explicitly.',
   authorization_changed: 'Access changed before generation completed. No analysis was saved.',
   scope_unavailable: 'The report scope is no longer available. No analysis was saved.',
   generation_conflict: 'The report changed or generation could not be completed. Review the report before retrying.',

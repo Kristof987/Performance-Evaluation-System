@@ -71,7 +71,6 @@ export type GroupReportDetail = {
   notes: Record<string, string>;
 };
 
-export type RolePerspective = 'evaluatee' | 'evaluator';
 
 export type EmployeeSelfEvaluationSummary = {
   status: string;
@@ -187,7 +186,6 @@ export type DashboardTrendPoint = {
   role_sections: Record<string, Record<string, number | null>>;
 };
 /** How evaluators in one company role rate their colleagues, for calibration. */
-export type DashboardRater = { id: number; name: string; evaluator_count: number; overall: { score: number | null; availability: ScoreAvailability } };
 export type CampaignDashboard = {
   campaign: ReportCampaignOption;
   previous_campaign: ReportCampaignOption | null;
@@ -199,7 +197,6 @@ export type CampaignDashboard = {
   benchmark?: { overall: { score: number | null; availability: ScoreAvailability }; sections: Record<string, { score: number | null; availability: ScoreAvailability }> } | null;
   /** Evaluated employees' company roles, in the same shape as groups. */
   roles: DashboardGroup[];
-  raters: DashboardRater[];
   trend: DashboardTrendPoint[];
 };
 export type SectionQuestionCell = { availability: ScoreAvailability; response_count: number | null; average: number | null; distribution?: Array<{ label: string; count: number; percentage: number }> | null };

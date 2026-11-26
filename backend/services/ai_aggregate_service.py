@@ -71,7 +71,7 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
         ).first()
         if configured is None:
             raise HTTPException(status_code=404, detail="Campaign evaluatee-role report not found")
-        report = reporting_service.build_role_detail(campaign_id, scope_id, actor, db, "evaluatee")
+        report = reporting_service.build_role_detail(campaign_id, scope_id, actor, db)
         label = report["role"]["name"]
         roles = reporting_service.users_by_id(db)
         cohort = {employee_id for employee_id, (_, role) in roles.items() if role.id == scope_id}

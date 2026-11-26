@@ -4,8 +4,8 @@ from uuid import uuid4
 import pytest
 
 from services import ai_generation_service
+from services import permissions as permission_service
 import models
-from services import reporting_service
 from services.ai_analysis_models import (EmployeeAIAnalysis, GeneratedAnalysis, GeneratedFinding, GeneratedTheme,
                                 TranslatedAnalysis, TranslatedFinding)
 from services.ai_analysis_service import build_employee_analysis_context, redact_names
@@ -25,7 +25,7 @@ def db():
 
 @pytest.fixture(autouse=True)
 def permissions(monkeypatch):
-    monkeypatch.setattr(reporting_service, "_has_permission", lambda _actor, _db, permission: permission in {"reports.read", "campaigns.manage"})
+    monkeypatch.setattr(permission_service, "has_permission", lambda _actor, _db, *names: any(name in {"reports.read", "campaigns.manage"} for name in names))
 
 
 def add(db, item):

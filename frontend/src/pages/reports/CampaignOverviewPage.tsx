@@ -6,7 +6,7 @@ import ReportsEmptyState from './components/ReportsEmptyState';
 import { DimensionSwitch, GroupToggles, MAX_COMPARED_GROUPS, SectionTabs } from './components/ReportFilterBar';
 import GroupPanel from './components/GroupPanel';
 import { GROUP_NOUN, reportScopeTitle, ROLE_NOUN, type Noun } from './reports.utils';
-import { ChartCard, CompletionDonut, CsvButton, Delta, DistributionBars, GapBars, GroupedBars, Heatmap, MeterRows, ScoreBars, TrendLines, type HeatmapRow, type TrendSeries } from './charts/DashboardCharts';
+import { ChartCard, CompletionDonut, CsvButton, Delta, DistributionBars, GroupedBars, Heatmap, MeterRows, ScoreBars, TrendLines, type HeatmapRow, type TrendSeries } from './charts/DashboardCharts';
 import SectionQuestionList from './charts/SectionQuestionList';
 import { scoreColor, SERIES_COUNT, seriesColor, useChartTheme, type ChartTheme } from './charts/chartTheme';
 import ReportsLayout from './ReportsLayout';
@@ -238,7 +238,6 @@ function CampaignView({ theme, data, dim, cohorts, colorOf, distribution, onSect
       </ChartCard>}
     </div>
 
-    {dim.key === 'roles' && <RaterCalibration theme={theme} data={data} />}
     {trend && <ChartCard title="Over time" subtitle="Peer rating in recent reportable campaigns · click a point to open that campaign">
       <TrendLines theme={theme} points={data.trend.map((point) => ({ campaignId: point.campaign.id, label: shortCampaign(point.campaign), fullName: point.campaign.name, overall: point.overall }))} series={[{ key: 'overall', name: 'Average peer rating', color: theme.primary }]} onSelect={onTrend} />
     </ChartCard>}
@@ -311,21 +310,6 @@ function SectionView({ theme, data, dim, cohorts, sectionId, groups, colorOf, di
       <TrendLines theme={theme} points={trendPoints} series={trendSeries} onSelect={onTrend} />
     </ChartCard>}
   </>;
-}
-
-/** How strictly each evaluator role rates colleagues: its average given rating against the campaign average. */
-function RaterCalibration({ theme, data }: { theme: ChartTheme; data: CampaignDashboard }) {
-  const overall = available(data.overall);
-  const rows = (data.raters ?? []).filter((rater) => available(rater.overall) !== null);
-  const hidden = (data.raters ?? []).length - rows.length;
-  // One evaluator role has nothing to be compared with.
-  if (overall === null || (data.raters ?? []).length < 2) return null;
-  return <ChartCard title="Rater calibration" subtitle={`Average rating each evaluator role gives, against the campaign average (${overall.toFixed(2)}) · below zero = stricter, above = more generous${hidden ? ` · ${hidden} hidden by the privacy threshold` : ''}`}
-    actions={rows.length > 0 ? <CsvButton name={`${data.campaign.name} rater calibration`} rows={() => [['Evaluator role', 'Evaluators', 'Average given', 'Campaign average', 'Difference'], ...rows.map((rater) => [rater.name, rater.evaluator_count, rater.overall.score!.toFixed(2), overall.toFixed(2), (rater.overall.score! - overall).toFixed(2)])]} /> : undefined}>
-    {rows.length ? <GapBars theme={theme} rows={rows.map((rater) => ({ id: rater.id, name: rater.name, self: rater.overall.score!, peer: overall }))} labels={{ self: 'Average given', peer: 'Campaign average', gap: 'Difference' }} />
-      : <p className="reports-chart-notice">No evaluator role has enough reviewers to be shown.</p>}
-    <p className="reports-chart-footnote">A role that rates much lower or higher than the others shifts the scores of the people it reviews; consider it when comparing results.</p>
-  </ChartCard>;
 }
 
 /** For a group leader, the whole campaign as an extra reference row; nothing for HR, whose totals already are the campaign. */

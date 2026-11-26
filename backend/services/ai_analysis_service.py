@@ -10,7 +10,6 @@ reports access, campaign/evaluatee scope, and the same suppression rules.
 import hashlib
 import re
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
 from statistics import mean
 
 from fastapi import HTTPException
@@ -21,8 +20,8 @@ from services import question_analytics_service
 from services import reporting_service
 from services import section_scoring_service
 from services.ai_analysis_models import (
-    CampaignAnalysisMetadata, DataQualityWarning, EmployeeAnalysisContext,
-    EvaluationSource, EvaluatorCategoryComparison, EvidenceReference,
+    DataQualityWarning, EmployeeAnalysisContext,
+    EvaluatorCategoryComparison, EvidenceReference,
     OverallStatistics, QualitativeEvidence, QuantitativeStatistics,
     QuestionEvidence, RatingDistributionBin, SectionStatistics,
 )
@@ -112,8 +111,6 @@ def _statistics(observations: list[tuple[int, float, str]], *, minimum: int = 1)
     return QuantitativeStatistics(
         availability="available", answer_count=len(observations),
         average_normalized=round(mean(scores), 2),
-        minimum_normalized=round(min(scores), 2), maximum_normalized=round(max(scores), 2),
-        normalized_range=round(max(scores) - min(scores), 2) if len(scores) >= 3 else None,
         original_distribution=[RatingDistributionBin(original_value=value, count=count) for value, count in sorted(counts.items())],
         evidence_ids=sorted({item[2] for item in observations}),
     )
@@ -146,7 +143,6 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
         raise HTTPException(status_code=404, detail="Employee is not part of this campaign report")
 
     warnings: list[DataQualityWarning] = []
-    sources: list[EvaluationSource] = []
     scored = []
     definitions: dict[str, dict] = {}
     observations: dict[tuple[str, str], list[tuple[int, float, str]]] = defaultdict(list)
@@ -156,7 +152,6 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
     section_refs: dict[tuple[int, str], set[str]] = defaultdict(set)
     evaluator_by_form: dict[int, int] = {}
     latest_section_form: dict[tuple[int, str, int], tuple[object, int]] = {}
-    structures: set[tuple[str, ...]] = set()
     peer_text: list[tuple[EvidenceReference, str, int]] = []
     for assignment, status in rows:
         # Unlike status_key, a finish date alone does not prove submission.
@@ -165,37 +160,20 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
             continue
         try:
             issued = _issued_questions(assignment.form_snapshot)
-        except ValueError as error:
-            warnings.append(DataQualityWarning(code=str(error), message="A submitted evaluation has no usable issued questionnaire snapshot."))
+        except ValueError:
             continue
         if not isinstance(assignment.answers, list):
-            warnings.append(DataQualityWarning(code="malformed_answers", message="A submitted evaluation has malformed answers."))
             continue
         category = "self" if assignment.evaluator_id == employee_id else "peer"
-        snapshot = assignment.form_snapshot
-        form_name = snapshot.get("form_name")
-        sources.append(EvaluationSource(filled_form_id=assignment.id, questionnaire_name=form_name if isinstance(form_name, str) and form_name.strip() else "Issued questionnaire",
-                                        snapshot_schema_version=2, category=category))
         evaluator_by_form[assignment.id] = assignment.evaluator_id
         answers, duplicates = _answers(assignment.answers)
-        structure = []
-        form_sections: dict[int, list[float]] = defaultdict(list)
-        form_question_keys: dict[int, set[str]] = defaultdict(set)
         for question, section_id, section_name in issued:
             if section_id is not None:
-                if section_id in section_names and section_names[section_id] != section_name:
-                    warnings.append(DataQualityWarning(code="different_section_names", message="Issued Section names differ between questionnaires."))
                 section_names.setdefault(section_id, section_name)
-            if (question.get("type") in section_scoring_service.RATING_TYPES
-                    and question.get("scale_direction", "higher_is_better") != "higher_is_better"):
-                warnings.append(DataQualityWarning(code="unsupported_scale_direction", message="A rating with an unsupported scale direction was excluded."))
-                continue
             definition = question_analytics_service._definition(question, section_id)
             if definition is None:
-                warnings.append(DataQualityWarning(code="unsupported_question", message="An issued question cannot be interpreted for analysis."))
                 continue
             key, metadata = definition
-            structure.append(key)
             definitions.setdefault(key, {**metadata, "section_name": section_name,
                                          "min_label": question.get("min_label") if isinstance(question.get("min_label"), str) else None,
                                          "max_label": question.get("max_label") if isinstance(question.get("max_label"), str) else None})
@@ -212,7 +190,6 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
                 normalized = (section_scoring_service.normalize_rating(value, metadata["scale_min"], metadata["scale_max"])
                               if type(value) is int else None)
                 if normalized is None:
-                    warnings.append(DataQualityWarning(code="invalid_rating", message="An invalid submitted rating was excluded."))
                     continue
                 observations[(key, category)].append((value, normalized, evidence_id))
                 if category == "self":
@@ -220,22 +197,16 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
                     reference.normalized_value = round(normalized, 2)
                 references[evidence_id] = reference
                 if section_id is not None:
-                    form_sections[section_id].append(normalized)
-                    form_question_keys[section_id].add(key)
                     section_refs[(section_id, category)].add(evidence_id)
             elif metadata["category"] == "text" and isinstance(value, str) and value.strip() and category == "self":
                 references[evidence_id] = reference
                 text_evidence.append(QualitativeEvidence(reference=reference, response_text=value))
             elif metadata["category"] == "text" and isinstance(value, str) and value.strip() and category == "peer":
                 peer_text.append((reference, value.strip(), assignment.evaluator_id))
-        structures.add(tuple(sorted(structure)))
-        scored.append(section_scoring_service.EvaluationSections(
-            assignment.id, campaign_id, assignment.evaluator_id, employee_id, assignment.company_group_id,
-            assignment.finish_date, frozenset(section_id for _, section_id, _ in issued if section_id is not None),
-            {section_id: mean(values) for section_id, values in form_sections.items()},
-            {section_id: frozenset(keys) for section_id, keys in form_question_keys.items()},
-        ))
-        for section_id in form_sections:
+        # Section scores come from the same scoring as Reports; this loop only collects the evidence behind them.
+        evaluation = section_scoring_service.score_evaluation(assignment, status_name=status)
+        scored.append(evaluation)
+        for section_id in evaluation.sections:
             key = (section_id, category, assignment.evaluator_id)
             candidate = (assignment.finish_date, assignment.id)
             if key not in latest_section_form or candidate > latest_section_form[key]:
@@ -254,10 +225,6 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
                 reference=reference, response_text=redact_names(text[:MAX_COMMENT_CHARACTERS], employee_name, colleagues),
                 author_key=hashlib.sha256(f"{campaign_id}:{author}".encode()).hexdigest()[:16]))
 
-    if len(structures) > 1:
-        warnings.append(DataQualityWarning(code="different_questionnaires", message="Issued questionnaires contain different question structures; only matching questions are aggregated."))
-    if not sources:
-        warnings.append(DataQualityWarning(code="no_submitted_evaluations", message="No submitted evaluation has a valid issued snapshot."))
     results = section_scoring_service.employee_scores(scored, campaign_id, employee_id)
     released_peer_keys = {item["key"] for item in question_analytics_service.build_question_report(
         campaign_id, actor, db, employee_id=employee_id, evaluation_type="peer")["questions"]
@@ -305,21 +272,13 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
     self_ids = {ref for section in sections if section.self_evaluation.availability == "available" for ref in section.self_evaluation.evidence_ids}
     overall = OverallStatistics(peer=_section_stat(results.overall_peer, peer_ids),
                                 self_evaluation=_section_stat(results.overall_self, self_ids))
-    if not any(question.peer.availability == "available" or question.self_evaluation.availability == "available" for question in questions):
-        warnings.append(DataQualityWarning(code="missing_quantitative_data", message="No reportable quantitative responses are available."))
-    if not text_evidence:
-        warnings.append(DataQualityWarning(code="no_qualitative_feedback", message="No written feedback is available."))
     if peer_text and not peer_text_released:
         warnings.append(DataQualityWarning(code="peer_text_withheld", message="Colleagues' written comments are left out: fewer than two colleagues wrote one."))
     if any(question.peer.availability == "suppressed" for question in questions) or any(section.peer.availability == "suppressed" for section in sections):
         warnings.append(DataQualityWarning(code="insufficient_peer_reviewers", message="Peer results with fewer than two distinct reviewers are suppressed."))
     visible_evidence = released_ids | {item.reference.evidence_id for item in text_evidence}
-    visible_forms = {references[key].filled_form_id for key in visible_evidence}
     return EmployeeAnalysisContext(
-        campaign_id=campaign_id, evaluatee_employee_id=employee_id, submitted_evaluation_count=len(sources),
-        metadata=CampaignAnalysisMetadata(campaign_id=campaign_id, campaign_name=campaign.name,
-                                          lifecycle_status=campaign.status, analyzed_at=datetime.now(timezone.utc)),
-        sources=[source for source in sources if source.category == "self" or source.filled_form_id in visible_forms],
+        campaign_id=campaign_id, evaluatee_employee_id=employee_id,
         questions=questions, sections=sections, overall=overall, comparisons=comparisons,
         qualitative_evidence=text_evidence,
         evidence_references=[references[key] for key in sorted(visible_evidence)],

@@ -1,15 +1,14 @@
-"""Durable, subject-scoped AI generation queue; browser navigation cannot cancel work.
+"""AI generation runs in a background job, so leaving the page cannot cancel a paid request.
 
-Multiple backend processes may run workers: SKIP LOCKED claims exactly one queued
-job, while a partial unique index prevents a second active job per subject. A
-running job is never replayed after a crash: it fails after its lease expires,
-avoiding another paid request whose first outcome may be unknown.
+The backend runs as one process with one worker thread: jobs are taken one at a time, and a
+partial unique index allows only one queued or running job per subject. A job that was running
+when the process stopped is marked failed at the next start instead of being sent again, because
+the outcome of its paid request is unknown.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import logging
 from threading import Event, Thread
-from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -26,8 +25,7 @@ from database import SessionLocal
 
 
 logger = logging.getLogger(__name__)
-_RUN_LEASE = timedelta(minutes=10)  # Two bounded provider calls plus DB construction.
-_QUEUE_LIMIT = timedelta(minutes=30)
+ACTIVE = ("queued", "running")
 
 
 def _subject_query(db: Session, campaign_id: int, scope_type: str, scope_id: int | None):
@@ -40,20 +38,17 @@ def _subject_query(db: Session, campaign_id: int, scope_type: str, scope_id: int
     )
 
 
-def _authorize(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
-               actor: models.User, *, write: bool) -> None:
+def _check_can_generate(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, actor: models.User) -> None:
     if scope_type == "employee":
         context = build_employee_analysis_context(db, campaign_id, scope_id, actor=actor)
-        if write:
-            _writable(context, db, actor)
-            if not context.evidence_references:
-                raise HTTPException(status_code=422, detail="insufficient_analysis_data")
+        _writable(context, db, actor)
+        has_evidence = bool(context.evidence_references)
     else:
         context = aggregate_context(db, campaign_id, scope_type, scope_id, actor)
-        if write:
-            aggregate_writable(db, campaign_id, actor)
-            if not context.evidence:
-                raise HTTPException(status_code=422, detail="insufficient_analysis_data")
+        aggregate_writable(db, campaign_id, actor)
+        has_evidence = bool(context.evidence)
+    if not has_evidence:
+        raise HTTPException(status_code=422, detail="insufficient_analysis_data")
 
 
 def _serialize(job: models.AIAnalysisGenerationJob) -> dict:
@@ -64,12 +59,10 @@ def _serialize(job: models.AIAnalysisGenerationJob) -> dict:
 
 def start(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, *, actor: models.User) -> dict:
     _subject_query(db, campaign_id, scope_type, scope_id)
-    _authorize(db, campaign_id, scope_type, scope_id, actor, write=True)
+    _check_can_generate(db, campaign_id, scope_type, scope_id, actor)
     workspace_settings_service.require_ai_enabled(db)
-    existing = _subject_query(db, campaign_id, scope_type, scope_id).filter(
-        models.AIAnalysisGenerationJob.status.in_(("queued", "running")),
-    ).first()
-    if existing:
+    active = _subject_query(db, campaign_id, scope_type, scope_id).filter(models.AIAnalysisGenerationJob.status.in_(ACTIVE))
+    if (existing := active.first()) is not None:
         return _serialize(existing)
     job = models.AIAnalysisGenerationJob(
         campaign_id=campaign_id, scope_type=scope_type, scope_id=scope_id,
@@ -78,31 +71,18 @@ def start(db: Session, campaign_id: int, scope_type: str, scope_id: int | None, 
     db.add(job)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError:  # A second click raced the first one: show the job that won.
         db.rollback()
-        existing = _subject_query(db, campaign_id, scope_type, scope_id).filter(
-            models.AIAnalysisGenerationJob.status.in_(("queued", "running")),
-        ).first()
-        if existing is None:
-            raise
-        return _serialize(existing)
+        return _serialize(active.one())
     db.refresh(job)
     return _serialize(job)
 
 
 def status(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
            *, actor: models.User, job_id: int | None = None) -> dict | None:
+    """Polled every few seconds; the route has already checked who may see this subject."""
+    reporting_service.require_reports_access(campaign_id, actor, db)
     query = _subject_query(db, campaign_id, scope_type, scope_id)
-    try:
-        _authorize(db, campaign_id, scope_type, scope_id, actor, write=False)
-    except HTTPException as error:
-        # An assigned group/role can be removed after a job was accepted. Only
-        # its already-persisted subject job remains visible to Reports readers.
-        if error.status_code != 404 or scope_type not in {"group", "role"}:
-            raise
-        reporting_service.require_reports_access(campaign_id, actor, db)
-        if query.first() is None:
-            raise error
     job = (query.filter(models.AIAnalysisGenerationJob.id == job_id).first() if job_id is not None
            else query.order_by(models.AIAnalysisGenerationJob.id.desc()).first())
     if job_id is not None and job is None:
@@ -110,110 +90,83 @@ def status(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
     return _serialize(job) if job else None
 
 
-def _expire(db: Session, now: datetime) -> None:
-    stale = db.query(models.AIAnalysisGenerationJob).filter(
-        ((models.AIAnalysisGenerationJob.status == "running") &
-         ((models.AIAnalysisGenerationJob.lease_expires_at < now) |
-          models.AIAnalysisGenerationJob.lease_expires_at.is_(None))) |
-        ((models.AIAnalysisGenerationJob.status == "queued") &
-         (models.AIAnalysisGenerationJob.created_at < now - _QUEUE_LIMIT)),
-    ).with_for_update(skip_locked=True).all()
-    for job in stale:
-        job.error_code = "worker_interrupted" if job.status == "running" else "generation_queue_expired"
+def _finish(db: Session, job_id: int, error_code: str) -> None:
+    job = db.get(models.AIAnalysisGenerationJob, job_id)
+    if job is not None and job.status == "running":  # A saved result has already marked it succeeded.
         job.status = "failed"
-        job.finished_at = now
-        job.worker_token = None
-        job.lease_expires_at = None
-    db.commit()
-
-
-def _claim(db: Session) -> tuple[int, str] | None:
-    job = db.query(models.AIAnalysisGenerationJob).filter(
-        models.AIAnalysisGenerationJob.status == "queued",
-    ).order_by(models.AIAnalysisGenerationJob.id).with_for_update(skip_locked=True).first()
-    if job is None:
-        db.rollback()
-        return None
-    token = str(uuid4())
-    now = datetime.now(timezone.utc)
-    job.status = "running"
-    job.started_at = now
-    job.lease_expires_at = now + _RUN_LEASE
-    job.worker_token = token
-    job_id = job.id
-    db.commit()
-    return job_id, token
-
-
-def _fail(db: Session, job_id: int, token: str, code: str) -> None:
-    job = db.query(models.AIAnalysisGenerationJob).filter(
-        models.AIAnalysisGenerationJob.id == job_id,
-    ).with_for_update().first()
-    if job is not None and job.status == "running" and job.worker_token == token:
-        job.status = "failed"
-        job.error_code = code
+        job.error_code = error_code
         job.finished_at = datetime.now(timezone.utc)
-        job.lease_expires_at = None
-        job.worker_token = None
         db.commit()
-    else:
-        db.rollback()  # A successful result and its job state may already have committed.
 
 
-def _execute(job_id: int, token: str) -> None:
+def _error_code(error: Exception) -> str:
+    if isinstance(error, AnalysisGenerationError):
+        return error.code
+    if isinstance(error, HTTPException):
+        return {403: "authorization_changed", 404: "scope_unavailable", 409: "generation_conflict",
+                422: "insufficient_analysis_data"}.get(error.status_code, "analysis_generation_failed")
+    return "analysis_generation_failed"
+
+
+def _execute(job_id: int) -> None:
     db = SessionLocal()
     try:
         job = db.get(models.AIAnalysisGenerationJob, job_id)
-        if job is None or job.status != "running" or job.worker_token != token:
-            return
         actor = db.get(models.User, job.requested_by_user_id)
         if actor is None:
             raise HTTPException(status_code=403, detail="Requesting user is no longer available")
         settings = workspace_settings_service.get_settings(db)
-        if not settings.ai_enabled:
-            # The job was queued before AI features were switched off.
-            db.rollback()
-            _fail(db, job_id, token, "analysis_disabled")
-            return
+        if not settings.ai_enabled:  # Switched off after the job was queued.
+            raise AnalysisGenerationError("analysis_disabled")
         with model_override(settings.ai_model):
             if job.scope_type == "employee":
-                generate_employee(db, job.campaign_id, job.scope_id, actor=actor, job_id=job_id, worker_token=token)
+                generate_employee(db, job.campaign_id, job.scope_id, actor=actor, job_id=job_id)
             else:
-                generate_aggregate(db, job.campaign_id, job.scope_type, job.scope_id,
-                                   actor=actor, job_id=job_id, worker_token=token)
-    except AnalysisGenerationError as error:
+                generate_aggregate(db, job.campaign_id, job.scope_type, job.scope_id, actor=actor, job_id=job_id)
+    except Exception as error:
         db.rollback()
-        _fail(db, job_id, token, error.code if error.code in {
-            "analysis_timeout", "analysis_rate_limited", "analysis_provider_unavailable",
-            "invalid_analysis_output", "invalid_analysis_evidence", "invalid_analysis_claim",
-            "analysis_refused_or_empty", "analysis_not_configured", "invalid_analysis_configuration",
-            "analysis_context_too_large", "insufficient_analysis_data", "invalid_analysis_context",
-        } else "analysis_generation_failed")
-    except HTTPException as error:
-        db.rollback()
-        _fail(db, job_id, token, {403: "authorization_changed", 404: "scope_unavailable",
-                                  409: "generation_conflict", 422: "insufficient_analysis_data"}.get(error.status_code,
-                                                                                                 "analysis_generation_failed"))
-    except Exception:
-        db.rollback()
-        logger.warning("AI generation worker failed: category=unexpected_error")
-        _fail(db, job_id, token, "analysis_generation_failed")
+        if not isinstance(error, (AnalysisGenerationError, HTTPException)):
+            logger.warning("AI generation worker failed: category=unexpected_error")
+        _finish(db, job_id, _error_code(error))
     finally:
         db.close()
 
 
+def _next_job(db: Session) -> int | None:
+    job = db.query(models.AIAnalysisGenerationJob).filter(
+        models.AIAnalysisGenerationJob.status == "queued").order_by(models.AIAnalysisGenerationJob.id).first()
+    if job is None:
+        db.rollback()
+        return None
+    job.status = "running"
+    job.started_at = datetime.now(timezone.utc)
+    db.commit()
+    return job.id
+
+
+def _recover_interrupted() -> None:
+    """A job left running by a stopped process is failed, never sent to the provider twice."""
+    with SessionLocal() as db:
+        db.query(models.AIAnalysisGenerationJob).filter(models.AIAnalysisGenerationJob.status == "running").update(
+            {"status": "failed", "error_code": "worker_interrupted", "finished_at": datetime.now(timezone.utc)})
+        db.commit()
+
+
 def _loop(stop: Event) -> None:
+    try:
+        _recover_interrupted()
+    except Exception:
+        logger.warning("AI generation worker recovery failed: category=database_unavailable")
     while not stop.is_set():
-        claimed = None
+        job_id = None
         try:
             with SessionLocal() as db:
-                _expire(db, datetime.now(timezone.utc))
-                claimed = _claim(db)
-            if claimed:
-                _execute(*claimed)
+                job_id = _next_job(db)
+            if job_id is not None:
+                _execute(job_id)
         except Exception:
             logger.warning("AI generation worker loop failed: category=database_unavailable")
-        if not claimed:
+        if job_id is None:
             stop.wait(2)
 
 
