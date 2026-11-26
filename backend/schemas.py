@@ -190,9 +190,6 @@ class PreferencesUpdate(BaseModel):
     theme: Literal["system", "light", "dark"] = "system"
     language: Literal["en", "hu"] = "en"
     date_format: Literal["locale", "iso"] = "locale"
-    notify_new_assignment: bool = True
-    notify_results_available: bool = True
-    notify_campaign_status: bool = True
 
 
 class PreferencesResponse(PreferencesUpdate):

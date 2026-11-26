@@ -81,10 +81,10 @@ export default function SettingsPage() {
           {!workspace && error && <InlineMessage tone="error">{error}</InlineMessage>}
           {!workspace && profile && section === 'profile' && <ProfileSettings profile={profile} />}
           {!workspace && profile && section === 'security' && <SecuritySettings />}
-          {!workspace && profile && (section === 'notifications' || section === 'appearance') && (
+          {!workspace && profile && section === 'appearance' && (
             preferenceState.loading ? <LoadingState variant="page" label="Loading preferences" />
               : preferenceState.error ? <LoadError message={preferenceState.error} onRetry={preferenceState.retry} />
-                : <PreferenceSettings key={`${userId}:${section}`} section={section} />
+                : <PreferenceSettings key={userId} />
           )}
         </div>
       </div>

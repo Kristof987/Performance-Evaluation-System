@@ -59,15 +59,10 @@ export type Preferences = {
   theme: 'system' | 'light' | 'dark';
   language: 'en' | 'hu';
   date_format: 'locale' | 'iso';
-  notify_new_assignment: boolean;
-  notify_results_available: boolean;
-  notify_campaign_status: boolean;
 };
 
 export const defaultPreferences: Preferences = {
   theme: 'system', language: 'en', date_format: 'locale',
-  notify_new_assignment: true,
-  notify_results_available: true, notify_campaign_status: true,
 };
 
 export function fetchPreferences(getAccessToken: AccessTokenGetter, signal: AbortSignal) {
@@ -82,7 +77,7 @@ export function patchPreferences(
   });
 }
 
-export const PROFILE_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const PROFILE_PHOTO_TYPES = ['image/jpeg', 'image/png'];
 export const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 
 export function uploadProfilePhoto(getAccessToken: AccessTokenGetter, file: File) {

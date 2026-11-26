@@ -209,9 +209,6 @@ class UserPreferences(Base):
     theme = Column(String(8), nullable=False, server_default="system")
     language = Column(String(2), nullable=False, server_default="en")
     date_format = Column(String(8), nullable=False, server_default="locale")
-    notify_new_assignment = Column(Boolean, nullable=False, server_default=text("true"))
-    notify_results_available = Column(Boolean, nullable=False, server_default=text("true"))
-    notify_campaign_status = Column(Boolean, nullable=False, server_default=text("true"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (

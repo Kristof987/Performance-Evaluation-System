@@ -4,7 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 import models
-from services import preferences_service
 from database import SessionLocal
 from api.dependencies import get_current_user, get_db
 from main import app
@@ -50,17 +49,19 @@ def test_defaults_and_partial_persistence(account):
     assert defaults.status_code == 200
     assert defaults.json()["theme"] == "system"
     assert db.get(models.UserPreferences, user.id) is None
-    saved = client.patch("/me/preferences", json={"theme": "dark", "notify_new_assignment": False})
+    saved = client.patch("/me/preferences", json={"theme": "dark"})
     assert saved.status_code == 200
     assert saved.json()["theme"] == "dark"
-    assert "notify_deadline_reminder" not in saved.json()  # Reminder timing is set per campaign by HR.
+    assert set(saved.json()) == {"theme", "language", "date_format", "updated_at"}
     assert saved.json()["updated_at"] is not None
-    assert client.get("/me/preferences").json()["notify_new_assignment"] is False
+    assert client.patch("/me/preferences", json={"date_format": "iso"}).status_code == 200
+    stored = client.get("/me/preferences").json()
+    assert (stored["theme"], stored["date_format"]) == ("dark", "iso")
 
 
 @pytest.mark.parametrize("changes", [
     {"theme": "invalid"}, {"reminder_days_before_deadline": 3}, {"notify_deadline_reminder": True},
-    {"theme": None}, {"user_id": 7}, {"notify_new_assignment": "false"},
+    {"theme": None}, {"user_id": 7}, {"notify_new_assignment": False},
 ])
 def test_invalid_and_unknown_fields_rejected(account, changes):
     assert account[2].patch("/me/preferences", json=changes).status_code == 422
@@ -76,31 +77,3 @@ def test_patch_requires_manage_self(account):
     db.flush()
     assert client.get("/me/preferences").status_code == 200
     assert client.patch("/me/preferences", json={"theme": "dark"}).status_code == 403
-
-
-def test_campaign_preference_requires_manager(account):
-    assert account[2].patch("/me/preferences", json={"notify_campaign_status": False}).status_code == 403
-
-
-def test_should_notify_defaults_opt_out_and_permissions(account):
-    user, db, client = account
-    assert preferences_service.should_notify(user.id, "new_assignment", db) is True
-    assert preferences_service.should_notify(user.id, "campaign_status", db) is False
-    assert preferences_service.should_notify(user.id, "unknown_event", db) is False
-    client.patch("/me/preferences", json={"notify_new_assignment": False})
-    assert preferences_service.should_notify(user.id, "new_assignment", db) is False
-    permission = db.query(models.SystemPermission).filter_by(name="campaigns.manage").first()
-    if permission is None:
-        permission = models.SystemPermission(name="campaigns.manage")
-        db.add(permission)
-        db.flush()
-    db.execute(models.system_role_permissions.insert().values(
-        system_role_id=user.system_role_id, permission_id=permission.id,
-    ))
-    db.flush()
-    assert preferences_service.should_notify(user.id, "campaign_status", db) is True
-    client.patch("/me/preferences", json={"notify_campaign_status": False})
-    assert preferences_service.should_notify(user.id, "campaign_status", db) is False
-    user.is_active = False
-    db.flush()
-    assert preferences_service.should_notify(user.id, "new_assignment", db) is False

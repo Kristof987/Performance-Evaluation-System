@@ -7,10 +7,9 @@ of inactive employees are not served.
 
 from io import BytesIO
 from uuid import uuid4
-import warnings
 
 from fastapi import HTTPException
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps
 from sqlalchemy.orm import Session
 
 import models
@@ -19,7 +18,7 @@ import models
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_PIXELS = 40_000_000  # Rejects "decompression bomb" images that are small files but huge in memory.
 OUTPUT_SIZE = 256
-ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
+ALLOWED_FORMATS = {"JPEG", "PNG"}
 
 
 def photo_url(photo_id: str) -> str:
@@ -27,32 +26,22 @@ def photo_url(photo_id: str) -> str:
 
 
 def process_image(data: bytes) -> bytes:
-    if not data:
-        raise HTTPException(status_code=400, detail="Choose an image to upload")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="The image must be 5 MB or smaller")
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            image = Image.open(BytesIO(data))
+        with Image.open(BytesIO(data)) as image:
             if image.format not in ALLOWED_FORMATS:
-                raise HTTPException(status_code=400, detail="Upload a JPG, PNG or WebP image")
+                raise HTTPException(status_code=400, detail="Upload a JPG or PNG image")
             if image.width * image.height > MAX_PIXELS:
                 raise HTTPException(status_code=400, detail="The image dimensions are too large")
-            image.load()
-    except HTTPException:
-        raise
-    except (UnidentifiedImageError, Image.DecompressionBombError, Image.DecompressionBombWarning, OSError, ValueError):
-        raise HTTPException(status_code=400, detail="The file is not a valid image") from None
-    image = ImageOps.exif_transpose(image)  # Respect phone camera orientation before EXIF is dropped.
-    if image.mode in ("RGBA", "LA", "P"):
-        background = Image.new("RGB", image.size, "white")
-        rgba = image.convert("RGBA")
-        background.paste(rgba, mask=rgba.getchannel("A"))
-        image = background
-    image = ImageOps.fit(image.convert("RGB"), (OUTPUT_SIZE, OUTPUT_SIZE), Image.Resampling.LANCZOS)
+            rgba = ImageOps.exif_transpose(image).convert("RGBA")
+            square = ImageOps.fit(rgba, (OUTPUT_SIZE, OUTPUT_SIZE), Image.Resampling.LANCZOS)
+    except (Image.DecompressionBombError, OSError, ValueError, SyntaxError) as exc:
+        raise HTTPException(status_code=400, detail="The file is not a valid image") from exc
+    photo = Image.new("RGB", square.size, "white")
+    photo.paste(square, mask=square.getchannel("A"))
     output = BytesIO()
-    image.save(output, format="JPEG", quality=85, optimize=True)  # Re-encoding drops all metadata.
+    photo.save(output, format="JPEG", quality=85)
     return output.getvalue()
 
 

@@ -1,6 +1,6 @@
-import { Bell, Bot, EyeOff, KeyRound, Mail, Palette, ScrollText, ShieldCheck, UserRound, type LucideIcon } from 'lucide-react';
+import { Bot, EyeOff, KeyRound, Mail, Palette, ScrollText, ShieldCheck, UserRound, type LucideIcon } from 'lucide-react';
 
-type SettingsSection = 'profile' | 'security' | 'notifications' | 'appearance'
+type SettingsSection = 'profile' | 'security' | 'appearance'
   | 'privacy' | 'emails' | 'ai' | 'permissions' | 'audit';
 
 type Item = { id: SettingsSection; label: string; description: string; icon: LucideIcon; anyOf?: string[] };
@@ -9,7 +9,6 @@ export const SETTINGS_GROUPS: { label: string; items: Item[] }[] = [
   { label: 'Your account', items: [
     { id: 'profile', label: 'My profile', description: 'Account details', icon: UserRound },
     { id: 'security', label: 'Security', description: 'Sign-in status', icon: ShieldCheck },
-    { id: 'notifications', label: 'Notifications', description: 'Update preferences', icon: Bell },
     { id: 'appearance', label: 'Appearance', description: 'Theme and display', icon: Palette },
   ] },
   { label: 'Workspace', items: [

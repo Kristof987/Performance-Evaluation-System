@@ -30,7 +30,7 @@ export default function ProfilePhoto({ name, employeeId, initialPhoto }: {
     setError('');
     if (input.current) input.current.value = '';
     if (!selected) return;
-    if (!PROFILE_PHOTO_TYPES.includes(selected.type)) { setError('Choose a JPG, PNG or WebP image.'); return; }
+    if (!PROFILE_PHOTO_TYPES.includes(selected.type)) { setError('Choose a JPG or PNG image.'); return; }
     if (selected.size > PROFILE_PHOTO_MAX_BYTES) { setError('The image must be 5 MB or smaller.'); return; }
     setFile(selected);
   }
@@ -58,7 +58,7 @@ export default function ProfilePhoto({ name, employeeId, initialPhoto }: {
       : <Avatar className="settings-photo-avatar" name={name} photo={photo} />}
     <div className="settings-photo-body">
       <strong>Profile photo</strong>
-      <span>{file ? 'Preview — save to use this photo.' : 'Shown next to your name across Mirra. JPG, PNG or WebP, up to 5 MB.'}</span>
+      <span>{file ? 'Preview — save to use this photo.' : 'Shown next to your name across Mirra. JPG or PNG, up to 5 MB.'}</span>
       {canEdit && <div className="settings-photo-actions">
         <input ref={input} id="profile-photo-input" type="file" accept={PROFILE_PHOTO_TYPES.join(',')} hidden
           onChange={(event) => choose(event.target.files?.[0] ?? null)} />
