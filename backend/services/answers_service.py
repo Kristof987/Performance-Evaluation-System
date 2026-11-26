@@ -39,8 +39,7 @@ def _require_access(campaign_id: int, actor: models.User, db: Session) -> tuple[
 
 
 def _submitted(row) -> bool:
-    assignment, _form, status = row
-    return reporting_service.status_key(status, assignment.finish_date) == "completed"
+    return row[0].finish_date is not None
 
 
 def _is_self(assignment: models.FilledForm) -> bool:
@@ -173,7 +172,7 @@ def build_employee_answers(campaign_id: int, employee_id: int, actor: models.Use
     threshold = reporting_service.min_individual_peer_reviewers()
 
     self_questionnaires = []
-    for assignment, form, _status in sorted((row for row in self_rows if _submitted(row)), key=lambda row: row[0].id):
+    for assignment, form in sorted((row for row in self_rows if _submitted(row)), key=lambda row: row[0].id):
         item = _questionnaire(assignment, form, names)
         if item is not None:
             self_questionnaires.append({"label": "Self-evaluation", "kind": "self", **item})
@@ -181,7 +180,7 @@ def build_employee_answers(campaign_id: int, employee_id: int, actor: models.Use
     peers: list[dict[str, Any]] = []
     if len(submitted_peers) >= threshold:
         ordered = sorted(submitted_peers, key=lambda row: sha256(f"answers:{campaign_id}:{employee_id}:{row[0].id}".encode()).digest())
-        for assignment, form, _status in ordered:
+        for assignment, form in ordered:
             item = _questionnaire(assignment, form, names)
             if item is not None:
                 peers.append({"label": f"Evaluator {len(peers) + 1}", "kind": "peer", **item})

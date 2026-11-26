@@ -43,8 +43,6 @@ class World:
         system_role = db.query(models.SystemRole).first() or add(db, models.SystemRole(name=f"System {suffix}"))
         self.actor = add(db, models.User(username=f"hr-{suffix}", email=f"hr-{suffix}@example.com", password_hash="",
                                          system_role_id=system_role.id, is_active=True))
-        self.done = db.query(models.FormStatus).filter_by(name="Completed").first() or add(db, models.FormStatus(name="Completed"))
-        self.open = db.query(models.FormStatus).filter_by(name="Not started").first() or add(db, models.FormStatus(name="Not started"))
         self.section = add(db, models.Section(scope_key="default", name=f"Teamwork {suffix}", normalized_name=f"teamwork {suffix}"))
         self.form = add(db, models.Form(name=f"Peer form {suffix}", questions=[]))
         self.group = add(db, models.CompanyGroup(name=f"Group {suffix}"))
@@ -70,7 +68,7 @@ class World:
                    {"question_id": "comment", "value": comment}] if submitted else []
         return add(self.db, models.FilledForm(campaign_id=self.campaign.id, form_id=self.form.id, company_group_id=self.group.id,
                                               evaluator_id=evaluator.id, evaluatee_id=self.people[0].id,
-                                              status_id=(self.done if submitted else self.open).id,
+                                             
                                               finish_date=date(2090, 2, 1) if submitted else None,
                                               form_snapshot=self.snapshot(), answers=answers))
 

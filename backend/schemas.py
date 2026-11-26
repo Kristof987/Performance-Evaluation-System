@@ -59,7 +59,6 @@ class AssignedEvaluationResponse(BaseModel):
     form_description: str | None
     evaluatee_id: int
     evaluatee_name: str
-    status_name: str
     due_date: date | None
     finish_date: date | None
     question_count: int

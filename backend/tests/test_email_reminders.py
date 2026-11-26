@@ -45,14 +45,9 @@ def campaign_with_open_evaluations(db, *, end_in_days=10, started_days_ago=5):
                                end_date=now + timedelta(days=end_in_days), status="active", created_by=evaluator.user_id)
     db.add(campaign)
     db.flush()
-    status = db.query(models.FormStatus).filter(models.FormStatus.name == "Not started").first()
-    if status is None:
-        status = models.FormStatus(name="Not started")
-        db.add(status)
-        db.flush()
     for target in (evaluatee, evaluator):
         db.add(models.FilledForm(campaign_id=campaign.id, evaluator_id=evaluator.id, evaluatee_id=target.id,
-                                 status_id=status.id, answers=[], form_snapshot={"schema_version": 2, "questions": []}))
+                                 answers=[], form_snapshot={"schema_version": 2, "questions": []}))
     db.flush()
     return campaign, evaluator
 
@@ -152,8 +147,7 @@ def test_workspace_defaults_apply_until_a_campaign_customizes(db):
 def test_recipient_list_and_selected_manual_send(db):
     campaign, evaluator = campaign_with_open_evaluations(db)
     other = person(db, "Zoe Other")
-    status = db.query(models.FormStatus).filter(models.FormStatus.name == "Not started").first()
-    db.add(models.FilledForm(campaign_id=campaign.id, evaluator_id=other.id, evaluatee_id=evaluator.id, status_id=status.id,
+    db.add(models.FilledForm(campaign_id=campaign.id, evaluator_id=other.id, evaluatee_id=evaluator.id,
                              answers=[], form_snapshot={"schema_version": 2, "questions": []}))
     db.flush()
     listed = reminders.recipient_list(campaign, db)

@@ -34,12 +34,11 @@ def _aware(value: datetime) -> datetime:
 
 def open_evaluation_breakdown(campaign_id: int, db: Session) -> dict[int, dict[str, int]]:
     """Issued, not yet completed evaluations per evaluator, split into not started and in progress."""
-    rows = (db.query(models.FilledForm.evaluator_id, models.FormStatus.name, models.FilledForm.finish_date)
-            .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
+    rows = (db.query(models.FilledForm)
             .filter(models.FilledForm.campaign_id == campaign_id, models.FilledForm.form_snapshot.isnot(None)).all())
     breakdown: dict[int, dict[str, int]] = {}
-    for evaluator_id, status_name, finish_date in rows:
-        status = reporting_service.status_key(status_name, finish_date)
+    for filled_form in rows:
+        evaluator_id, status = filled_form.evaluator_id, reporting_service.status_of(filled_form)
         if status != "completed":
             counts = breakdown.setdefault(evaluator_id, {"not_started": 0, "in_progress": 0})
             counts[status] += 1

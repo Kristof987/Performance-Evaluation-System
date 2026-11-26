@@ -1,8 +1,8 @@
 import type { AssignedEvaluation } from './employee-home.api';
 
 export function evaluationStatus(evaluation: AssignedEvaluation): 'Not started' | 'In progress' | 'Completed' {
-  if (evaluation.finishDate !== null || evaluation.statusName.toLowerCase() === 'completed' || evaluation.statusName.toLowerCase() === 'submitted') return 'Completed';
-  if (evaluation.statusName.toLowerCase() === 'in progress' || evaluation.answeredCount > 0) return 'In progress';
+  if (evaluation.finishDate !== null) return 'Completed';
+  if (evaluation.answeredCount > 0) return 'In progress';
   return 'Not started';
 }
 

@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from services import ai_trace
 import models
 from services import permissions
-from services import reporting_service
 from services import workspace_settings_service
 from services.ai_analysis_models import EmployeeAIAnalysis, EmployeeAnalysisContext
 from services.ai_analysis_service import build_employee_analysis_context
@@ -73,14 +72,14 @@ def _fingerprint(db: Session, campaign_id: int, employee_id: int) -> str:
     analyses stale too. Draft answers are excluded exactly as in Phase 1.
     """
     digest = sha256(b"employee-ai-source-v1\n")
-    rows = db.query(models.FilledForm, models.FormStatus.name).join(
-        models.FormStatus, models.FormStatus.id == models.FilledForm.status_id,
-    ).filter(models.FilledForm.campaign_id == campaign_id, models.FilledForm.evaluatee_id == employee_id).order_by(models.FilledForm.id).all()
-    for form, status in rows:
-        if status.strip().lower() not in reporting_service.COMPLETED_STATUSES or form.finish_date is None:
-            continue
+    rows = db.query(models.FilledForm).filter(
+        models.FilledForm.campaign_id == campaign_id, models.FilledForm.evaluatee_id == employee_id,
+        models.FilledForm.finish_date.isnot(None),
+    ).order_by(models.FilledForm.id).all()
+    for form in rows:
+        # "completed" stays in the hash so existing fingerprints keep matching.
         source = [form.id, form.evaluator_id, form.evaluatee_id, form.company_group_id, form.form_id,
-                  form.finish_date.isoformat(), status.strip().lower(), form.form_snapshot, form.answers]
+                  form.finish_date.isoformat(), "completed", form.form_snapshot, form.answers]
         digest.update(json.dumps(source, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("utf-8"))
         digest.update(b"\n")
     return digest.hexdigest()

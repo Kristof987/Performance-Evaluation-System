@@ -56,8 +56,8 @@ def _summarize(campaign: models.Campaign, roles: dict[int, int], aggregate_acces
     role_totals: dict[int, set[int]] = {}
     role_completed: dict[int, set[int]] = {}
     role_people: dict[int, set[int]] = {}
-    for filled_form, _form, status in rows:
-        done = reporting_service.status_key(status, filled_form.finish_date) == "completed"
+    for filled_form, _form in rows:
+        done = filled_form.finish_date is not None
         for key in (None, filled_form.company_group_id):
             if key is None and team is not None and filled_form.company_group_id not in team:
                 continue

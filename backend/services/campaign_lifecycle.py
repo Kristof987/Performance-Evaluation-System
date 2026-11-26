@@ -90,6 +90,13 @@ def record_snapshot_issuance(db: Session, campaign: Campaign, count: int,
     ))
 
 
+def status_of(filled_form: FilledForm) -> str:
+    """Submitted once it has a finish date; in progress once answers are saved; otherwise not started."""
+    if filled_form.finish_date is not None:
+        return "completed"
+    return "in_progress" if filled_form.answers else "not_started"
+
+
 def is_overdue(form: FilledForm, campaign: Campaign, *, now: datetime) -> bool:
     return (
         form.finish_date is None

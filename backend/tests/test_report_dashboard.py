@@ -42,8 +42,6 @@ class World:
         self.role = add(db, models.CompanyRole(name=f"Dashboard role {suffix}"))
         self.actor = add(db, models.User(username=f"hr-{suffix}", email=f"hr-{suffix}@example.com", password_hash="",
                                          system_role_id=system_role.id, is_active=True))
-        self.done = db.query(models.FormStatus).filter(models.FormStatus.name == "Completed").first() or add(db, models.FormStatus(name="Completed"))
-        self.open = db.query(models.FormStatus).filter(models.FormStatus.name == "Not started").first() or add(db, models.FormStatus(name="Not started"))
         self.section_a = add(db, models.Section(scope_key="default", name=f"Alpha {suffix}", normalized_name=f"alpha {suffix}"))
         self.section_b = add(db, models.Section(scope_key="default", name=f"Beta {suffix}", normalized_name=f"beta {suffix}"))
         self.form = add(db, models.Form(name=f"Form {suffix}", questions=[]))
@@ -75,7 +73,7 @@ class World:
         answers = [{"question_id": f"q{self.section_a.id}", "value": alpha}, {"question_id": f"q{self.section_b.id}", "value": beta}]
         add(self.db, models.FilledForm(campaign_id=campaign.id, form_id=self.form.id, company_group_id=group.id,
                                        evaluator_id=evaluator.id, evaluatee_id=evaluatee.id,
-                                       status_id=(self.done if completed else self.open).id,
+                                      
                                        finish_date=date(2091, 2, 1) if completed else None,
                                        answers=answers if completed else [], form_snapshot=self.snapshot()))
 

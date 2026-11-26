@@ -20,8 +20,10 @@ from services.ai_analysis_models import AggregateAnalysisContext, AggregateEvide
 def _fingerprint(db: Session, campaign_id: int, report: dict, questions: list[dict]) -> str:
     digest = sha256(b"aggregate-ai-source-v1\n")
     rows = reporting_service.campaign_report_rows(campaign_id, db)
-    for assignment, _form, status in sorted(rows, key=lambda row: row[0].id):
-        completed = reporting_service.status_key(status, assignment.finish_date) == "completed"
+    labels = {"completed": "Completed", "in_progress": "In progress", "not_started": "Not started"}
+    for assignment, _form in sorted(rows, key=lambda row: row[0].id):
+        status = labels[reporting_service.status_of(assignment)]  # Same text as the former status names.
+        completed = assignment.finish_date is not None
         source = [assignment.id, assignment.company_group_id, assignment.evaluator_id, assignment.evaluatee_id,
                   assignment.evaluator_company_role_id, assignment.evaluatee_company_role_id,
                   assignment.form_id, status, assignment.finish_date.isoformat() if assignment.finish_date else None,

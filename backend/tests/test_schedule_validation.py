@@ -23,12 +23,11 @@ def make_campaign(db):
     suffix = uuid4().hex
     role = models.CompanyRole(name=f"Engineer {suffix}")
     group = models.CompanyGroup(name=f"Engineering {suffix}")
-    status = models.FormStatus(name=f"Planned {suffix}")
     form = models.Form(name=f"Peer form {suffix}", questions=[
         {"type": "question", "question": {"id": "q1", "text": "How well?", "type": "Scale", "scale_min": 1, "scale_max": 5, "required": True}},
     ])
     system_role = models.SystemRole(name=f"Planner {suffix}")
-    db.add_all([role, group, status, form, system_role])
+    db.add_all([role, group, form, system_role])
     db.flush()
     owner = models.User(username=f"planner-{suffix}", email=f"{suffix}@example.com", password_hash="test-only",
                         system_role_id=system_role.id)
@@ -49,19 +48,19 @@ def make_campaign(db):
     db.add(models.CampaignEvaluationRule(campaign_id=campaign.id, company_group_id=group.id,
                                          evaluator_role_id=role.id, evaluatee_role_id=role.id, form_id=form.id))
     db.flush()
-    return campaign, group, status, form, anna, bela
+    return campaign, group, form, anna, bela
 
 
-def add_assignment(db, campaign, group, status, evaluator, evaluatee, form_id):
+def add_assignment(db, campaign, group, evaluator, evaluatee, form_id):
     db.add(models.FilledForm(campaign_id=campaign.id, company_group_id=group.id, evaluator_id=evaluator.id,
-                             evaluatee_id=evaluatee.id, form_id=form_id, status_id=status.id, answers=[]))
+                             evaluatee_id=evaluatee.id, form_id=form_id, answers=[]))
     db.flush()
 
 
 def test_self_pair_without_self_form_points_to_self_evaluations(db):
-    campaign, group, status, form, anna, bela = make_campaign(db)
-    add_assignment(db, campaign, group, status, anna, bela, form.id)
-    add_assignment(db, campaign, group, status, anna, anna, None)
+    campaign, group, form, anna, bela = make_campaign(db)
+    add_assignment(db, campaign, group, anna, bela, form.id)
+    add_assignment(db, campaign, group, anna, anna, None)
 
     errors = validate_campaign_configuration(campaign, db)
 
@@ -69,18 +68,18 @@ def test_self_pair_without_self_form_points_to_self_evaluations(db):
 
 
 def test_self_pair_with_self_form_is_valid(db):
-    campaign, group, status, form, anna, bela = make_campaign(db)
+    campaign, group, form, anna, bela = make_campaign(db)
     db.add(models.CampaignEmployeeSelfEvaluation(campaign_id=campaign.id, employee_id=anna.id, form_id=form.id))
-    add_assignment(db, campaign, group, status, anna, bela, form.id)
-    add_assignment(db, campaign, group, status, anna, anna, form.id)
+    add_assignment(db, campaign, group, anna, bela, form.id)
+    add_assignment(db, campaign, group, anna, anna, form.id)
 
     assert validate_campaign_configuration(campaign, db) == []
 
 
 def test_peer_pair_without_rule_names_both_employees(db):
-    campaign, group, status, form, anna, bela = make_campaign(db)
+    campaign, group, form, anna, bela = make_campaign(db)
     db.query(models.CampaignEvaluationRule).filter(models.CampaignEvaluationRule.campaign_id == campaign.id).delete()
-    add_assignment(db, campaign, group, status, anna, bela, None)
+    add_assignment(db, campaign, group, anna, bela, None)
 
     errors = validate_campaign_configuration(campaign, db)
 

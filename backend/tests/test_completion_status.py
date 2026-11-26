@@ -29,8 +29,6 @@ def add(db, item):
     return item
 
 
-def status(db, name):
-    return db.query(models.FormStatus).filter_by(name=name).first() or add(db, models.FormStatus(name=name))
 
 
 class World:
@@ -69,7 +67,7 @@ class World:
     def evaluation(self, evaluator, evaluatee, status_name, *, done=False, issued=True):
         return add(self.db, models.FilledForm(
             campaign_id=self.campaign.id, form_id=self.form.id, company_group_id=self.group.id,
-            evaluator_id=evaluator.id, evaluatee_id=evaluatee.id, status_id=status(self.db, status_name).id,
+            evaluator_id=evaluator.id, evaluatee_id=evaluatee.id,
             finish_date=date.today() if done else None, answers=[{"secret": "do not leak"}] if status_name != "Not started" else [],
             form_snapshot={"schema_version": 2, "questions": []} if issued else None))
 

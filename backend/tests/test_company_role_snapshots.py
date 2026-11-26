@@ -52,13 +52,8 @@ def campaign(db, status, creator):
 
 
 def assignment(db, campaign_id, group_id, evaluator, evaluatee, *, issued=True):
-    status = db.query(models.FormStatus).first()
-    if status is None:
-        status = models.FormStatus(name="Not started")
-        db.add(status)
-        db.flush()
     row = models.FilledForm(campaign_id=campaign_id, company_group_id=group_id, evaluator_id=evaluator.id,
-                            evaluatee_id=evaluatee.id, status_id=status.id, answers=[],
+                            evaluatee_id=evaluatee.id, answers=[],
                             form_snapshot={"schema_version": 2, "questions": []} if issued else None)
     db.add(row)
     db.flush()

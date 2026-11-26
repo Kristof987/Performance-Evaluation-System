@@ -128,13 +128,6 @@ company_group_leaders = Table(
     Column("employee_id", Integer, ForeignKey("employees.id", ondelete="CASCADE"), primary_key=True),
 )
 
-class FormStatus(Base):
-    __tablename__ = "form_statuses"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-
-
 class FilledForm(Base):
     __tablename__ = "filled_forms"
 
@@ -173,12 +166,6 @@ class FilledForm(Base):
         Integer,
         ForeignKey("forms.id"),
         nullable=True,
-    )
-
-    status_id = Column(
-        Integer,
-        ForeignKey("form_statuses.id"),
-        nullable=False,
     )
 
     finish_date = Column(

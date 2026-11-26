@@ -89,11 +89,11 @@ def _collect(rows: list[Any], db: Session, *, include_text: bool = False):
     section_ids: set[int] = set()
     roles = {employee_id: role.id for employee_id, (_employee, role) in reporting_service.users_by_id(db).items()}
     seen_assignments: set[int] = set()
-    for assignment, _form, status in rows:
+    for assignment, _form in rows:
         if assignment.id in seen_assignments:
             continue
         seen_assignments.add(assignment.id)
-        completed = reporting_service.status_key(status, assignment.finish_date) == "completed"
+        completed = assignment.finish_date is not None
         snapshot = assignment.form_snapshot
         if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 2 or not isinstance(snapshot.get("questions"), list):
             continue

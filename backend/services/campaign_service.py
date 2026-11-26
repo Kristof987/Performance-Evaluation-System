@@ -353,17 +353,6 @@ def snapshot_assignment_roles(assignment: models.FilledForm, db: Session) -> Non
             setattr(assignment, field, person.company_role_id if person else None)
 
 
-def normalize_form_status(status_name: str | None, finish_date: date | None) -> tuple[str, str]:
-    if finish_date is not None:
-        return "completed", "Completed"
-    normalized = (status_name or "Not started").strip().lower()
-    if normalized in {"completed", "submitted"}:
-        return "completed", "Completed"
-    if normalized in {"in progress", "in_progress", "started"}:
-        return "in_progress", "In progress"
-    return "not_started", "Not started"
-
-
 def get_campaign_completion_status(*, campaign_id: int, search: str | None = None, status: str | None = None, overdue_only: bool = False, sort: str = "outstanding", order: str = "desc", page: int = 1, page_size: int = 25, db: Session):
     """Progress per evaluator. Who evaluates whom is never part of this view (requirement 7.4)."""
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
@@ -381,11 +370,10 @@ def get_campaign_completion_status(*, campaign_id: int, search: str | None = Non
             models.FilledForm.finish_date,
             models.Employee.full_name.label("evaluator_name"),
             models.User.email.label("evaluator_email"),
-            models.FormStatus.name.label("status_name"),
+            models.FilledForm.answers,
         )
         .join(models.Employee, models.Employee.id == models.FilledForm.evaluator_id)
         .outerjoin(models.User, models.User.id == models.Employee.user_id)
-        .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
         .filter(models.FilledForm.campaign_id == campaign.id)
         .filter(or_(issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
         .all()
@@ -395,7 +383,7 @@ def get_campaign_completion_status(*, campaign_id: int, search: str | None = Non
     people: dict[int, dict] = {}
     pair_counts: dict[tuple, int] = {}
     for row in rows:
-        status_key, _label = normalize_form_status(row.status_name, row.finish_date)
+        status_key = campaign_lifecycle.status_of(row)
         person = people.setdefault(row.evaluator_id, {
             "evaluator_id": row.evaluator_id,
             "evaluator_name": row.evaluator_name,
@@ -802,21 +790,6 @@ def update_campaign(*, campaign_id: int, campaign_update: schemas.CampaignUpdate
             models.FilledForm.finish_date.isnot(None),
         ).count()
     return campaign_payload(campaign, campaign_today(), issued_forms_count, submitted_forms_count)
-
-
-def get_or_create_default_form_status(db: Session):
-    status = (
-        db.query(models.FormStatus)
-        .filter(func.lower(models.FormStatus.name) == "not started")
-        .first()
-    )
-    if status is not None:
-        return status
-
-    status = models.FormStatus(name="Not started")
-    db.add(status)
-    db.flush()
-    return status
 
 
 def get_form_id_for_employee_pair(campaign_id: int, group_id: int, evaluator, evaluatee, db: Session):

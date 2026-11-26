@@ -6,12 +6,12 @@ const task = (id, changes = {}) => ({
   id, evaluatorId: 1, evaluateeId: 2, evaluateeName: 'Sarah Mitchell',
   campaignId: 10, campaignName: 'Third review', campaignStartDate: '2026-10-01',
   campaignStatus: 'active', campaignEndAt: '2999-12-31T23:59:59Z', dueDate: '2026-10-20', finishDate: null,
-  statusName: 'Not started', answeredCount: 0, formName: 'Probe form',
+  answeredCount: 0, formName: 'Probe form',
   ...changes,
 });
 
 test('actionable KPIs share running campaigns and the nearest outstanding deadline', () => {
-  const items = [task(1), task(2, { statusName: 'In progress', dueDate: '2026-10-11' }),
+  const items = [task(1), task(2, { answeredCount: 1, dueDate: '2026-10-11' }),
     task(3, { finishDate: '2026-10-08', dueDate: '2026-10-10' }),
     task(4, { campaignStatus: 'scheduled', campaignStartDate: '2026-11-01', dueDate: '2026-11-20' }),
     task(5, { campaignStatus: 'paused' }), task(6, { campaignStatus: 'review', dueDate: '2026-10-15' })];

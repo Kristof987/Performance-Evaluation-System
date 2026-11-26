@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 import models
@@ -36,12 +36,10 @@ def list_employee_evaluations(employee: models.Employee, db: Session) -> list[di
             models.FilledForm,
             models.Campaign,
             models.Form,
-            models.FormStatus,
             models.Employee,
         )
         .join(models.Campaign, models.Campaign.id == models.FilledForm.campaign_id)
         .join(models.Form, models.Form.id == models.FilledForm.form_id)
-        .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
         .join(models.Employee, models.Employee.id == models.FilledForm.evaluatee_id)
         .filter(models.FilledForm.evaluator_id == employee.id)
         .filter(or_(campaign_service.issued_snapshot_filter(), models.FilledForm.finish_date.isnot(None)))
@@ -56,7 +54,7 @@ def list_employee_evaluations(employee: models.Employee, db: Session) -> list[di
     today = campaign_today()
     now = datetime.now(timezone.utc)
     evaluations = []
-    for filled_form, campaign, form, status, evaluatee in rows:
+    for filled_form, campaign, form, evaluatee in rows:
         if campaign.status not in {models.CampaignStatus.ACTIVE.value, models.CampaignStatus.REVIEW.value} or campaign.is_archived:
             continue
         can_edit = questionnaire_can_edit(campaign, filled_form, now)
@@ -87,7 +85,6 @@ def list_employee_evaluations(employee: models.Employee, db: Session) -> list[di
             "form_description": form_snapshot_service.snapshot_form_description(filled_form, form),
             "evaluatee_id": evaluatee.id,
             "evaluatee_name": evaluatee.full_name,
-            "status_name": status.name,
             "due_date": business_date(campaign.end_date),
             "finish_date": filled_form.finish_date,
             "question_count": len(issued_questions),
@@ -178,13 +175,6 @@ def update_assigned_questionnaire(*, user_id: int, evaluation_id: int, payload: 
     if not questionnaire_can_edit(campaign, filled_form, datetime.now(timezone.utc)):
         raise HTTPException(status_code=403, detail="This questionnaire is not currently available")
     filled_form.answers = payload.answers
-    status_name = "Completed" if payload.submit else "In progress"
-    status = db.query(models.FormStatus).filter(func.lower(models.FormStatus.name) == status_name.lower()).first()
-    if status is None:
-        status = models.FormStatus(name=status_name)
-        db.add(status)
-        db.flush()
-    filled_form.status_id = status.id
     if payload.submit:
         filled_form.finish_date = campaign_today()
     db.commit()
@@ -259,7 +249,8 @@ def get_employee_dashboard(*, user_id: int, db: Session, actor: models.User, emp
                 "id": evaluation["id"],
                 "title": evaluation["form_name"],
                 "subtitle": evaluation["campaign_name"],
-                "status": "Submitted" if evaluation["finish_date"] is not None else evaluation["status_name"],
+                "status": ("Submitted" if evaluation["finish_date"] is not None
+                           else "In progress" if evaluation["answered_count"] else "Not started"),
                 "occurred_at": evaluation["finish_date"] or evaluation["created_at"],
             }
             for evaluation in evaluations[:3]

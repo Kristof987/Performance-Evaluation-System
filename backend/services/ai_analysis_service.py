@@ -130,9 +130,7 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
     assert campaign is not None
     if db.query(models.Employee.id).filter(models.Employee.id == employee_id).first() is None:
         raise HTTPException(status_code=404, detail="Employee not found")
-    rows = db.query(models.FilledForm, models.FormStatus.name).join(
-        models.FormStatus, models.FormStatus.id == models.FilledForm.status_id,
-    ).filter(models.FilledForm.campaign_id == campaign_id, models.FilledForm.evaluatee_id == employee_id).order_by(models.FilledForm.id).all()
+    rows = db.query(models.FilledForm).filter(models.FilledForm.campaign_id == campaign_id, models.FilledForm.evaluatee_id == employee_id).order_by(models.FilledForm.id).all()
     # Match Reports' object boundary: assigned evaluatees or assigned-group members.
     groups = [group.id for group in reporting_service.assigned_campaign_groups(campaign_id, db)]
     member = (db.query(models.employee_company_groups.c.employee_id).filter(
@@ -153,10 +151,8 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
     evaluator_by_form: dict[int, int] = {}
     latest_section_form: dict[tuple[int, str, int], tuple[object, int]] = {}
     peer_text: list[tuple[EvidenceReference, str, int]] = []
-    for assignment, status in rows:
-        # Unlike status_key, a finish date alone does not prove submission.
-        if (status.strip().lower() not in reporting_service.COMPLETED_STATUSES
-                or assignment.finish_date is None):
+    for assignment in rows:
+        if assignment.finish_date is None:
             continue
         try:
             issued = _issued_questions(assignment.form_snapshot)
@@ -204,7 +200,7 @@ def build_employee_analysis_context(db: Session, campaign_id: int, employee_id: 
             elif metadata["category"] == "text" and isinstance(value, str) and value.strip() and category == "peer":
                 peer_text.append((reference, value.strip(), assignment.evaluator_id))
         # Section scores come from the same scoring as Reports; this loop only collects the evidence behind them.
-        evaluation = section_scoring_service.score_evaluation(assignment, status_name=status)
+        evaluation = section_scoring_service.score_evaluation(assignment)
         scored.append(evaluation)
         for section_id in evaluation.sections:
             key = (section_id, category, assignment.evaluator_id)

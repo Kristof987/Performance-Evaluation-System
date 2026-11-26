@@ -168,9 +168,9 @@ def extract_section_ratings(snapshot: object, answers: object) -> list[SectionRa
     return ratings
 
 
-def score_evaluation(assignment: models.FilledForm, *, status_name: str | None = None) -> EvaluationSections | None:
+def score_evaluation(assignment: models.FilledForm) -> EvaluationSections | None:
     """A draft or a record without an issued v2 snapshot has no Section score."""
-    if reporting_service.status_key(status_name, assignment.finish_date) != "completed":
+    if assignment.finish_date is None:
         return None
     by_section: dict[int, list[float]] = defaultdict(list)
     for rating in extract_section_ratings(assignment.form_snapshot, assignment.answers):

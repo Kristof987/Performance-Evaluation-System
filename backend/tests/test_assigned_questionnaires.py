@@ -9,6 +9,7 @@ import models
 import schemas
 from database import SessionLocal
 from api.evaluations import get_assigned_questionnaire, update_assigned_questionnaire
+from services import campaign_lifecycle
 from services.campaign_service import issue_activation_snapshots
 
 
@@ -29,8 +30,6 @@ def add(db, item):
     return item
 
 
-def status(db, name):
-    return db.query(models.FormStatus).filter_by(name=name).first() or add(db, models.FormStatus(name=name))
 
 
 class World:
@@ -44,7 +43,6 @@ class World:
             {"type": "question", "question": {"id": "score", "text": "Original rating", "type": "Scale",
                                               "scale_min": 1, "scale_max": 5, "required": False}},
         ]))
-        status(db, "Not started")
         self.users, self.people = [], []
         for index in range(2):
             user = add(db, models.User(username=f"q{index}-{suffix}", email=f"q{index}-{suffix}@example.com",
@@ -57,8 +55,7 @@ class World:
                                                 start_date=now - timedelta(days=1), end_date=now + timedelta(days=2),
                                                 created_by=self.users[0].id))
         self.filled = add(db, models.FilledForm(campaign_id=self.campaign.id, evaluator_id=self.people[0].id,
-                                                evaluatee_id=self.people[1].id, form_id=self.form.id,
-                                                status_id=status(db, "Not started").id, answers=[]))
+                                                evaluatee_id=self.people[1].id, form_id=self.form.id, answers=[]))
         assert issue_activation_snapshots(self.campaign, db) == []
         db.flush()
 
@@ -82,7 +79,7 @@ def test_draft_then_submission_locks_the_questionnaire(db):
     world = World(db)
     world.save([{"question_id": "score", "value": 4}])
     assert world.get()["answers"] == [{"question_id": "score", "value": 4}]
-    assert db.get(models.FormStatus, world.filled.status_id).name == "In progress"
+    assert campaign_lifecycle.status_of(world.filled) == "in_progress"
     # A required question is still unanswered.
     expect(400, world.save, [{"question_id": "score", "value": 4}], submit=True)
     response = world.save([{"question_id": "required", "value": "Good work"}], submit=True)

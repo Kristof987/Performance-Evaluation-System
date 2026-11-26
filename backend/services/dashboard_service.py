@@ -124,10 +124,7 @@ def get_dashboard(*, campaign_id: int | None = None, db: Session):
     overdue_form_ids = {assignment.form_id for assignment in overdue_assignments}
     next_campaign = next((campaign for campaign in upcoming_campaigns if campaign.id != selected_campaign.id), None)
 
-    status_names = dict(db.query(models.FormStatus.id, models.FormStatus.name).all())
-    in_progress_count = sum(assignment.finish_date is None and not (assignment.form_snapshot is None and not assignment.answers)
-                            and (bool(assignment.answers) or campaign_service.normalize_form_status(status_names.get(assignment.status_id), None)[0] == "in_progress")
-                            for assignment in assignments)
+    in_progress_count = sum(assignment.finish_date is None and bool(assignment.answers) for assignment in assignments)
     metrics = {
         "assignment_count": assignment_count,
         "planned_count": planned_count,

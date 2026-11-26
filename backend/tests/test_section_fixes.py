@@ -52,11 +52,10 @@ def test_reports_use_the_issued_section_name(db, monkeypatch):
         {"type": "section", "section_id": item.id, "section": {"id": item.id, "name": issued_name}, "questions": []},
         {"type": "section", "section_id": other.id, "questions": []},
     ]}
-    row = (SimpleNamespace(id=1, form_snapshot=snapshot, finish_date=object()), None, "Completed")
+    row = (SimpleNamespace(id=1, form_snapshot=snapshot, finish_date=object()), None)
     evaluation = SimpleNamespace(section_ids=frozenset({item.id, other.id}))
     from services import section_scoring_service
     monkeypatch.setattr(section_scoring_service, "score_evaluation", lambda *_args, **_kwargs: evaluation)
-    monkeypatch.setattr(reporting_service, "status_key", lambda *_args: "completed")
     _scored, names = reporting_service._section_report_data([row], db)
     assert names[item.id] == issued_name
     assert names[other.id] == other.name  # No issued name: fall back to the catalog.

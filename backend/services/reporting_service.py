@@ -1,6 +1,5 @@
 from collections import defaultdict
 from contextvars import ContextVar
-from datetime import date
 from hashlib import sha256
 from typing import Any
 
@@ -11,11 +10,11 @@ from sqlalchemy.orm import Session
 import models
 from services import permissions
 from services import campaign_lifecycle
+from services.campaign_lifecycle import status_of
 from services import workspace_settings_service
 from business_calendar import business_date
 
 
-COMPLETED_STATUSES = {"completed", "submitted"}
 REPORTABLE_CAMPAIGN_STATUSES = tuple(status.value for status in campaign_lifecycle.REPORTABLE_STATUSES)
 
 
@@ -33,17 +32,6 @@ def min_individual_peer_reviewers() -> int:
 
 def min_aggregate_evaluatees() -> int:
     return _privacy_thresholds.get()[1]
-
-
-def status_key(status_name: str | None, finish_date: date | None) -> str:
-    if finish_date is not None:
-        return "completed"
-    normalized = (status_name or "Not started").strip().lower()
-    if normalized in COMPLETED_STATUSES:
-        return "completed"
-    if normalized in {"in progress", "in_progress", "started"}:
-        return "in_progress"
-    return "not_started"
 
 
 # Team leads (reports.read_team) see reports only for the groups they lead. Team-enabled routes
@@ -164,9 +152,8 @@ def list_report_campaigns(actor: models.User, db: Session) -> list[dict[str, Any
 
 def campaign_report_rows(campaign_id: int, db: Session) -> list[Any]:
     return (
-        db.query(models.FilledForm, models.Form, models.FormStatus.name.label("status_name"))
+        db.query(models.FilledForm, models.Form)
         .join(models.Form, models.Form.id == models.FilledForm.form_id)
-        .join(models.FormStatus, models.FormStatus.id == models.FilledForm.status_id)
         .filter(models.FilledForm.campaign_id == campaign_id)
         .all()
     )
@@ -291,13 +278,13 @@ UNNAMED_SECTION = "Unnamed section"
 def _section_report_data(rows: list[Any], db: Session):
     from services import section_scoring_service
 
-    scored = [result for filled_form, _form, status in rows
-              if (result := section_scoring_service.score_evaluation(filled_form, status_name=status)) is not None]
+    scored = [result for filled_form, _form in rows
+              if (result := section_scoring_service.score_evaluation(filled_form)) is not None]
     section_ids = {section_id for evaluation in scored for section_id in evaluation.section_ids}
     # Reports show the name a Section had when it was issued; a later rename must not relabel history.
     names: dict[int, str] = {}
-    for filled_form, _form, status in sorted(rows, key=lambda row: row[0].id):
-        if status_key(status, filled_form.finish_date) != "completed":
+    for filled_form, _form in sorted(rows, key=lambda row: row[0].id):
+        if status_of(filled_form) != "completed":
             continue
         snapshot = filled_form.form_snapshot
         if not isinstance(snapshot, dict):
@@ -342,7 +329,7 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
 
     rows = campaign_report_rows(campaign.id, db)
     total = len({filled_form.id for filled_form, _, _ in rows})
-    completed_rows = [row for row in rows if status_key(row[2], row[0].finish_date) == "completed"]
+    completed_rows = [row for row in rows if status_of(row[0]) == "completed"]
     completed = len({filled_form.id for filled_form, _, _ in completed_rows})
     peer_completed_rows = [row for row in completed_rows if row[0].evaluator_id != row[0].evaluatee_id]
     self_completed = len({row[0].id for row in completed_rows if row[0].evaluator_id == row[0].evaluatee_id})
@@ -355,7 +342,7 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
     section_scores = _section_score_rows(campaign_performance, scored, names)
     issued_questions: dict[int, set[str]] = defaultdict(set)
     seen_assignments: set[int] = set()
-    for assignment, _form, _status in rows:
+    for assignment, _form in rows:
         if assignment.id in seen_assignments:
             continue
         seen_assignments.add(assignment.id)
@@ -383,7 +370,7 @@ def build_campaign_report_overview(campaign_id: int, actor: models.User, db: Ses
     group_summaries = []
     for group in groups:
         group_rows = [row for row in rows if row[0].company_group_id == group.id]
-        group_completed_rows = [row for row in group_rows if status_key(row[2], row[0].finish_date) == "completed"]
+        group_completed_rows = [row for row in group_rows if status_of(row[0]) == "completed"]
         group_result = group_performance.get(group.id)
         group_overall = group_result.overall if group_result else None
         group_average = group_overall.score if group_overall else None
@@ -449,7 +436,7 @@ def build_groups_overview(campaign_id: int, actor: models.User, db: Session) -> 
     assert campaign is not None
     aggregate_access = aggregate_reporting_access(campaign_id, actor, db)
     rows = campaign_report_rows(campaign.id, db)
-    completed_rows = [row for row in rows if status_key(row[2], row[0].finish_date) == "completed"]
+    completed_rows = [row for row in rows if status_of(row[0]) == "completed"]
     groups = assigned_campaign_groups(campaign.id, db)
     team_groups = _team_groups.get()
     if team_groups is not None:
@@ -509,7 +496,7 @@ def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: 
         raise HTTPException(status_code=404, detail="Group report not found")
     rows = campaign_report_rows(campaign_id, db)
     group_rows = [row for row in rows if row[0].company_group_id == group_id]
-    completed_rows = [row for row in group_rows if status_key(row[2], row[0].finish_date) == "completed"]
+    completed_rows = [row for row in group_rows if status_of(row[0]) == "completed"]
     scored, names = _section_report_data(rows, db)
     group_scored = [evaluation for evaluation in scored if evaluation.company_group_id == group_id]
     employees_by_id = users_by_id(db)
@@ -523,7 +510,7 @@ def build_group_detail(campaign_id: int, group_id: int, actor: models.User, db: 
     role_names = company_role_names(db)
     # People evaluated in this group keep the role they had then; other members show their current role.
     cohort_roles = {employee_id: role.id for employee_id, (_employee, role) in employees_by_id.items() if employee_id in role_cohort_ids}
-    for filled_form, _form, _status in sorted(group_rows, key=lambda row: row[0].id):
+    for filled_form, _form in sorted(group_rows, key=lambda row: row[0].id):
         if filled_form.evaluatee_company_role_id is not None:
             cohort_roles[filled_form.evaluatee_id] = filled_form.evaluatee_company_role_id
     role_counts: dict[int, dict[str, Any]] = {}
@@ -611,7 +598,7 @@ def build_roles_overview(campaign_id: int, actor: models.User, db: Session) -> d
     for role in roles:
         role_rows, role_scored, employee_ids = _role_slice(rows, scored, role_map, role.id)
         participating_employees.update(employee_ids)
-        completed = [row for row in role_rows if status_key(row[2], row[0].finish_date) == "completed"]
+        completed = [row for row in role_rows if status_of(row[0]) == "completed"]
         result = role_results.get(role.id)
         average = result.overall.score if result else None
         for section in (_section_score_rows(result, role_scored, names) if result else []):
@@ -667,7 +654,7 @@ def build_role_detail(campaign_id: int, role_id: int, actor: models.User, db: Se
             group_result = section_scoring_service.suppress_small_complements(group_result, role_scored, group_scored)
             group_result = section_scoring_service.suppress_small_complements(group_result, scored, group_scored)
         group_visible = group_result
-        group_breakdown.append({"group_id": group.id, "group_name": group.name, "employee_count": len(group_employee_ids), "completed_evaluations": len({row[0].id for row in group_rows if status_key(row[2], row[0].finish_date) == "completed"}), "average_score": group_visible.overall.score if group_visible else None, "score_availability": group_visible.overall.availability if group_visible else "suppressed" if group_result else "no_data"})
+        group_breakdown.append({"group_id": group.id, "group_name": group.name, "employee_count": len(group_employee_ids), "completed_evaluations": len({row[0].id for row in group_rows if status_of(row[0]) == "completed"}), "average_score": group_visible.overall.score if group_visible else None, "score_availability": group_visible.overall.availability if group_visible else "suppressed" if group_result else "no_data"})
     return {
         "campaign": overview["campaign"],
         "role": {"id": role_summary["role_id"], "name": role_summary["role_name"]},
@@ -688,8 +675,8 @@ def self_evaluation_status(rows: list[Any], employee_id: int) -> dict[str, Any]:
     self_rows = [row for row in rows if row[0].evaluatee_id == employee_id and row[0].evaluator_id == employee_id]
     if len(self_rows) == 0:
         return {"status": "Not assigned", "assigned": 0, "completed": 0}
-    completed = sum(1 for row in self_rows if status_key(row[2], row[0].finish_date) == "completed")
-    in_progress = any(status_key(row[2], row[0].finish_date) == "in_progress" for row in self_rows)
+    completed = sum(1 for row in self_rows if status_of(row[0]) == "completed")
+    in_progress = any(status_of(row[0]) == "in_progress" for row in self_rows)
     status = "Completed" if completed == len(self_rows) else "In progress" if in_progress or completed > 0 else "Not started"
     return {"status": status, "assigned": len({row[0].id for row in self_rows}), "completed": completed}
 
@@ -732,7 +719,7 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
         team = team_employee_ids(campaign.id, team_groups, actor, db)
         participant_ids &= team
         rows = [row for row in rows if row[0].evaluatee_id in team]
-    completed_peer_rows = [row for row in rows if row[0].evaluator_id != row[0].evaluatee_id and status_key(row[2], row[0].finish_date) == "completed"]
+    completed_peer_rows = [row for row in rows if row[0].evaluator_id != row[0].evaluatee_id and status_of(row[0]) == "completed"]
     peer_assigned_by_employee: dict[int, list[Any]] = defaultdict(list)
     peer_completed_by_employee: dict[int, list[Any]] = defaultdict(list)
     for row in rows:
@@ -740,7 +727,7 @@ def build_employee_reports_overview(campaign_id: int, actor: models.User, db: Se
         if filled_form.evaluator_id == filled_form.evaluatee_id:
             continue
         peer_assigned_by_employee[filled_form.evaluatee_id].append(row)
-        if status_key(row[2], filled_form.finish_date) == "completed":
+        if status_of(filled_form) == "completed":
             peer_completed_by_employee[filled_form.evaluatee_id].append(row)
     from services import report_dashboard_service
 
@@ -878,7 +865,7 @@ def build_employee_report_detail(campaign_id: int, employee_id: int, actor: mode
         raise HTTPException(status_code=404, detail="Employee is not part of this campaign report")
     employee, role = employee_role
     peer_rows = [row for row in rows if row[0].evaluatee_id == employee_id and row[0].evaluator_id != employee_id]
-    peer_completed_rows = [row for row in peer_rows if status_key(row[2], row[0].finish_date) == "completed"]
+    peer_completed_rows = [row for row in peer_rows if status_of(row[0]) == "completed"]
     scored, names = _section_report_data(rows, db)
     employee_result = section_scoring_service.employee_scores(scored, campaign.id, employee_id, aggregate_access=aggregate_access)
     sections = []

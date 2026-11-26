@@ -576,8 +576,6 @@ def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.Camp
             raise HTTPException(status_code=409, detail="This evaluator/evaluatee pair already has an assignment in this campaign")
         remaining_pairs.add((evaluator_id, evaluatee_id))
 
-    status = campaign_service.get_or_create_default_form_status(db)
-
     created_count = 0
     for group_id, evaluator_id, evaluatee_id, form_id in desired_assignments:
         if (group_id, evaluator_id, evaluatee_id) in existing_by_pair:
@@ -591,7 +589,6 @@ def update_campaign_evaluation_matrix(*, campaign_id: int, payload: schemas.Camp
             evaluator_id=evaluator_id,
             evaluatee_id=evaluatee_id,
             form_id=form_id,
-            status_id=status.id,
             finish_date=None,
             answers=[],
             form_snapshot=None,
@@ -826,11 +823,10 @@ def update_campaign_setup(*, campaign_id: int, payload: schemas.CampaignSetupUpd
         for group_id in sorted(group_ids):
             db.execute(models.campaign_company_groups.insert().values(campaign_id=campaign_id, company_group_id=group_id))
         retained_pairs = existing_pairs | set(relocated.values())
-        status = campaign_service.get_or_create_default_form_status(db) if selected.keys() - retained_pairs else None
         for key, form_id in selected.items():
             if key not in retained_pairs:
                 db.add(models.FilledForm(campaign_id=campaign_id, company_group_id=key[0], evaluator_id=key[1],
-                                         evaluatee_id=key[2], form_id=form_id, status_id=status.id,
+                                         evaluatee_id=key[2], form_id=form_id,
                                          finish_date=None, answers=[], form_snapshot=None, snapshot_status=None))
         db.flush()
         campaign_service.unschedule_if_incomplete(campaign, db, manager.id)
