@@ -225,12 +225,17 @@ def build_section_questions(campaign_id: int, section_id: int, group_ids: list[i
             raise HTTPException(status_code=404, detail="Group report not found")
         cohorts = [(group_id, groups[group_id].name, {"group_id": group_id}) for group_id in group_ids]
 
-    peer = _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db), section_id)
+    # Collect the campaign once; every slice below is released from the same data by its own rules.
+    prepared = question_analytics_service.prepare(campaign_id, actor, db)
+
+    def report(**scope) -> dict[str, dict]:
+        return _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, prepared=prepared, **scope), section_id)
+
+    peer = report()
     if not peer:
         raise HTTPException(status_code=404, detail="Section is not part of this campaign report")
-    self_rated = _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, evaluation_type="self"), section_id)
-    by_group = {cohort_id: _section_questions(question_analytics_service.build_question_report(campaign_id, actor, db, **scope), section_id)
-                for cohort_id, _name, scope in cohorts}
+    self_rated = report(evaluation_type="self")
+    by_group = {cohort_id: report(**scope) for cohort_id, _name, scope in cohorts}
     history = _history(campaign, db, team)
     previous_campaign = history[-1] if history else None
     previous = (_section_questions(question_analytics_service.build_question_report(previous_campaign.id, actor, db), section_id)

@@ -72,12 +72,13 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
             payload={"scope": scope_type, "reportable_metrics": []}, evidence=[], statistics=[],
             comparison_evidence=[], source_fingerprint=_fingerprint(db, campaign_id, report, []),
         )
+    prepared = question_analytics_service.prepare(campaign_id, actor, db)
     peer_questions = question_analytics_service.build_question_report(
-        campaign_id, actor, db, group_id=scope_id if scope_type == "group" else None,
+        campaign_id, actor, db, prepared=prepared, group_id=scope_id if scope_type == "group" else None,
         evaluation_type="peer",
     )["questions"]
     self_questions = question_analytics_service.build_question_report(
-        campaign_id, actor, db, group_id=scope_id if scope_type == "group" else None,
+        campaign_id, actor, db, prepared=prepared, group_id=scope_id if scope_type == "group" else None,
         evaluation_type="self",
     )["questions"]
     scope_key = f"aggregate:{campaign_id}:{scope_type}:{scope_id or 0}"
@@ -138,8 +139,7 @@ def _build(db: Session, campaign_id: int, scope_type: str, scope_id: int | None,
                 values.append((f"rating_{bin_['label']}_percentage", bin_["percentage"], "percentage", None))
             add_metric(f"question:{key}:{category}", category, "question", item["text"], item["section_name"], detail, values)
     comparable_keys = peer_by_key.keys() & self_by_key.keys()
-    comparable_observations = (question_analytics_service._collect(
-        reporting_service.campaign_report_rows(campaign_id, db), db)[1] if comparable_keys else [])
+    comparable_observations = prepared.observations
     for key in sorted(comparable_keys):
         scoped = [item for item in comparable_observations if item.key == key
                   and (scope_type != "group" or item.group_id == scope_id)]

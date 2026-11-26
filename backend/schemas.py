@@ -618,8 +618,6 @@ class ReportQuestionResult(BaseModel):
     category: Literal["rating", "choice", "text"]
     section_id: int | None
     section_name: str
-    required: bool
-    required_modes: list[Literal["required", "optional"]]
     scale_min: int | None = None
     scale_max: int | None = None
     availability: Literal["available", "no_data", "suppressed"]
@@ -632,7 +630,6 @@ class ReportQuestionResult(BaseModel):
 class ReportQuestionsResponse(BaseModel):
     evaluation_type: Literal["peer", "self"]
     questions: list[ReportQuestionResult]
-    notes: dict[str, str]
 
 
 class ReportNamedOption(BaseModel):
@@ -769,7 +766,6 @@ class ReportRatingDistribution(BaseModel):
 class ReportRatingDistributionResponse(BaseModel):
     campaign: ReportRatingDistribution
     sections: list[ReportRatingDistribution]
-    notes: str
 
 
 class SectionCreate(BaseModel):

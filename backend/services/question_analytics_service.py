@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-from services import reporting_service
+from services import permissions, reporting_service
 from services.section_scoring_service import normalize_rating, rating_range
 
 
@@ -26,144 +26,73 @@ class Observation:
     value: Any
 
 
-def _options(question: dict) -> list[dict] | None:
-    raw = question.get("options")
-    if not isinstance(raw, list) or len(raw) < 2:
-        return None
-    options = []
-    for option in raw:
-        if isinstance(option, dict):
-            value, label = option.get("id"), option.get("label")
-            if not isinstance(value, str) or not isinstance(label, str):
-                return None
-            # Generated option IDs identify issued answers, not cross-Form semantics.
-            definition = {k: v for k, v in option.items() if k not in {"id", "value"}}
-            options.append({"value": value, "label": label, "definition": definition})
-        else:
-            return None
-    if len({item["value"] for item in options}) != len(options):
-        return None
-    return options
+def _options(question: dict) -> list[dict]:
+    """Issued choice options: validated before issuing to be at least two, each with a unique id and a label."""
+    # Generated option IDs identify issued answers, not cross-Form semantics.
+    return [{"value": option["id"], "label": option["label"],
+             "definition": {k: v for k, v in option.items() if k not in {"id", "value"}}} for option in question["options"]]
 
 
-def _definition(question: dict, section_id: int | None) -> tuple[str, dict] | None:
-    kind, text = question.get("type"), question.get("text")
-    if not isinstance(text, str) or not text.strip():
-        return None
+def _definition(question: dict, section_id: int | None) -> tuple[str, dict]:
+    """A question's content key (stable across campaigns while the question is unchanged) and its metadata."""
+    kind, text = question["type"], question["text"]
+    bounds, options = rating_range(question), []
     if kind == "Scale":
-        bounds = rating_range(question)
-        category = "rating"
-        config: dict[str, Any] = {"bounds": bounds}
+        category, config = "rating", {"bounds": bounds}
     elif kind in {"Single choice", "Multiple choice"}:
         options = _options(question)
-        if options is None:
-            return None
-        category = "choice"
-        config = {"options": [item["definition"] for item in options]}
-    elif kind == "Text":
-        category = "text"
-        config = {}
+        category, config = "choice", {"options": [item["definition"] for item in options]}
     else:
-        return None
+        category, config = "text", {}
     # Include issued answer-domain metadata, not presentation/order, UUIDs or requiredness.
-    excluded = {"id", "text", "type", "required", "options", "scale_min", "scale_max",
-                "dimension", "dimension_id", "dimensionId", "section_id"}
+    excluded = {"id", "text", "type", "required", "options", "scale_min", "scale_max", "section_id"}
     config.update({key: value for key, value in question.items() if key not in excluded})
     identity = [kind, " ".join(text.split()).casefold(), section_id, config]
     canonical = json.dumps(identity, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
     key = sha256(canonical.encode("utf-8")).hexdigest()
-    return key, {"key": key, "text": text.strip(), "type": kind, "category": category,
-                 "section_id": section_id, "required": bool(question.get("required")),
-                 "required_modes": ["required" if question.get("required") else "optional"],
-                 "scale_min": bounds[0] if category == "rating" else None,
-                 "scale_max": bounds[1] if category == "rating" else None,
-                 "options": [{"label": option["label"], "value": option["value"]} for option in options] if category == "choice" else []}
+    return key, {"key": key, "text": text.strip(), "type": kind, "category": category, "section_id": section_id,
+                 "scale_min": bounds[0] if bounds else None, "scale_max": bounds[1] if bounds else None,
+                 "options": [{"label": option["label"], "value": option["value"]} for option in options]}
 
 
 def _collect(rows: list[Any], db: Session, *, include_text: bool = False):
+    """Issued questions and submitted answers; both were validated against the snapshot when saved."""
     definitions: dict[str, dict] = {}
     observations: list[Observation] = []
     issued_scopes: dict[str, set[tuple[int | None, int | None, int, str]]] = defaultdict(set)
-    section_ids: set[int] = set()
     roles = {employee_id: role.id for employee_id, (_employee, role) in reporting_service.users_by_id(db).items()}
-    seen_assignments: set[int] = set()
     for assignment, _form in rows:
-        if assignment.id in seen_assignments:
-            continue
-        seen_assignments.add(assignment.id)
-        completed = assignment.finish_date is not None
         snapshot = assignment.form_snapshot
-        if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 2 or not isinstance(snapshot.get("questions"), list):
+        # Unissued assignments have no snapshot; pre-v2 list snapshots stay out of Reports.
+        if not snapshot or snapshot.get("schema_version") != 2:
             continue
-        blocks = snapshot["questions"]
         issued: list[tuple[dict, int | None]] = []
-        names: dict[int, str] = {}
-        for block in blocks:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "section":
-                section_id = block.get("section_id")
-                if isinstance(section_id, bool) or not isinstance(section_id, int) or section_id <= 0:
-                    continue
-                metadata = block.get("section")
-                if isinstance(metadata, dict) and isinstance(metadata.get("name"), str):
-                    names[section_id] = metadata["name"]
-                questions = block.get("questions")
-                if isinstance(questions, list):
-                    issued.extend((question, section_id) for question in questions if isinstance(question, dict))
-            elif block.get("type") == "question" and isinstance(block.get("question"), dict):
+        names: dict[int, str | None] = {}
+        for block in snapshot["questions"]:
+            if block["type"] == "section":
+                names[block["section_id"]] = (block.get("section") or {}).get("name")
+                issued.extend((question, block["section_id"]) for question in block["questions"])
+            else:
                 issued.append((block["question"], None))
-        ids = Counter(question.get("id") for question, _ in issued if isinstance(question.get("id"), str))
-        answers: dict[str, Any] = {}
-        repeated: set[str] = set()
-        for answer in assignment.answers if completed and isinstance(assignment.answers, list) else []:
-            if not isinstance(answer, dict) or not isinstance(answer.get("question_id"), str):
-                continue
-            question_id = answer["question_id"]
-            if question_id in answers:
-                repeated.add(question_id)
-            answers[question_id] = answer.get("value")
+        answers = {answer["question_id"]: answer["value"] for answer in assignment.answers} if assignment.finish_date is not None else {}
+        role_id = reporting_service.assignment_role_id(assignment, roles)
+        evaluation_type = "self" if assignment.evaluator_id == assignment.evaluatee_id else "peer"
         for question, section_id in issued:
-            question_id = question.get("id")
-            if not isinstance(question_id, str) or ids[question_id] != 1:
-                continue
-            definition = _definition(question, section_id)
-            if definition is None:
-                continue
-            key, metadata = definition
-            if section_id is not None:
-                section_ids.add(section_id)
-                metadata["section_name"] = names.get(section_id)
-            else:
-                metadata["section_name"] = "Other questions"
+            key, metadata = _definition(question, section_id)
+            metadata["section_name"] = names.get(section_id) if section_id is not None else "Other questions"
             definitions.setdefault(key, metadata)
-            mode = metadata["required_modes"][0]
-            if mode not in definitions[key]["required_modes"]:
-                definitions[key]["required_modes"].append(mode)
-            issued_scopes[key].add((assignment.company_group_id, reporting_service.assignment_role_id(assignment, roles),
-                                    assignment.evaluatee_id, "self" if assignment.evaluator_id == assignment.evaluatee_id else "peer"))
-            if question_id not in answers or question_id in repeated:
+            issued_scopes[key].add((assignment.company_group_id, role_id, assignment.evaluatee_id, evaluation_type))
+            if question["id"] not in answers:
                 continue
-            value = answers[question_id]
-            category = metadata["category"]
-            if category == "rating":
-                valid = isinstance(value, int) and not isinstance(value, bool) and normalize_rating(value, metadata["scale_min"], metadata["scale_max"]) is not None
-            elif category == "choice":
-                allowed = {option["value"] for option in metadata["options"]}
-                valid = (isinstance(value, str) and value in allowed if question["type"] == "Single choice" else
-                         isinstance(value, list) and bool(value) and all(isinstance(item, str) and item in allowed for item in value) and len(value) == len(set(value)))
-                if valid:
-                    positions = {option["value"]: index for index, option in enumerate(metadata["options"])}
-                    value = [positions[item] for item in value] if isinstance(value, list) else positions[value]
-            else:
-                valid = isinstance(value, str) and bool(value.strip())
-                if valid:
-                    if not include_text:
-                        value = True  # Ordinary analytics retains availability, not written feedback.
-            if valid:
-                observations.append(Observation(assignment.id, assignment.evaluatee_id, assignment.evaluator_id,
-                                                assignment.company_group_id, reporting_service.assignment_role_id(assignment, roles),
-                                                key, value))
+            value = answers[question["id"]]
+            if metadata["category"] == "choice":
+                # Option positions, matched through this snapshot's own option IDs.
+                positions = {option["id"]: index for index, option in enumerate(question["options"])}
+                value = [positions[item] for item in value] if isinstance(value, list) else positions[value]
+            elif metadata["category"] == "text" and not include_text:
+                value = True  # Ordinary analytics retains availability, not written feedback.
+            observations.append(Observation(assignment.id, assignment.evaluatee_id, assignment.evaluator_id,
+                                            assignment.company_group_id, role_id, key, value))
     # Issued names win so a rename does not relabel past campaigns; the catalog only fills gaps.
     unnamed = {definition["section_id"] for definition in definitions.values()
                if definition["section_id"] is not None and not definition["section_name"]}
@@ -206,10 +135,8 @@ def _peer_release_allowed(cohort: list[Observation], *, single_employee: bool) -
     by_employee: dict[int, set[int]] = defaultdict(set)
     for item in cohort:
         by_employee[item.evaluatee_id].add(item.evaluator_id)
-    if single_employee:
-        return all(len(evaluators) >= reviewers for evaluators in by_employee.values())
-    return (len(by_employee) >= reporting_service.min_aggregate_evaluatees()
-            and all(len(evaluators) >= reviewers for evaluators in by_employee.values()))
+    return (all(len(evaluators) >= reviewers for evaluators in by_employee.values())
+            and (single_employee or len(by_employee) >= reporting_service.min_aggregate_evaluatees()))
 
 
 def _self_release_allowed(cohort: list[Observation], *, single_employee: bool) -> bool:
@@ -217,44 +144,56 @@ def _self_release_allowed(cohort: list[Observation], *, single_employee: bool) -
     return single_employee or len({item.evaluatee_id for item in cohort}) >= reporting_service.min_aggregate_evaluatees()
 
 
+@dataclass(frozen=True)
+class Prepared:
+    """One campaign's questions and answers, collected once for any number of question reports."""
+    campaign_id: int
+    rows: list[Any]
+    aggregate_access: bool
+    definitions: dict[str, dict]
+    observations: list[Observation]
+    issued_scopes: dict[str, set[tuple]]
+
+
+def prepare(campaign_id: int, actor: models.User, db: Session) -> Prepared:
+    reporting_service.require_reports_access(campaign_id, actor, db)
+    rows = reporting_service.campaign_report_rows(campaign_id, db)
+    return Prepared(campaign_id, rows, permissions.has_permission(actor, db, "campaigns.manage"), *_collect(rows, db))
+
+
 def build_question_report(campaign_id: int, actor: models.User, db: Session, *, group_id: int | None = None,
                           role_id: int | None = None, employee_id: int | None = None,
-                          evaluation_type: str = "peer") -> dict:
-    reporting_service.require_reports_access(campaign_id, actor, db)
-    aggregate_access = reporting_service.aggregate_reporting_access(campaign_id, actor, db)
+                          evaluation_type: str = "peer", prepared: Prepared | None = None) -> dict:
+    prepared = prepared or prepare(campaign_id, actor, db)
     if group_id is not None and group_id not in {group.id for group in reporting_service.assigned_campaign_groups(campaign_id, db)}:
         raise HTTPException(status_code=404, detail="Group report not found")
-    if role_id is not None and db.query(models.CompanyRole).filter(models.CompanyRole.id == role_id).first() is None:
+    if role_id is not None and db.get(models.CompanyRole, role_id) is None:
         raise HTTPException(status_code=404, detail="Role report not found")
-    rows = reporting_service.campaign_report_rows(campaign_id, db)
-    if employee_id is not None and employee_id not in reporting_service.campaign_participant_ids(campaign_id, rows, db):
+    if employee_id is not None and employee_id not in reporting_service.campaign_participant_ids(campaign_id, prepared.rows, db):
         raise HTTPException(status_code=404, detail="Employee is not part of this campaign report")
-    definitions, observations, issued_scopes = _collect(rows, db)
     allowed = _self_release_allowed if evaluation_type == "self" else _peer_release_allowed
     by_question: dict[str, list[Observation]] = defaultdict(list)
-    for item in observations:
+    for item in prepared.observations:
         by_question[item.key].append(item)
     questions = []
-    for key, metadata in definitions.items():
-        issued = [scope for scope in issued_scopes[key] if scope[3] == evaluation_type
+    for key, metadata in prepared.definitions.items():
+        issued = [scope for scope in prepared.issued_scopes[key] if scope[3] == evaluation_type
                   and (group_id is None or scope[0] == group_id)
                   and (role_id is None or scope[1] == role_id)
                   and (employee_id is None or scope[2] == employee_id)]
         if not issued:
             continue
         population = [item for item in by_question[key]
-                       if (item.evaluator_id == item.evaluatee_id) == (evaluation_type == "self")]
+                      if (item.evaluator_id == item.evaluatee_id) == (evaluation_type == "self")]
         cohort = [item for item in population if (group_id is None or item.group_id == group_id)
                   and (role_id is None or item.role_id == role_id)
                   and (employee_id is None or item.evaluatee_id == employee_id)]
         availability = ("no_data" if not cohort else
-                        "available" if aggregate_access or allowed(cohort, single_employee=employee_id is not None)
+                        "available" if prepared.aggregate_access or allowed(cohort, single_employee=employee_id is not None)
                         else "suppressed")
         questions.append(_released(metadata, cohort, availability))
     questions.sort(key=lambda item: (item["section_id"] is None, item["section_name"].casefold(), item["text"].casefold(), item["key"]))
-    return {"evaluation_type": evaluation_type, "questions": questions, "notes": {"weighting": "Each valid submitted answer is one observation; self responses are separate from peer distributions.",
-             "rating_bins": "Exact issued integer ratings are shown; normalized averages use 1 + 4 * (answer - minimum) / (maximum - minimum).",
-              "privacy": "Authorized campaign managers see every result. Otherwise an employee's peer answers need at least two distinct reviewers, and a cohort needs at least two evaluated employees who each have that many reviewers."}}
+    return {"evaluation_type": evaluation_type, "questions": questions}
 
 
 def build_rating_distribution_report(campaign_id: int, actor: models.User, db: Session) -> dict:
@@ -271,8 +210,7 @@ def build_rating_distribution_report(campaign_id: int, actor: models.User, db: S
             released = True
             for bucket in question["distribution"]:
                 value = normalize_rating(int(bucket["label"]), question["scale_min"], question["scale_max"])
-                if value is not None:
-                    counts[min(4, int(value))] += bucket["count"]
+                counts[min(4, int(value))] += bucket["count"]
         total = sum(counts)
         if not released or total == 0:
             return {"section_id": section_id, "availability": "suppressed" if any(item["availability"] == "suppressed" for item in items) else "no_data",
@@ -286,5 +224,4 @@ def build_rating_distribution_report(campaign_id: int, actor: models.User, db: S
     section_ids = sorted({question["section_id"] for question in ratings if question["section_id"] is not None})
     return {"campaign": release(ratings, None),
             "sections": [release([question for question in ratings if question["section_id"] == section_id], section_id)
-                         for section_id in section_ids],
-             "notes": "Only authorized, available peer rating questions contribute. Each valid response counts once; campaign includes standalone rating questions, while section views use issued section IDs. Values use the issued range normalized to 1-5 on a 0-5 axis. Bins are [0,1), [1,2), [2,3), [3,4), [4,5]; percentages use available rating responses as the denominator. Section scores use different weighting."}
+                         for section_id in section_ids]}

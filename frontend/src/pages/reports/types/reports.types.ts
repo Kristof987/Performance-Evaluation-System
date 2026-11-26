@@ -23,13 +23,11 @@ export type ReportQuestion = QuestionResult & {
   category: 'rating' | 'choice' | 'text';
   section_id: number | null;
   section_name: string;
-  required: boolean;
-  required_modes: Array<'required' | 'optional'>;
   scale_min: number | null;
   scale_max: number | null;
 };
 
-export type ReportQuestions = { evaluation_type: 'peer' | 'self'; questions: ReportQuestion[]; notes: Record<string, string> };
+export type ReportQuestions = { evaluation_type: 'peer' | 'self'; questions: ReportQuestion[] };
 
 export type WrittenFeedbackResponse = {
   question_key: string;
@@ -49,7 +47,7 @@ export type RatingDistribution = {
   bins: Array<{ label: string; count: number; percentage: number }> | null;
 };
 
-export type CampaignRatingDistribution = { campaign: RatingDistribution; sections: RatingDistribution[]; notes: string };
+export type CampaignRatingDistribution = { campaign: RatingDistribution; sections: RatingDistribution[] };
 
 export type ReportSectionScore = {
   id: number;
