@@ -14,8 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
-from services import permissions
-from services import reporting_service
+from services import permissions, reporting_service
 from services.form_snapshot_service import snapshot_form_name
 from services.question_analytics_service import _options
 from services.section_scoring_service import rating_range
@@ -26,8 +25,8 @@ OTHER_QUESTIONS = "Other questions"
 
 
 def _require_access(campaign_id: int, actor: models.User, db: Session) -> tuple[models.Campaign, list[Any]]:
-    reporting_service.require_reports_access(None, actor, db)
-    campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).with_for_update(read=True).first()
+    reporting_service.require_reports_access(None, actor, db)  # Also loads the privacy thresholds.
+    campaign = db.get(models.Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
     if models.CampaignStatus(campaign.status) not in ANSWER_STATUSES:
@@ -48,9 +47,8 @@ def _is_self(assignment: models.FilledForm) -> bool:
 
 def build_answers_index(campaign_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     campaign, rows = _require_access(campaign_id, actor, db)
-    unique = {row[0].id: row for row in rows}.values()
     counts: dict[int, dict[str, int | bool]] = {}
-    for row in unique:
+    for row in rows:
         assignment = row[0]
         entry = counts.setdefault(assignment.evaluatee_id, {"self_assigned": False, "self_submitted": False,
                                                              "peer_assigned": 0, "peer_submitted": 0})
@@ -67,84 +65,41 @@ def build_answers_index(campaign_id: int, actor: models.User, db: Session) -> di
             "employees": employees}
 
 
-def _answer(question: dict, value: Any, answered: bool) -> dict[str, Any] | None:
-    kind, text = question.get("type"), question.get("text")
-    if not isinstance(kind, str) or not isinstance(text, str) or not text.strip():
-        return None
-    result: dict[str, Any] = {"question_id": question.get("id") if isinstance(question.get("id"), str) else "",
-                              "text": text.strip(), "type": kind, "required": bool(question.get("required")),
-                              "rating": None, "rating_label": None, "scale_min": None, "scale_max": None, "choices": [], "text_answer": None,
-                              "answered": False}
+def _answer(question: dict, value: Any) -> dict[str, Any]:
+    """value is None when unanswered; saved answers were validated against this snapshot."""
+    kind = question["type"]
+    result: dict[str, Any] = {"question_id": question["id"], "text": question["text"].strip(), "type": kind,
+                              "required": bool(question.get("required")), "rating": None, "rating_label": None,
+                              "scale_min": None, "scale_max": None, "choices": [], "text_answer": None,
+                              "answered": value is not None}
     if kind == "Scale":
-        bounds = rating_range(question)
-        result["scale_min"], result["scale_max"] = bounds
-        if answered and isinstance(value, int) and not isinstance(value, bool) and bounds[0] <= value <= bounds[1]:
-            result["rating"], result["answered"] = value, True
+        result["scale_min"], result["scale_max"] = rating_range(question)
+        if value is not None:
             labels = question.get("scale_labels")
-            if isinstance(labels, list) and len(labels) == bounds[1] - bounds[0] + 1 and isinstance(labels[value - bounds[0]], str):
-                result["rating_label"] = labels[value - bounds[0]].strip() or None
+            result["rating"] = value
+            result["rating_label"] = (labels[value - result["scale_min"]].strip() or None) if labels else None
     elif kind in {"Single choice", "Multiple choice"}:
-        options = _options(question)
-        if options is None:
-            return None
-        labels = {option["value"]: option["label"] for option in options}
         picked = value if isinstance(value, list) else [value]
-        if answered and picked and all(isinstance(item, str) and item in labels for item in picked):
-            # Issued option order, not the order the reviewer clicked.
-            result["choices"] = [option["label"] for option in options if option["value"] in picked]
-            result["answered"] = True
-    elif kind == "Text":
-        if answered and isinstance(value, str) and value.strip():
-            result["text_answer"], result["answered"] = value.strip(), True
-    else:
-        return None
+        # Issued option order, not the order the reviewer clicked.
+        result["choices"] = [option["label"] for option in _options(question) if option["value"] in picked]
+    elif value is not None:
+        result["text_answer"] = value.strip()
     return result
 
 
-def _questionnaire(assignment: models.FilledForm, form: models.Form, db_section_names: dict[int, str]) -> dict[str, Any] | None:
+def _questionnaire(assignment: models.FilledForm, form: models.Form) -> dict[str, Any] | None:
     snapshot = assignment.form_snapshot
-    if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 2 or not isinstance(snapshot.get("questions"), list):
+    if snapshot.get("schema_version") != 2:  # Legacy v1 snapshots are left out, as in every report.
         return None
-    answers: dict[str, Any] = {}
-    repeated: set[str] = set()
-    for item in assignment.answers if isinstance(assignment.answers, list) else []:
-        if isinstance(item, dict) and isinstance(item.get("question_id"), str):
-            if item["question_id"] in answers:
-                repeated.add(item["question_id"])
-            answers[item["question_id"]] = item.get("value")
+    answers = {item["question_id"]: item["value"] for item in assignment.answers}
     sections: list[dict[str, Any]] = []
     loose: list[dict[str, Any]] = []
     for block in snapshot["questions"]:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "section" and isinstance(block.get("questions"), list):
-            section_id = block.get("section_id")
-            if isinstance(section_id, bool) or not isinstance(section_id, int) or section_id <= 0:
-                section_id = None
-            metadata = block.get("section")
-            name = metadata.get("name") if isinstance(metadata, dict) and isinstance(metadata.get("name"), str) else None
-            questions = block["questions"]
-        elif block.get("type") == "question" and isinstance(block.get("question"), dict):
-            section_id, name, questions = None, None, [block["question"]]
+        if block["type"] == "section":
+            sections.append({"section_id": block["section_id"], "section_name": block["section"]["name"],
+                             "answers": [_answer(question, answers.get(question["id"])) for question in block["questions"]]})
         else:
-            continue
-        rows = []
-        for question in questions:
-            if not isinstance(question, dict):
-                continue
-            question_id = question.get("id")
-            answered = isinstance(question_id, str) and question_id in answers and question_id not in repeated
-            row = _answer(question, answers.get(question_id) if answered else None, answered)
-            if row is not None:
-                rows.append(row)
-        if not rows:
-            continue
-        if block.get("type") == "question":
-            loose.extend(rows)
-        else:
-            sections.append({"section_id": section_id,
-                             "section_name": name or (db_section_names.get(section_id) if section_id else None) or reporting_service.UNNAMED_SECTION,
-                             "answers": rows})
+            loose.append(_answer(block["question"], answers.get(block["question"]["id"])))
     if loose:
         sections.append({"section_id": None, "section_name": OTHER_QUESTIONS, "answers": loose})
     return {"form_name": snapshot_form_name(assignment, form), "sections": sections}
@@ -152,17 +107,12 @@ def _questionnaire(assignment: models.FilledForm, form: models.Form, db_section_
 
 def build_employee_answers(campaign_id: int, employee_id: int, actor: models.User, db: Session) -> dict[str, Any]:
     campaign, rows = _require_access(campaign_id, actor, db)
-    unique = list({row[0].id: row for row in rows if row[0].evaluatee_id == employee_id}.values())
+    unique = [row for row in rows if row[0].evaluatee_id == employee_id]
     if not unique and employee_id not in reporting_service.campaign_participant_ids(campaign_id, rows, db):
         raise HTTPException(status_code=404, detail="Employee is not part of this campaign")
     employee = db.get(models.Employee, employee_id)
     if employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
-
-    section_ids = {block.get("section_id") for row in unique if isinstance(row[0].form_snapshot, dict)
-                   for block in row[0].form_snapshot.get("questions") or [] if isinstance(block, dict)}
-    section_ids = {item for item in section_ids if isinstance(item, int) and not isinstance(item, bool)}
-    names = dict(db.query(models.Section.id, models.Section.name).filter(models.Section.id.in_(section_ids)).all()) if section_ids else {}
 
     self_rows = [row for row in unique if _is_self(row[0])]
     peer_rows = [row for row in unique if not _is_self(row[0])]
@@ -171,7 +121,7 @@ def build_employee_answers(campaign_id: int, employee_id: int, actor: models.Use
 
     self_questionnaires = []
     for assignment, form in sorted((row for row in self_rows if _submitted(row)), key=lambda row: row[0].id):
-        item = _questionnaire(assignment, form, names)
+        item = _questionnaire(assignment, form)
         if item is not None:
             self_questionnaires.append({"label": "Self-evaluation", "kind": "self", **item})
 
@@ -179,7 +129,7 @@ def build_employee_answers(campaign_id: int, employee_id: int, actor: models.Use
     if len(submitted_peers) >= threshold:
         ordered = sorted(submitted_peers, key=lambda row: sha256(f"answers:{campaign_id}:{employee_id}:{row[0].id}".encode()).digest())
         for assignment, form in ordered:
-            item = _questionnaire(assignment, form, names)
+            item = _questionnaire(assignment, form)
             if item is not None:
                 peers.append({"label": f"Evaluator {len(peers) + 1}", "kind": "peer", **item})
         availability = "available" if peers else "no_data"

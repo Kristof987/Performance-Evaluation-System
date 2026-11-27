@@ -8,11 +8,16 @@ function succeeds. Row locking serializes competing transitions for one campaign
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 
-from sqlalchemy import or_
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
-from models import Campaign, CampaignArchiveEvent, CampaignLifecycleHistory, CampaignOperationAudit, CampaignStatus, FilledForm
+from models import (
+    Campaign,
+    CampaignArchiveEvent,
+    CampaignLifecycleHistory,
+    CampaignOperationAudit,
+    CampaignStatus,
+    FilledForm,
+)
 
 
 class CampaignLifecycleError(ValueError):
@@ -30,46 +35,29 @@ ALLOWED_TRANSITIONS = {
 REPORTABLE_STATUSES = (CampaignStatus.REVIEW, CampaignStatus.CLOSED)
 
 
-def _instant(value: datetime) -> datetime:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
-        raise CampaignLifecycleError("Campaign dates must be timezone-aware timestamps")
-    return value.astimezone(timezone.utc)
-
-
-def validate_dates(start: datetime, end: datetime | None) -> None:
-    start = _instant(start)
-    if end is not None and _instant(end) <= start:
-        raise CampaignLifecycleError("Campaign end must be later than its start")
-
-
-def validate_date_edit(
-    campaign: Campaign, start: datetime, end: datetime | None, *, now: datetime,
-    validate_configuration: Callable[[Campaign, datetime, datetime | None], Sequence[str]] | None = None,
-) -> None:
-    """Validate date edits: any date before activation, only a later deadline while active."""
+def validate_date_edit(campaign: Campaign, start: datetime, end: datetime | None, *, now: datetime,
+                       configuration_errors: Callable[[], Sequence[str]]) -> None:
+    """Validate date edits (already ordered by the caller): any date before activation, only a later deadline while active."""
     status = CampaignStatus(campaign.status)
     if status == CampaignStatus.ACTIVE:
         # Review ends filling for good, so a later deadline is how HR gives people more time.
-        if _instant(start) != _instant(campaign.start_date):
+        if start != campaign.start_date:
             raise CampaignLifecycleError("The start of an active campaign cannot change")
         if end is None:
             raise CampaignLifecycleError("Active campaigns require an end timestamp")
-        if _instant(end) <= _instant(now):
+        if end <= now:
             raise CampaignLifecycleError("The new deadline must be in the future")
-        if campaign.end_date is not None and _instant(end) < _instant(campaign.end_date):
+        if end < campaign.end_date:
             raise CampaignLifecycleError("The deadline of an active campaign can only be extended")
         return
     if status not in {CampaignStatus.DRAFT, CampaignStatus.SCHEDULED}:
         raise CampaignLifecycleError(f"Dates cannot be changed in {status.value}")
-    validate_dates(start, end)
-    if status == CampaignStatus.SCHEDULED and _instant(start) <= _instant(now):
-        raise CampaignLifecycleError("Scheduled campaigns must start in the future")
     if status == CampaignStatus.SCHEDULED:
+        if start <= now:
+            raise CampaignLifecycleError("Scheduled campaigns must start in the future")
         if end is None:
             raise CampaignLifecycleError("Scheduled campaigns require an end timestamp")
-        if validate_configuration is None:
-            raise CampaignLifecycleError("A complete configuration validator is required")
-        errors = validate_configuration(campaign, start, end)
+        errors = configuration_errors()
         if errors:
             raise CampaignLifecycleError("Invalid campaign configuration: " + "; ".join(errors))
 
@@ -101,11 +89,18 @@ def is_overdue(form: FilledForm, campaign: Campaign, *, now: datetime) -> bool:
     return (
         form.finish_date is None
         and campaign.end_date is not None
-        and _instant(now) >= _instant(campaign.end_date)
+        and now >= campaign.end_date
         and CampaignStatus(campaign.status) in {
             CampaignStatus.ACTIVE, CampaignStatus.PAUSED, CampaignStatus.REVIEW, CampaignStatus.CLOSED,
         }
     )
+
+
+def resume_target(campaign: Campaign, now: datetime) -> CampaignStatus:
+    """A paused campaign returns where it was, except that a passed deadline ends filling."""
+    if campaign.paused_from_status == CampaignStatus.REVIEW.value or (campaign.end_date is not None and now >= campaign.end_date):
+        return CampaignStatus.REVIEW
+    return CampaignStatus.ACTIVE
 
 
 def transition_campaign(
@@ -121,14 +116,11 @@ def transition_campaign(
 ) -> Campaign:
     """Lock and flush a transition/history atomically; never commits the caller's transaction.
 
-    Validators return blocking errors. Issuance must be idempotent, must not commit,
-    and must update only as-yet-unissued assignments. An issuance failure rolls back
-    the nested transaction, including snapshots written during the attempt.
+    Scheduling and activation need validate_configuration, activation also issue_snapshots (the
+    lifecycle worker). Issuance must be idempotent and must not commit; a failure rolls back the
+    nested transaction, including snapshots written during the attempt.
     """
-    now = _instant(now)
     target = CampaignStatus(target)
-    if not automatic and actor_user_id is None:
-        raise CampaignLifecycleError("Manual transitions require an acting user")
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id).populate_existing().with_for_update().one_or_none()
     if campaign is None:
         raise CampaignLifecycleError("Campaign not found")
@@ -137,79 +129,33 @@ def transition_campaign(
         raise CampaignLifecycleError(f"Invalid transition: {current.value} -> {target.value}")
     if campaign.is_archived:
         raise CampaignLifecycleError("Archived campaigns cannot transition")
-    if automatic and (current, target) not in {
-        (CampaignStatus.SCHEDULED, CampaignStatus.ACTIVE),
-        (CampaignStatus.ACTIVE, CampaignStatus.REVIEW),
-    }:
-        raise CampaignLifecycleError("This transition requires a manual action")
-
-    if (current, target) in {
-        (CampaignStatus.DRAFT, CampaignStatus.SCHEDULED),
-        (CampaignStatus.SCHEDULED, CampaignStatus.ACTIVE),
-    }:
-        validate_dates(campaign.start_date, campaign.end_date)
+    if target in {CampaignStatus.SCHEDULED, CampaignStatus.ACTIVE} and current != CampaignStatus.PAUSED:
         if campaign.end_date is None:
             raise CampaignLifecycleError("Scheduling and activation require an end timestamp")
-        if validate_configuration is None:
-            raise CampaignLifecycleError("A complete configuration validator is required")
         errors = validate_configuration(campaign, db)
         if errors:
             raise CampaignLifecycleError("Invalid campaign configuration: " + "; ".join(errors))
-    if current == CampaignStatus.DRAFT and target == CampaignStatus.SCHEDULED and _instant(campaign.start_date) <= now:
+    if target == CampaignStatus.SCHEDULED and campaign.start_date <= now:
         raise CampaignLifecycleError("Campaign start must be in the future")
-    if current == CampaignStatus.SCHEDULED and target == CampaignStatus.ACTIVE and now < _instant(campaign.start_date):
+    if current == CampaignStatus.SCHEDULED and target == CampaignStatus.ACTIVE and now < campaign.start_date:
         raise CampaignLifecycleError("Campaign has not started")
-    if not automatic and current == CampaignStatus.SCHEDULED and target == CampaignStatus.ACTIVE and (
-        campaign.end_date is not None and now >= _instant(campaign.end_date)
-    ):
-        raise CampaignLifecycleError("Campaign deadline has passed before activation")
-    if automatic and current == CampaignStatus.ACTIVE and target == CampaignStatus.REVIEW and (
-        campaign.end_date is None or now < _instant(campaign.end_date)
-    ):
+    if automatic and target == CampaignStatus.REVIEW and now < campaign.end_date:
         raise CampaignLifecycleError("Automatic review requires a passed deadline")
-    if current == CampaignStatus.PAUSED and campaign.is_archived:
-        raise CampaignLifecycleError("Archived campaigns cannot resume")
-    if current == CampaignStatus.PAUSED:
-        expected = CampaignStatus.REVIEW if campaign.paused_from_status == CampaignStatus.REVIEW.value or (
-            campaign.end_date is not None and now >= _instant(campaign.end_date)
-        ) else CampaignStatus.ACTIVE
-        if target != expected:
-            raise CampaignLifecycleError(f"Paused campaign must resume in {expected.value}")
+    if current == CampaignStatus.PAUSED and target != resume_target(campaign, now):
+        raise CampaignLifecycleError(f"Paused campaign must resume in {resume_target(campaign, now).value}")
 
     with db.begin_nested():
         if current == CampaignStatus.SCHEDULED and target == CampaignStatus.ACTIVE:
-            if issue_snapshots is None:
-                raise CampaignLifecycleError("Snapshot issuer is required to activate a campaign")
             errors = issue_snapshots(campaign, db)
             if errors:
                 raise CampaignLifecycleError("Snapshot issuance failed: " + "; ".join(errors))
-            db.flush()
-            pending = db.query(FilledForm.id).filter(
-                FilledForm.campaign_id == campaign.id,
-                FilledForm.finish_date.is_(None),
-                FilledForm.form_snapshot.is_(None),
-                FilledForm.answers == [],
-            ).first()
-            if pending is not None:
-                raise CampaignLifecycleError("Not all assignments received a snapshot")
         campaign.paused_from_status = current.value if target == CampaignStatus.PAUSED else None
         campaign.status = target.value
-        if target == CampaignStatus.ACTIVE:
-            campaign.ever_issued = True
+        campaign.is_active = target == CampaignStatus.ACTIVE
         campaign.lifecycle_error = None
         campaign.lifecycle_retry_at = None
         campaign.lifecycle_attempts = 0
         campaign.last_transition_at = now
-        if (current, target) == (CampaignStatus.DRAFT, CampaignStatus.SCHEDULED):
-            campaign.is_active = False
-        elif (current, target) == (CampaignStatus.SCHEDULED, CampaignStatus.ACTIVE):
-            campaign.is_active = True
-        elif (current, target) == (CampaignStatus.SCHEDULED, CampaignStatus.DRAFT):
-            campaign.is_active = False
-        elif target in {CampaignStatus.PAUSED, CampaignStatus.REVIEW, CampaignStatus.CLOSED}:
-            campaign.is_active = False
-        elif current == CampaignStatus.PAUSED and target == CampaignStatus.ACTIVE:
-            campaign.is_active = True
         db.add(CampaignLifecycleHistory(
             campaign_id=campaign.id, previous_status=current.value, new_status=target.value,
             transitioned_at=now, actor_user_id=actor_user_id, is_automatic=automatic,
@@ -229,43 +175,18 @@ def set_campaign_archived(db: Session, campaign_id: int, archived: bool, *, acto
         raise CampaignLifecycleError("Only paused or closed campaigns can be archived")
     campaign.is_archived = archived
     if archived:
-        campaign.archived_at = _instant(now)
-        campaign.archived_by = actor_user_id
+        campaign.archived_at, campaign.archived_by = now, actor_user_id
     else:
-        campaign.unarchived_at = _instant(now)
-        campaign.unarchived_by = actor_user_id
+        campaign.unarchived_at, campaign.unarchived_by = now, actor_user_id
     db.add(CampaignArchiveEvent(campaign_id=campaign.id, action="archive" if archived else "unarchive",
-                                occurred_at=_instant(now), actor_user_id=actor_user_id))
+                                occurred_at=now, actor_user_id=actor_user_id))
     db.flush()
     return campaign
 
 
-def deletion_blocker(db: Session, campaign: Campaign) -> str | None:
-    if campaign.is_archived:
-        return "Archived campaigns cannot be permanently deleted"
+def deletion_blocker(campaign: Campaign) -> str | None:
+    """Only a never-started campaign is deletable: no transition leads back to Draft or Scheduled once
+    it was active, and issuing, answering and archiving all happen only after activation."""
     if campaign.status not in {CampaignStatus.DRAFT.value, CampaignStatus.SCHEDULED.value}:
         return "Only draft or scheduled campaigns can be deleted"
-    if campaign.ever_issued:
-        return "Campaign has already issued evaluations"
-    if db.query(CampaignOperationAudit.id).filter(
-        CampaignOperationAudit.campaign_id == campaign.id,
-        CampaignOperationAudit.category == "snapshot_issuance",
-    ).first() is not None:
-        return "Campaign has recorded questionnaire issuance"
-    if db.query(CampaignArchiveEvent.id).filter(CampaignArchiveEvent.campaign_id == campaign.id).first() is not None:
-        return "Campaign has archive history and cannot be permanently deleted"
-    if db.query(CampaignLifecycleHistory.id).filter(
-        CampaignLifecycleHistory.campaign_id == campaign.id,
-        or_(CampaignLifecycleHistory.previous_status.in_(("active", "paused", "review", "closed")),
-            CampaignLifecycleHistory.new_status.in_(("active", "paused", "review", "closed"))),
-    ).first() is not None:
-        return "Campaign has previously entered an issued lifecycle status"
-    if db.query(FilledForm.id).filter(
-        FilledForm.campaign_id == campaign.id,
-        or_(FilledForm.finish_date.isnot(None),
-            FilledForm.snapshot_status.isnot(None),
-            FilledForm.answers.notin_([[], {}, JSONB.NULL]),
-            FilledForm.form_snapshot.isnot(None)),
-    ).first() is not None:
-        return "Campaign has issued or answered evaluations"
     return None

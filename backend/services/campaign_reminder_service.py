@@ -8,17 +8,15 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from integrations import email_service
 import models
-from services import reporting_service
-from database import SessionLocal
-from services import workspace_settings_service
 import schemas
-
+from database import SessionLocal
+from integrations import email_service
+from services import reporting_service, workspace_settings_service
 
 logger = logging.getLogger(__name__)
 MANUAL_COOLDOWN = timedelta(hours=24)
@@ -26,10 +24,6 @@ MANUAL_COOLDOWN = timedelta(hours=24)
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _aware(value: datetime) -> datetime:
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def open_evaluation_breakdown(campaign_id: int, db: Session) -> dict[int, dict[str, int]]:
@@ -61,17 +55,14 @@ def _recipients(campaign_id: int, db: Session, employee_ids: set[int] | None = N
     return [(employee, user, counts[employee.id]) for employee, user in people if user.email]
 
 
-def _deadline_text(end_date: datetime | None) -> str:
-    if end_date is None:
-        return "no deadline set"
-    local = _aware(end_date).astimezone(ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Budapest")))
+def _deadline_text(end_date: datetime) -> str:
+    """Emails go out only for active campaigns, which always have a deadline."""
+    local = end_date.astimezone(ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Budapest")))
     return f"{local.day} {local.strftime('%B %Y, %H:%M')}"
 
 
-def _time_left(end_date: datetime | None, now: datetime) -> str:
-    if end_date is None:
-        return "no deadline"
-    days = math.ceil((_aware(end_date) - now).total_seconds() / 86400)
+def _time_left(end_date: datetime, now: datetime) -> str:
+    days = math.ceil((end_date - now).total_seconds() / 86400)
     if days <= 1:
         return "ends within a day" if days == 1 else "ends today"
     return f"{days} days left"
@@ -115,10 +106,9 @@ def _deliver(db: Session, campaign: models.Campaign, employee: models.Employee, 
 
 
 def workspace_reminder_defaults(db: Session) -> tuple[list[int], bool]:
+    """Saved deduplicated and newest-first; a missing settings row means no reminders and a launch email."""
     row = db.get(models.WorkspaceSettings, "default")
-    days = row.default_reminder_days if row and isinstance(row.default_reminder_days, list) else []
-    return sorted({day for day in days if isinstance(day, int) and not isinstance(day, bool)}, reverse=True), \
-        row.default_launch_email if row else True
+    return (row.default_reminder_days, row.default_launch_email) if row else ([], True)
 
 
 def effective_reminders(campaign: models.Campaign, db: Session) -> list[tuple[int, int | None]]:
@@ -130,9 +120,9 @@ def effective_reminders(campaign: models.Campaign, db: Session) -> list[tuple[in
 
 def due_reminder(campaign: models.Campaign, now: datetime, db: Session) -> tuple[int, int | None] | None:
     """The latest reminder that is due; earlier ones it supersedes are never sent late in a burst."""
-    if campaign.end_date is None or now >= _aware(campaign.end_date):
+    end, start = campaign.end_date, campaign.start_date
+    if now >= end:
         return None
-    end, start = _aware(campaign.end_date), _aware(campaign.start_date)
     due = [item for item in effective_reminders(campaign, db)
            if end - timedelta(days=item[0]) <= now
            # A reminder falling before the start would just repeat the launch email.
@@ -162,14 +152,20 @@ def send_due_emails(db: Session, now: datetime | None = None) -> int:
                                                   models.Campaign.is_archived.is_(False)).order_by(models.Campaign.id).all())
     for campaign in campaigns:
         reminder = due_reminder(campaign, now, db)
+        # Skip already claimed emails up front instead of re-inserting them on every worker cycle;
+        # the unique dedupe key in _deliver still decides races between replicas.
+        claimed = {key for (key,) in db.query(models.EmailDelivery.dedupe_key)
+                   .filter(models.EmailDelivery.campaign_id == campaign.id).all()}
         for employee, user, count in _recipients(campaign.id, db):
-            if campaign.launch_email_enabled:
-                sent += _deliver(db, campaign, employee, user, count, kind="launch",
-                                 dedupe_key=f"launch:{campaign.id}:{employee.id}") == "sent"
+            key = f"launch:{campaign.id}:{employee.id}"
+            if campaign.launch_email_enabled and key not in claimed:
+                sent += _deliver(db, campaign, employee, user, count, kind="launch", dedupe_key=key) == "sent"
             if reminder is not None:
                 days, reminder_id = reminder
-                sent += _deliver(db, campaign, employee, user, count, kind="reminder", reminder_id=reminder_id,
-                                 reminder_days=days, dedupe_key=f"reminder:{campaign.id}:{days}:{employee.id}") == "sent"
+                key = f"reminder:{campaign.id}:{days}:{employee.id}"
+                if key not in claimed:
+                    sent += _deliver(db, campaign, employee, user, count, kind="reminder", reminder_id=reminder_id,
+                                     reminder_days=days, dedupe_key=key) == "sent"
     return sent
 
 
@@ -198,8 +194,6 @@ def send_manual(campaign: models.Campaign, actor: models.User, employee_ids: lis
         status = _deliver(db, campaign, employee, user, count, kind="manual", actor=actor,
                           dedupe_key=f"manual:{campaign.id}:{employee.id}:{uuid4().hex}")
         result["sent" if status == "sent" else "failed"] += 1
-    from services import workspace_settings_service
-
     workspace_settings_service.record_audit(db, "notifications", actor, f"Reminder emails sent for {campaign.name}",
                                             {"campaign_id": campaign.id, **result})
     db.commit()
@@ -213,7 +207,7 @@ def email_overview(campaign: models.Campaign, db: Session) -> dict:
     for delivery in deliveries:
         if delivery.kind == "reminder" and delivery.reminder_days is not None:
             by_days.setdefault(delivery.reminder_days, []).append(delivery)
-    end = _aware(campaign.end_date) if campaign.end_date else None
+    end = campaign.end_date
     reminders = []
     for days, reminder_id in effective_reminders(campaign, db):
         sent = [item for item in by_days.get(days, []) if item.status == "sent"]
@@ -250,7 +244,7 @@ def recipient_list(campaign: models.Campaign, db: Session) -> list[dict]:
         "employee_id": employee.id, "name": employee.full_name, "email": user.email,
         "not_started": breakdown[employee.id]["not_started"], "in_progress": breakdown[employee.id]["in_progress"],
         "last_reminded_at": last_manual.get(employee.id),
-        "recently_reminded": last_manual.get(employee.id) is not None and _aware(last_manual[employee.id]) >= since,
+        "recently_reminded": last_manual.get(employee.id) is not None and last_manual[employee.id] >= since,
     } for employee, user, _count in sorted(_recipients(campaign.id, db), key=lambda item: item[0].full_name.lower())]
 
 

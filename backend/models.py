@@ -567,7 +567,6 @@ class Campaign(Base):
     archived_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     unarchived_at = Column(DateTime(timezone=True), nullable=True)
     unarchived_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    ever_issued = Column(Boolean, nullable=False, default=False, server_default="false")
     # Email everyone with evaluations when the campaign opens; off for campaigns that were already running.
     launch_email_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     # False: the workspace default reminders apply; True: this campaign's own campaign_reminders rows do.

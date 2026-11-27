@@ -27,14 +27,3 @@ def campaign_instant(value: date | datetime | None) -> datetime | None:
         return value.astimezone(timezone.utc)
     return datetime.combine(value, time.min, tzinfo=BUSINESS_TIMEZONE).astimezone(timezone.utc)
 
-
-def campaign_status(start_date: date, end_date: date | None, is_active: bool, today: date) -> str:
-    start_date = business_date(start_date)
-    end_date = business_date(end_date)
-    if not is_active:
-        return "Disabled"
-    if start_date > today:
-        return "Scheduled"
-    if end_date is not None and end_date < today:
-        return "Completed"
-    return "Ongoing"

@@ -64,8 +64,8 @@ class World:
             {"type": "question", "question": {"id": "comment", "type": "Text", "text": "What should they keep doing?"}}]}
 
     def review(self, evaluator, rating=4, comment="Keeps the team calm.", *, submitted=True, picks=("o3", "o1")):
-        answers = [{"question_id": "rating", "value": rating}, {"question_id": "pick", "value": list(picks)},
-                   {"question_id": "comment", "value": comment}] if submitted else []
+        answers = [answer for answer in ({"question_id": "rating", "value": rating}, {"question_id": "pick", "value": list(picks)},
+                                         {"question_id": "comment", "value": comment}) if answer["value"] is not None] if submitted else []
         return add(self.db, models.FilledForm(campaign_id=self.campaign.id, form_id=self.form.id, company_group_id=self.group.id,
                                               evaluator_id=evaluator.id, evaluatee_id=self.people[0].id,
                                              
@@ -121,7 +121,7 @@ def test_released_questionnaires_are_whole_and_carry_no_reviewer_identity(db):
 def test_unanswered_questions_are_marked(db):
     world = World(db, ["Anna", "Béla", "Cecil"])
     anna, bela, cecil = world.people
-    world.review(bela, rating=9, comment="  ")
+    world.review(bela, rating=None, comment=None)  # Optional questions left empty.
     world.review(cecil)
     result = answers_service.build_employee_answers(world.campaign.id, anna.id, world.actor, db)
     flat = [answer for item in result["questionnaires"] for section in item["sections"] for answer in section["answers"]]

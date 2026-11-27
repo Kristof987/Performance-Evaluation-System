@@ -83,7 +83,7 @@ def validate_scheduled_campaign(campaign: models.Campaign, db: Session) -> None:
         try:
             campaign_lifecycle.validate_date_edit(
                 campaign, campaign.start_date, campaign.end_date, now=datetime.now(timezone.utc),
-                validate_configuration=lambda _campaign, _start, _end: validate_campaign_configuration(campaign, db),
+                configuration_errors=lambda: validate_campaign_configuration(campaign, db),
             )
         except campaign_lifecycle.CampaignLifecycleError as error:
             db.rollback()
@@ -459,7 +459,7 @@ def get_campaign_deletion_eligibility(*, campaign_id: int, db: Session):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).first()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    reason = campaign_lifecycle.deletion_blocker(db, campaign)
+    reason = campaign_lifecycle.deletion_blocker(campaign)
     return {"campaign_id": campaign_id, "can_delete": reason is None, "reason": reason}
 
 
@@ -484,7 +484,7 @@ def delete_campaign(*, campaign_id: int, db: Session, manager: models.User):
     campaign = db.query(models.Campaign).filter(models.Campaign.id == campaign_id).populate_existing().with_for_update().one_or_none()
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    reason = campaign_lifecycle.deletion_blocker(db, campaign)
+    reason = campaign_lifecycle.deletion_blocker(campaign)
     if reason is not None:
         raise HTTPException(status_code=409, detail=reason)
     db.add(models.CampaignOperationAudit(
@@ -524,8 +524,7 @@ def resume_campaign(*, campaign_id: int, db: Session, actor: models.User):
         if campaign is None:
             raise campaign_lifecycle.CampaignLifecycleError("Campaign not found")
         now = datetime.now(timezone.utc)
-        target = (models.CampaignStatus.REVIEW if campaign.paused_from_status == models.CampaignStatus.REVIEW.value
-                  or (campaign.end_date is not None and now >= campaign.end_date) else models.CampaignStatus.ACTIVE)
+        target = campaign_lifecycle.resume_target(campaign, now)
         campaign = campaign_lifecycle.transition_campaign(db, campaign_id, target, now=now, actor_user_id=actor.id)
         ensure_campaign_issued(campaign_id, db, commit=False, actor_user_id=actor.id)
         return campaign
@@ -585,7 +584,7 @@ def update_campaign(*, campaign_id: int, campaign_update: schemas.CampaignUpdate
     if (start_at, end_at) != (campaign.start_date, campaign.end_date):
         try:
             campaign_lifecycle.validate_date_edit(campaign, start_at, end_at, now=datetime.now(timezone.utc),
-                                                   validate_configuration=lambda _campaign, _start, _end: validate_campaign_configuration(campaign, db))
+                                                   configuration_errors=lambda: validate_campaign_configuration(campaign, db))
         except campaign_lifecycle.CampaignLifecycleError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
     if campaign.end_date is not None and end_at is not None and end_at < campaign.end_date and form_counts(campaign_id, db)[0]:
